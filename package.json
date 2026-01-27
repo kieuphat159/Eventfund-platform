@@ -1,0 +1,13 @@
+{
+  "name": "eventfund-ticket-platform",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"npm run dev --prefix backend\" \"npm run dev --prefix frontend\"",
+    "contracts": "npm --prefix contracts run",
+    "backend": "npm --prefix backend run",
+    "frontend": "npm --prefix frontend run"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

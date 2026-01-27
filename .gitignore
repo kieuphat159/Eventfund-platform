@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+.env
+.env.*
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# === Backend ===
+backend/dist/
+
+# === Frontend ===
+frontend/dist/
+frontend/dist-ssr/
+*.local
+
+# === Contracts (Hardhat) ===
+contracts/cache/
+contracts/artifacts/
+contracts/typechain/
+contracts/typechain-types/
+contracts/coverage/
+contracts/coverage.json
+contracts/ignition/deployments/chain-31337
