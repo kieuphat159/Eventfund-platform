@@ -4,6 +4,7 @@ Nền tảng tạo quỹ sự kiện, bán, trao đổi và chứng thực vé s
 
 ## Kiến trúc
 
+
 ```
 eventfund-ticket-platform/
 ├── frontend/          # React + Vite
