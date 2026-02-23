@@ -1,4 +1,4 @@
-import { provider, ticket } from "./connection.js";
+import { provider, ticket } from "../connection.js";
 
 async function main() {
   console.log("block:", await provider.getBlockNumber());

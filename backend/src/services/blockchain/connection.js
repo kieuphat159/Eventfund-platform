@@ -1,20 +1,11 @@
 import { ethers } from "ethers";
 import dotenv from "dotenv";
-import { createRequire } from "module";
 
 dotenv.config();
 
-const require = createRequire(import.meta.url);
-const TicketArtifact = require("./abis/Ticket.json");
+if (!process.env.RPC_URL) {
+  throw new Error("Missing RPC_URL or WS_URL in environment (.env)");
+}
 
-const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
-
-const TicketABI = TicketArtifact.abi ?? TicketArtifact;
-
-const ticket = new ethers.Contract(
-  process.env.TICKET_ADDRESS,
-  TicketABI,
-  provider
-);
-
-export { provider, ticket };
+// If WS_URL is provided, it's usually better for real-time event subscriptions.
+export const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
