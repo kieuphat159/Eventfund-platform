@@ -2,8 +2,14 @@ import { ethers } from "ethers";
 
 import { provider } from "../../core/provider.js";
 import { getTicket } from "../../core/contracts/index.js";
-import { BlockchainSyncState } from "../../../../models/BlockchainSyncState.js";
 import { ChainLog } from "../../../../models/ChainLog.js";
+import {
+  getOrInitSyncState,
+  markError,
+  markSynced,
+  markSyncing,
+  updateProgress,
+} from "../../core/blockTracker.js";
 
 const CONTRACT_NAME = "Ticket";
 
@@ -48,24 +54,6 @@ function getNumberEnv(name, defaultValue) {
     throw new Error(`Invalid number env ${name}=${raw}`);
   }
   return parsed;
-}
-
-async function getOrInitSyncState(startBlock) {
-  const ticket = getTicket();
-  const contractAddress = await ticket.getAddress();
-
-  const existing = await BlockchainSyncState.findOne({
-    contractName: CONTRACT_NAME,
-  });
-
-  if (existing) return existing;
-
-  return BlockchainSyncState.create({
-    contractName: CONTRACT_NAME,
-    contractAddress,
-    lastProcessedBlock: startBlock,
-    status: "synced",
-  });
 }
 
 async function deleteLogsInRange(contractAddress, fromBlock, toBlock) {
@@ -114,8 +102,14 @@ export async function syncTicketLogsOnce() {
   const chunkSize = getNumberEnv("CHAIN_LOG_CHUNK_SIZE", 2000);
   const startBlock = getNumberEnv("TICKET_START_BLOCK", 0);
 
-  const syncState = await getOrInitSyncState(startBlock);
-  const contractAddress = (await ticket.getAddress()).toLowerCase();
+  const contractAddress = await ticket.getAddress();
+  const contractAddressLower = contractAddress.toLowerCase();
+
+  const syncState = await getOrInitSyncState({
+    contractName: CONTRACT_NAME,
+    contractAddress,
+    startBlock,
+  });
 
   const latest = await provider.getBlockNumber();
   const target = Math.max(0, latest - confirmations);
@@ -131,45 +125,34 @@ export async function syncTicketLogsOnce() {
     return { latest, target, processedTo: syncState.lastProcessedBlock };
   }
 
-  await BlockchainSyncState.updateOne(
-    { contractName: CONTRACT_NAME },
-    { $set: { status: "syncing", errorMessage: null } }
-  );
+  await markSyncing(CONTRACT_NAME);
 
   let currentFrom = from;
   while (currentFrom <= target) {
     const currentTo = Math.min(target, currentFrom + chunkSize - 1);
 
     // Reorg-handling strategy: for the rescan range, wipe then re-insert logs.
-    await deleteLogsInRange(contractAddress, currentFrom, currentTo);
+    await deleteLogsInRange(contractAddressLower, currentFrom, currentTo);
 
     const logs = await provider.getLogs({
-      address: contractAddress,
+      address: contractAddressLower,
       fromBlock: currentFrom,
       toBlock: currentTo,
     });
 
-    await storeLogs(contractAddress, logs);
+    await storeLogs(contractAddressLower, logs);
 
-    await BlockchainSyncState.updateOne(
-      { contractName: CONTRACT_NAME },
-      {
-        $set: {
-          contractAddress,
-          lastProcessedBlock: currentTo,
-          lastSyncAt: new Date(),
-          status: "syncing",
-        },
-      }
-    );
+    await updateProgress({
+      contractName: CONTRACT_NAME,
+      contractAddress,
+      lastProcessedBlock: currentTo,
+      status: "syncing",
+    });
 
     currentFrom = currentTo + 1;
   }
 
-  await BlockchainSyncState.updateOne(
-    { contractName: CONTRACT_NAME },
-    { $set: { status: "synced", lastSyncAt: new Date() } }
-  );
+  await markSynced(CONTRACT_NAME);
 
   return { latest, target, processedTo: target };
 }
@@ -182,17 +165,7 @@ export async function runTicketIndexerLoop() {
     try {
       await syncTicketLogsOnce();
     } catch (err) {
-      await BlockchainSyncState.updateOne(
-        { contractName: CONTRACT_NAME },
-        {
-          $set: {
-            status: "error",
-            errorMessage: err instanceof Error ? err.message : String(err),
-            lastSyncAt: new Date(),
-          },
-        },
-        { upsert: true }
-      );
+      await markError(CONTRACT_NAME, err);
 
       // Keep process alive; next iteration may recover.
       // eslint-disable-next-line no-console
