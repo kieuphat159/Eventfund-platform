@@ -1,5 +1,5 @@
-import { provider } from "../connection.js";
-import { getFund } from "../contracts.js"; // đổi đúng tên file bạn đang để (chỗ có getFund)
+import { provider } from "../../core/provider.js";
+import { getFund } from "../../core/contracts/index.js";
 
 async function main() {
   console.log("block:", await provider.getBlockNumber());
@@ -13,13 +13,16 @@ async function main() {
   console.log("fund.ticket():", await fund.ticket());
   console.log("fund.marketplace():", await fund.marketplace());
 
-  // pendingReward(eventId, user) - sẽ revert nếu eventId chưa tồn tại
+  // pendingReward(eventId, user) - will revert if eventId does not exist
   const testEventId = 1;
   const testUser = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"; // hardhat account #0
 
   try {
     const pending = await fund.pendingReward(testEventId, testUser);
-    console.log(`fund.pendingReward(${testEventId}, ${testUser}):`, pending.toString());
+    console.log(
+      `fund.pendingReward(${testEventId}, ${testUser}):`,
+      pending.toString()
+    );
   } catch (e) {
     console.log(
       `pendingReward(${testEventId}) reverted (chưa createEvent)`,

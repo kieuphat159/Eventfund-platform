@@ -1,6 +1,6 @@
-import "../../config/env.js";
-import { connectDB } from "../../config/mongoDB.js";
-import { runTicketIndexerLoop } from "./ticketIndexer.js";
+import "../../../../config/env.js";
+import { connectDB } from "../../../../config/mongoDB.js";
+import { runTicketIndexerLoop } from "./indexer.js";
 
 async function main() {
   await connectDB();

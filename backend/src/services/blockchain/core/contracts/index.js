@@ -3,15 +3,17 @@ import { createRequire } from "module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { provider } from "./connection.js";
+import { provider } from "../provider.js";
 
 const require = createRequire(import.meta.url);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const repoRoot = path.resolve(__dirname, "../../../../../..");
+
 function requireArtifact(relativeFromRepoRoot) {
-  return require(path.join(__dirname, "../../../../", relativeFromRepoRoot));
+  return require(path.join(repoRoot, relativeFromRepoRoot));
 }
 
 function loadAbi(artifactPath) {
@@ -25,7 +27,7 @@ function loadAbi(artifactPath) {
 
 function requireAddress(envName) {
   const addr = process.env[envName];
-  if (!addr) throw new Error(`Missing ${envName} in environment (.env)`);
+  if (!addr) throw new Error(`Missing ${envName} in environment (backend/.env)`);
   if (!ethers.isAddress(addr)) throw new Error(`Invalid ${envName}: ${addr}`);
   return ethers.getAddress(addr);
 }
@@ -58,16 +60,4 @@ export function getMarketplace() {
   );
   marketplace = new ethers.Contract(address, abi, provider);
   return marketplace;
-}
-
-
-// hàm tiện ích để lấy block number và timestamp hiện tại, có thể dùng trong indexer hoặc các phần khác cần đồng bộ với blockchain
-export async function getCurrentBlock() {
-    return await provider.getBlockNumber();
-}
-
-export async function getCurrentBlockTimestamp() {
-    const blockNumber = await getCurrentBlock();
-    const block = await provider.getBlock(blockNumber);
-    return block.timestamp;
 }

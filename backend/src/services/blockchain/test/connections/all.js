@@ -1,11 +1,16 @@
 import { ethers } from "ethers";
 
-import { provider } from "../connection.js";
-import { getFund, getMarketplace, getTicket } from "../contracts.js";
+import { provider } from "../../core/provider.js";
+import {
+  getFund,
+  getMarketplace,
+  getTicket,
+} from "../../core/contracts/index.js";
 
 async function assertDeployed(address, label) {
   if (!address) throw new Error(`${label}: empty address`);
-  if (!ethers.isAddress(address)) throw new Error(`${label}: invalid address ${address}`);
+  if (!ethers.isAddress(address))
+    throw new Error(`${label}: invalid address ${address}`);
 
   const checksum = ethers.getAddress(address);
   const code = await provider.getCode(checksum);
@@ -23,8 +28,7 @@ async function testRpc() {
 
 async function testTicket() {
   const ticket = getTicket();
-  const address = ticket.target;
-  const checksum = await assertDeployed(address, "Ticket");
+  const checksum = await assertDeployed(ticket.target, "Ticket");
   const name = await ticket.name();
   const symbol = await ticket.symbol();
   console.log("Ticket ok:", { address: checksum, name, symbol });
@@ -32,14 +36,11 @@ async function testTicket() {
 
 async function testFund() {
   const fund = getFund();
-  const address = fund.target;
-  const checksum = await assertDeployed(address, "Fund");
-
+  const checksum = await assertDeployed(fund.target, "Fund");
   const admin = await fund.admin();
   const nextEventId = await fund.nextEventId();
   const ticket = await fund.ticket();
   const marketplace = await fund.marketplace();
-
   console.log("Fund ok:", {
     address: checksum,
     admin,
@@ -51,11 +52,12 @@ async function testFund() {
 
 async function testMarketplace() {
   const marketplace = getMarketplace();
-  const address = marketplace.target;
-  const checksum = await assertDeployed(address, "Marketplace");
-
+  const checksum = await assertDeployed(marketplace.target, "Marketplace");
   const listingCount = await marketplace.getListingCount();
-  console.log("Marketplace ok:", { address: checksum, listingCount: listingCount.toString() });
+  console.log("Marketplace ok:", {
+    address: checksum,
+    listingCount: listingCount.toString(),
+  });
 }
 
 async function runNonBlocking(name, fn) {
@@ -80,7 +82,6 @@ async function main() {
   console.log("\n== Summary ==");
   for (const r of results) console.log(`${r.ok ? "OK" : "FAIL"} - ${r.name}`);
 
-  // Run all tests regardless; then return non-zero exit code if anything failed.
   if (failed.length > 0) process.exitCode = 1;
 }
 

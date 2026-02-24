@@ -1,7 +1,9 @@
-import { provider } from "./connection.js";
-import { getTicket } from "./contracts.js";
-import { BlockchainSyncState } from "../../models/BlockchainSyncState.js";
-import { ChainLog } from "../../models/ChainLog.js";
+import { ethers } from "ethers";
+
+import { provider } from "../../core/provider.js";
+import { getTicket } from "../../core/contracts/index.js";
+import { BlockchainSyncState } from "../../../../models/BlockchainSyncState.js";
+import { ChainLog } from "../../../../models/ChainLog.js";
 
 const CONTRACT_NAME = "Ticket";
 
@@ -118,9 +120,13 @@ export async function syncTicketLogsOnce() {
   const latest = await provider.getBlockNumber();
   const target = Math.max(0, latest - confirmations);
 
-  if (target <= 0) return { latest, target, processedTo: syncState.lastProcessedBlock };
+  if (target <= 0)
+    return { latest, target, processedTo: syncState.lastProcessedBlock };
 
-  const from = Math.max(startBlock, Math.max(0, syncState.lastProcessedBlock - reorgBuffer + 1));
+  const from = Math.max(
+    startBlock,
+    Math.max(0, syncState.lastProcessedBlock - reorgBuffer + 1)
+  );
   if (from > target) {
     return { latest, target, processedTo: syncState.lastProcessedBlock };
   }
