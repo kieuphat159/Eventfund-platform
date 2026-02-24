@@ -4,6 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "node": "npx hardhat node",
+    "chain": "npx hardhat node",
+    "deploy:all": "npx hardhat run contracts/scripts/deployAll.js --network localhost",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

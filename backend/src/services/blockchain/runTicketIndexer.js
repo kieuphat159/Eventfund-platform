@@ -1,8 +1,6 @@
-import dotenv from "dotenv";
+import "../../config/env.js";
 import { connectDB } from "../../config/mongoDB.js";
 import { runTicketIndexerLoop } from "./ticketIndexer.js";
-
-dotenv.config();
 
 async function main() {
   await connectDB();
