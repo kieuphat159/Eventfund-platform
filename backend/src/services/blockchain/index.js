@@ -5,3 +5,13 @@ export {
   runTicketIndexerLoop,
   syncTicketLogsOnce,
 } from "./indexers/ticket/indexer.js";
+
+export {
+  runFundIndexerLoop,
+  syncFundLogsOnce,
+} from "./indexers/fund/indexer.js";
+
+export {
+  runMarketplaceIndexerLoop,
+  syncMarketplaceLogsOnce,
+} from "./indexers/marketplace/indexer.js";

@@ -4,6 +4,11 @@ import { provider } from "../../core/provider.js";
 import { getTicket } from "../../core/contracts/index.js";
 import { ChainLog } from "../../../../models/ChainLog.js";
 import {
+  getNumberEnv,
+  planReorgSafeSync,
+  readReorgPolicyFromEnv,
+} from "../../sync/reorgPolicy.js";
+import {
   getOrInitSyncState,
   markError,
   markSynced,
@@ -44,16 +49,6 @@ function resultToArgsObject(result) {
   }
 
   return out;
-}
-
-function getNumberEnv(name, defaultValue) {
-  const raw = process.env[name];
-  if (raw === undefined || raw === "") return defaultValue;
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed)) {
-    throw new Error(`Invalid number env ${name}=${raw}`);
-  }
-  return parsed;
 }
 
 async function deleteLogsInRange(contractAddress, fromBlock, toBlock) {
@@ -97,9 +92,7 @@ async function storeLogs(contractAddress, logs) {
 
 export async function syncTicketLogsOnce() {
   const ticket = getTicket();
-  const confirmations = getNumberEnv("CHAIN_CONFIRMATIONS", 12);
-  const reorgBuffer = getNumberEnv("REORG_BUFFER_BLOCKS", 12);
-  const chunkSize = getNumberEnv("CHAIN_LOG_CHUNK_SIZE", 2000);
+  const { confirmations, reorgBuffer, chunkSize } = readReorgPolicyFromEnv();
   const startBlock = getNumberEnv("TICKET_START_BLOCK", 0);
 
   const contractAddress = await ticket.getAddress();
@@ -112,18 +105,20 @@ export async function syncTicketLogsOnce() {
   });
 
   const latest = await provider.getBlockNumber();
-  const target = Math.max(0, latest - confirmations);
-
-  if (target <= 0)
-    return { latest, target, processedTo: syncState.lastProcessedBlock };
-
-  const from = Math.max(
+  const plan = planReorgSafeSync({
+    latestBlock: latest,
+    confirmations,
     startBlock,
-    Math.max(0, syncState.lastProcessedBlock - reorgBuffer + 1)
-  );
-  if (from > target) {
+    lastProcessedBlock: syncState.lastProcessedBlock,
+    reorgBuffer,
+  });
+  const target = plan.targetBlock;
+
+  if (!plan.shouldSync) {
     return { latest, target, processedTo: syncState.lastProcessedBlock };
   }
+
+  const from = plan.fromBlock;
 
   await markSyncing(CONTRACT_NAME);
 

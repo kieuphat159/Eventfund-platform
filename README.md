@@ -145,9 +145,18 @@ Ghi chú:
 # Test connection tới RPC + cả 3 contracts (non-blocking)
 npm run backend test:blockchain:connections
 
-# Chạy ticket indexer loop
+# Chạy các indexer loop
 npm run backend indexer:ticket
+npm run backend indexer:fund
+npm run backend indexer:marketplace
+
+# Chạy ticket processor loop (build TicketEvent/TicketStats từ ChainLog)
+npm run backend processor:ticket
 ```
+
+Tài liệu chi tiết (Indexer/Processor, reorg handling, env vars, data model):
+
+- `backend/docs/blockchain-indexing.md`
 
 ## Cấu trúc chi tiết
 
