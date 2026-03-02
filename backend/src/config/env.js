@@ -35,9 +35,10 @@ function validateEnv() {
 
   // Validate NODE_ENV value
   const validEnvs = ['DEV', 'PROD', 'TEST', 'Dev', 'Prod', 'Test'];
-  if (!validEnvs.includes(process.env.NODE_ENV)) {
+  const nodeEnv = process.env.NODE_ENV || 'DEV';
+  if (!validEnvs.includes(nodeEnv) && !validEnvs.map(e => e.toLowerCase()).includes(nodeEnv.toLowerCase())) {
     throw new Error(
-      `Invalid NODE_ENV value: ${process.env.NODE_ENV}\n` +
+      `Invalid NODE_ENV value: ${nodeEnv}\n` +
       `Must be one of: ${validEnvs.join(', ')}`
     );
   }
@@ -70,7 +71,8 @@ export const config = {
   // SIWE (will be added later)
   siwe: {
     domain: process.env.SIWE_DOMAIN || 'localhost:4000',
-    uri: process.env.SIWE_URI || 'http://localhost:4000'
+    uri: process.env.SIWE_URI || 'http://localhost:4000',
+    chainId: parseInt(process.env.SIWE_CHAIN_ID) || 1
   },
 
   // Rate Limiting
@@ -81,7 +83,9 @@ export const config = {
   },
 
   // Redis
-  redisUrl: process.env.REDIS_URL || 'redis://localhost:6379',
+  redis: {
+    url: process.env.REDIS_URL || 'redis://localhost:6379'
+  },
 
   // Logging
   logLevel: process.env.LOG_LEVEL || 'info',

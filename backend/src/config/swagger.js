@@ -24,7 +24,7 @@ const options = {
         description: 'Development server'
       },
       {
-        url: 'https://api.eventfund.example.com/api',
+        url: 'https://api.eventfund.example.com',
         description: 'Production server'
       }
     ],

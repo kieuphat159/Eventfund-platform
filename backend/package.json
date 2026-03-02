@@ -7,8 +7,6 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
-    "test:mongo": "node src/config/testMongoDB.js",
-    "test:cloudinary": "node src/config/testCloudinary.js"
   },
   "keywords": [],
   "author": "",
@@ -27,6 +25,7 @@
     "jsonwebtoken": "^9.0.3",
     "mongodb": "^7.1.0",
     "mongoose": "^9.1.5",
+    "mongoose-paginate-v2": "^1.9.1",
     "morgan": "^1.10.1",
     "multer": "^2.0.2",
     "multer-storage-cloudinary": "^4.0.0",
@@ -37,6 +36,13 @@
     "winston": "^3.19.0"
   },
   "devDependencies": {
-    "nodemon": "^3.1.11"
+    "@types/jest": "^30.0.0",
+    "cross-env": "^10.1.0",
+    "fast-check": "^4.5.3",
+    "jest": "^30.2.0",
+    "mongodb-memory-server": "^11.0.1",
+    "nodemon": "^3.1.11",
+    "sinon": "^21.0.1",
+    "supertest": "^7.2.2"
   }
 }

@@ -59,45 +59,30 @@ app.get('/health', (_, res) => {
   });
 });
 
-// API routes will be added here
-// app.use('/api/auth', authRoutes);
-// app.use('/api/users', usersRoutes);
-// app.use('/api/events', eventsRoutes);
-// app.use('/api/tickets', ticketsRoutes);
-// app.use('/api/marketplace', marketplaceRoutes);
-// app.use('/api/admin', adminRoutes);
+// API routes
+import authRoutes from './routes/auth.routes.js';
+import eventsRoutes from './routes/events.routes.js';
+import ticketsRoutes from './routes/tickets.routes.js';
+import marketplaceRoutes from './routes/marketplace.routes.js';
+import usersRoutes from './routes/users.routes.js';
+import adminRoutes from './routes/admin.routes.js';
+import healthRoutes from './routes/health.routes.js';
 
-// 404 handler
-app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    error: {
-      code: 'NOT_FOUND',
-      message: `Route ${req.method} ${req.url} not found`
-    }
-  });
-});
+// Import error handling middleware
+import { errorHandler, notFoundHandler } from './middlewares/error.middleware.js';
 
-// Error handler (will be replaced with proper middleware later)
-app.use((err, req, res, next) => {
-  logger.error('Unhandled error', {
-    error: {
-      message: err.message,
-      stack: err.stack
-    },
-    request: {
-      method: req.method,
-      url: req.url
-    }
-  });
+app.use('/api/auth', authRoutes);
+app.use('/api/events', eventsRoutes);
+app.use('/api/tickets', ticketsRoutes);
+app.use('/api/marketplace', marketplaceRoutes);
+app.use('/api/users', usersRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/health', healthRoutes);
 
-  res.status(err.statusCode || 500).json({
-    success: false,
-    error: {
-      code: err.code || 'INTERNAL_ERROR',
-      message: config.isDev ? err.message : 'Internal server error'
-    }
-  });
-});
+// 404 handler for unknown routes
+app.use(notFoundHandler);
+
+// Centralized error handling middleware
+app.use(errorHandler);
 
 export default app;
