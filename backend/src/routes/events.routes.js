@@ -1,0 +1,330 @@
+import express from 'express';
+import EventsController from '../controllers/events.controller.js';
+import { authenticate } from '../middlewares/auth.middleware.js';
+import { requireOrganizer } from '../middlewares/roles.middleware.js';
+import { validate } from '../middlewares/validate.middleware.js';
+import { eventSchemas } from '../validators/event.validator.js';
+
+const router = express.Router();
+const controller = new EventsController();
+
+/**
+ * @swagger
+ * tags:
+ *   name: Events
+ *   description: Event management endpoints
+ */
+
+/**
+ * @swagger
+ * /events:
+ *   get:
+ *     summary: List events with filters and pagination
+ *     tags: [Events]
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           enum: [draft, funding, funded, ticketing, ongoing, completed, cancelled, failed]
+ *         description: Filter by event status
+ *       - in: query
+ *         name: category
+ *         schema:
+ *           type: string
+ *         description: Filter by event category
+ *       - in: query
+ *         name: organizer
+ *         schema:
+ *           type: string
+ *         description: Filter by organizer wallet address
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Page number
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *           maximum: 100
+ *         description: Items per page
+ *       - in: query
+ *         name: sortBy
+ *         schema:
+ *           type: string
+ *           default: createdAt
+ *         description: Sort field
+ *       - in: query
+ *         name: sortOrder
+ *         schema:
+ *           type: string
+ *           enum: [asc, desc]
+ *           default: desc
+ *         description: Sort order
+ *     responses:
+ *       200:
+ *         description: List of events
+ *       500:
+ *         description: Server error
+ */
+router.get('/', validate({ query: eventSchemas.queryEvents }), (req, res, next) => controller.getEvents(req, res, next));
+
+/**
+ * @swagger
+ * /events:
+ *   post:
+ *     summary: Create new event (organizer only)
+ *     tags: [Events]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - title
+ *               - description
+ *               - fundingGoal
+ *               - fundingDeadline
+ *               - startDate
+ *               - endDate
+ *               - totalTickets
+ *             properties:
+ *               title:
+ *                 type: string
+ *                 example: "Web3 Developer Conference 2026"
+ *               description:
+ *                 type: string
+ *                 example: "Annual conference for blockchain developers and Web3 enthusiasts"
+ *               category:
+ *                 type: string
+ *                 example: "conference"
+ *               fundingGoal:
+ *                 type: string
+ *                 example: "5000000000000000000"
+ *               minStakeRequired:
+ *                 type: string
+ *                 example: "1000000000000000000"
+ *               fundingDeadline:
+ *                 type: string
+ *                 format: date-time
+ *                 example: "2026-04-15T23:59:59Z"
+ *               startDate:
+ *                 type: string
+ *                 format: date-time
+ *                 example: "2026-05-20T09:00:00Z"
+ *               endDate:
+ *                 type: string
+ *                 format: date-time
+ *                 example: "2026-05-22T18:00:00Z"
+ *               totalTickets:
+ *                 type: integer
+ *                 example: 500
+ *               venue:
+ *                 type: object
+ *                 properties:
+ *                   name:
+ *                     type: string
+ *                     example: "Tech Convention Center"
+ *                   address:
+ *                     type: string
+ *                     example: "123 Innovation Drive"
+ *                   city:
+ *                     type: string
+ *                     example: "San Francisco"
+ *                   country:
+ *                     type: string
+ *                     example: "USA"
+ *                 example:
+ *                   name: "Tech Convention Center"
+ *                   address: "123 Innovation Drive"
+ *                   city: "San Francisco"
+ *                   country: "USA"
+ *           example:
+ *             title: "Web3 Developer Conference 2026"
+ *             description: "Annual conference for blockchain developers and Web3 enthusiasts"
+ *             category: "conference"
+ *             fundingGoal: "5000000000000000000"
+ *             minStakeRequired: "1000000000000000000"
+ *             fundingDeadline: "2026-04-15T23:59:59Z"
+ *             startDate: "2026-05-20T09:00:00Z"
+ *             endDate: "2026-05-22T18:00:00Z"
+ *             totalTickets: 500
+ *             venue:
+ *               name: "Tech Convention Center"
+ *               address: "123 Innovation Drive"
+ *               city: "San Francisco"
+ *               country: "USA"
+ *     responses:
+ *       201:
+ *         description: Event created successfully
+ *       400:
+ *         description: Validation error
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Not authorized (requires organizer role)
+ *       500:
+ *         description: Server error
+ */
+router.post('/', authenticate, requireOrganizer, validate({ body: eventSchemas.createEvent }), (req, res, next) => controller.createEvent(req, res, next));
+
+/**
+ * @swagger
+ * /events/{id}:
+ *   get:
+ *     summary: Get event by ID
+ *     tags: [Events]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Event ID
+ *         example: "507f1f77bcf86cd799439011"
+ *     responses:
+ *       200:
+ *         description: Event details
+ *       404:
+ *         description: Event not found
+ *       500:
+ *         description: Server error
+ */
+router.get('/:id', (req, res, next) => controller.getEventById(req, res, next));
+
+/**
+ * @swagger
+ * /events/{id}:
+ *   patch:
+ *     summary: Update event (organizer only, must own event)
+ *     tags: [Events]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Event ID
+ *         example: "507f1f77bcf86cd799439011"
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               title:
+ *                 type: string
+ *                 example: "Web3 Developer Conference 2026 - Updated"
+ *               description:
+ *                 type: string
+ *                 example: "Updated description with more details about speakers and workshops"
+ *               category:
+ *                 type: string
+ *                 example: "conference"
+ *               venue:
+ *                 type: object
+ *                 properties:
+ *                   name:
+ *                     type: string
+ *                   address:
+ *                     type: string
+ *                   city:
+ *                     type: string
+ *                   country:
+ *                     type: string
+ *                 example:
+ *                   name: "New Convention Center"
+ *                   address: "456 Tech Boulevard"
+ *                   city: "San Francisco"
+ *                   country: "USA"
+ *           example:
+ *             title: "Web3 Developer Conference 2026 - Updated"
+ *             description: "Updated description with more details about speakers and workshops"
+ *             category: "conference"
+ *             venue:
+ *               name: "New Convention Center"
+ *               address: "456 Tech Boulevard"
+ *               city: "San Francisco"
+ *               country: "USA"
+ *     responses:
+ *       200:
+ *         description: Event updated successfully
+ *       400:
+ *         description: Validation error
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Not authorized (requires organizer role and ownership)
+ *       404:
+ *         description: Event not found
+ *       500:
+ *         description: Server error
+ */
+router.patch('/:id', authenticate, requireOrganizer, validate({ body: eventSchemas.updateEvent }), (req, res, next) => controller.updateEvent(req, res, next));
+
+/**
+ * @swagger
+ * /events/{id}:
+ *   delete:
+ *     summary: Delete event (organizer only, must own event, draft only)
+ *     tags: [Events]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Event ID
+ *         example: "507f1f77bcf86cd799439011"
+ *     responses:
+ *       200:
+ *         description: Event deleted successfully
+ *       400:
+ *         description: Cannot delete non-draft event
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Not authorized (requires organizer role and ownership)
+ *       404:
+ *         description: Event not found
+ *       500:
+ *         description: Server error
+ */
+router.delete('/:id', authenticate, requireOrganizer, (req, res, next) => controller.deleteEvent(req, res, next));
+
+/**
+ * @swagger
+ * /events/{id}/stats:
+ *   get:
+ *     summary: Get event statistics
+ *     tags: [Events]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Event ID
+ *         example: "507f1f77bcf86cd799439011"
+ *     responses:
+ *       200:
+ *         description: Event statistics
+ *       404:
+ *         description: Event not found
+ *       500:
+ *         description: Server error
+ */
+router.get('/:id/stats', (req, res, next) => controller.getEventStats(req, res, next));
+
+export default router;
