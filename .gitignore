@@ -33,15 +33,3 @@ contracts/typechain-types/
 contracts/coverage/
 contracts/coverage.json
 contracts/ignition/deployments/chain-31337
-
-powers
-superpowers-main
-.kiro/specs/srctree.txt
-.kiro/specs/project.md
-.kiro/specs/web3-event-platform/.config.kiro
-.kiro/specs/backend-mvc-setup/.config.kiro
-.kiro/specs/backend-mvc-setup/design.md
-.kiro/specs/backend-mvc-setup/requirements.md
-.kiro/specs/backend-mvc-setup/tasks.md
-.kiro/specs/web3-event-platform/requirements.md
-backend/README.md
