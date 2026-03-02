@@ -8,7 +8,8 @@
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
     "test:mongo": "node src/config/testMongoDB.js",
-    "test:cloudinary": "node src/config/testCloudinary.js"
+    "test:cloudinary": "node src/config/testCloudinary.js",
+    "seed": "node src/scripts/seed.js"
   },
   "keywords": [],
   "author": "",
