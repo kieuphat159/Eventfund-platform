@@ -1,5 +1,5 @@
 import asyncHandler from '../utils/asyncHandler.js';
-import * as adminService from '../services/admin.service.js';
+import * as adminService from '../services/admin/admin.service.js';
 import { convertBigIntToString } from '../utils/bigint.js';
 
 /**

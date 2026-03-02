@@ -1,5 +1,5 @@
-import * as ListingRepo from '../repositories/listing.repo.js';
-import * as TicketRepo from '../repositories/ticket.repo.js';
+import * as ListingRepo from '../../repositories/listing.repo.js';
+import * as TicketRepo from '../../repositories/ticket.repo.js';
 
 /**
  * Get marketplace listings with filters and pagination

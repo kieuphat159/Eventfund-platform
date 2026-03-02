@@ -1,8 +1,8 @@
-import * as userRepo from '../repositories/user.repo.js';
-import * as eventRepo from '../repositories/event.repo.js';
-import * as ticketRepo from '../repositories/ticket.repo.js';
-import * as listingRepo from '../repositories/listing.repo.js';
-import { Event as DefaultEvent } from '../models/index.js';
+import * as userRepo from '../../repositories/user.repo.js';
+import * as eventRepo from '../../repositories/event.repo.js';
+import * as ticketRepo from '../../repositories/ticket.repo.js';
+import * as listingRepo from '../../repositories/listing.repo.js';
+import { Event as DefaultEvent } from '../../models/index.js';
 import mongoose from 'mongoose';
 
 /**

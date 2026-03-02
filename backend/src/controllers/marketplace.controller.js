@@ -1,5 +1,5 @@
 import asyncHandler from '../utils/asyncHandler.js';
-import * as marketplaceService from '../services/marketplace.service.js';
+import * as marketplaceService from '../services/marketplace/marketplace.service.js';
 import { convertBigIntToString } from '../utils/bigint.js';
 
 /**
