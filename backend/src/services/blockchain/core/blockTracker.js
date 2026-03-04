@@ -1,4 +1,4 @@
-import { BlockchainSyncState } from "../../../models/BlockchainSyncState.js";
+import { BlockchainSyncState } from "../../../models/BlockchainSyncState.model.js";
 
 export function normalizeContractAddress(contractAddress) {
     if (!contractAddress) return undefined;
