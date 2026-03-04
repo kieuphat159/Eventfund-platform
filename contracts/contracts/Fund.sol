@@ -162,6 +162,8 @@ contract Fund is IFund, ReentrancyGuard {
     event RefundsEnabled(uint256 indexed eventId, uint256 refundPoolAmount);
     event TicketRefundPaid(uint256 indexed eventId, uint256 indexed tokenId, address indexed to, uint256 amount);
 
+    event RefundPoolDeposited(uint256 indexed eventId, address indexed from, uint256 amount, uint256 newRefundPool);
+
     event PenaltyApplied(uint256 indexed eventId, uint256 amount, uint256 penaltyBps, PenaltyReason reason);
 
     // FIX: escrow deposit events for off-chain sync.
@@ -248,6 +250,15 @@ contract Fund is IFund, ReentrancyGuard {
 
         e.escrowedRevenue += msg.value;
         emit RoyaltyDeposited(eventId, msg.sender, msg.value, e.escrowedRevenue);
+    }
+
+    /// @notice Organizer/Admin can top up refund pool for a specific event.
+    /// @dev Needed for ticket refund end-to-end flow.
+    function depositRefundPool(uint256 eventId) external payable onlyOrganizerOrAdmin(eventId) {
+        if (msg.value == 0) revert BadParam();
+        EventConfig storage e = _mustGet(eventId);
+        e.refundPool += msg.value;
+        emit RefundPoolDeposited(eventId, msg.sender, msg.value, e.refundPool);
     }
 
     // -----------------------
@@ -523,6 +534,20 @@ contract Fund is IFund, ReentrancyGuard {
     function refundTickets(uint256 eventId) external onlyOrganizerOrAdmin(eventId) {
         EventConfig storage e = _mustGet(eventId);
 
+        if (address(ticket) == address(0)) revert TicketContractNotSet();
+        if (!e.sharesFinalized) revert Unsafe();
+        if (e.revenueReleased) revert Unsafe();
+
+        // Only allow refund mode after ticketing started (or completed before revenue release).
+        if (e.status != EventStatus.Ticketing && e.status != EventStatus.Completed) revert Unsafe();
+
+        // FIX (critical): move escrowed revenue into refund pool so funds are not stuck.
+        // In refund mode, revenue release is forbidden; escrowedRevenue must be spendable for refunds.
+        if (e.escrowedRevenue > 0) {
+            e.refundPool += e.escrowedRevenue;
+            e.escrowedRevenue = 0;
+        }
+
         e.refundsEnabled = true;
         emit RefundsEnabled(eventId, e.refundPool);
     }
@@ -570,7 +595,8 @@ contract Fund is IFund, ReentrancyGuard {
         // - event completed and revenue released OR refunds enabled (settlement decision made)
         bool canWithdraw =
             (e.status == EventStatus.Cancelled && e.sharesFinalized) ||
-            (e.status == EventStatus.Completed && (e.revenueReleased || e.refundsEnabled));
+            (e.status == EventStatus.Completed && (e.revenueReleased || e.refundsEnabled)) ||
+            (e.refundsEnabled && e.sharesFinalized);
 
         if (!canWithdraw) revert Unsafe();
 
@@ -603,7 +629,12 @@ contract Fund is IFund, ReentrancyGuard {
         if (!e.refundsEnabled) revert RefundsNotEnabled();
         if (to == address(0)) revert BadParam();
 
-        uint256 amount = e.ticketPrice;
+        // Harden: verify token belongs to this event and refund exact token price.
+        // This supports variable pricing per ticket type/batch.
+        if (ticket.getEventId(tokenId) != eventId) revert BadParam();
+
+        uint256 amount = ticket.getTicketPrice(tokenId);
+        if (amount == 0) revert BadParam();
         if (amount > e.refundPool) revert InsufficientRefundPool();
 
         e.refundPool -= amount;

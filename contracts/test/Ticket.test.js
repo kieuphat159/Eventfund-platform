@@ -107,6 +107,22 @@ describe("Ticket Smart Contract", () => {
         .be.reverted;
     });
 
+    it("Only event organizer (after first mint) can toggle sales", async () => {
+      const { ticket, organizer, stranger, eventId } = await loadFixture(
+        deployTicketFixture,
+      );
+
+      // Before any mint, eventOrganizer[eventId] == address(0) => organizer isn't recognized yet.
+      await expect(
+        ticket.connect(organizer).setSalesActive(eventId, false),
+      ).to.be.revertedWithCustomError(ticket, "InvalidTicketStatus");
+
+      // Stranger also cannot toggle.
+      await expect(
+        ticket.connect(stranger).setSalesActive(eventId, false),
+      ).to.be.revertedWithCustomError(ticket, "InvalidTicketStatus");
+    });
+
     it("TC4: Stranger cannot call admin/mint functions", async () => {
       const { ticket, stranger, eventId } = await loadFixture(
         deployTicketFixture,
@@ -125,13 +141,18 @@ describe("Ticket Smart Contract", () => {
       const { ticket, fund, organizer, eventId, ticketPrice } =
         await loadFixture(deployTicketFixture);
       const fundSigner = await getContractSigner(fund.target);
-      await ticket
+      const tx = ticket
         .connect(fundSigner)
         .mintBatch(organizer.address, eventId, ticketPrice, 0, 5);
+
+      await expect(tx).to.emit(ticket, "TicketMintedBatch");
 
       const info = await ticket.getTicketInfo(1);
       expect(info.price).to.equal(ticketPrice);
       expect(await ticket.ownerOf(1)).to.equal(organizer.address);
+
+      const tokenIds = await ticket.getEventTokenIds(eventId);
+      expect(tokenIds.length).to.equal(5);
     });
 
     it("TC6: Auto-activate sales on first mint", async () => {
@@ -225,7 +246,11 @@ describe("Ticket Smart Contract", () => {
       const tx = ticket
         .connect(buyer)
         .purchaseTicket(1, { value: ticketPrice });
+
       await expect(tx).to.changeEtherBalance(fund, ticketPrice);
+      await expect(tx)
+        .to.emit(ticket, "TicketPurchased")
+        .withArgs(1, 1, buyer.address, ticketPrice);
       expect(await ticket.getTicketStatus(1)).to.equal(1); // Sold
     });
 
@@ -254,13 +279,18 @@ describe("Ticket Smart Contract", () => {
     });
 
     it("TC14: Revert if seller is not organizer", async () => {
-      const { ticket, buyer, stranger, ticketPrice, admin } =
+      const { ticket, buyer, stranger, organizer, ticketPrice } =
         await mintedFixture();
-      // Stranger không có ORGANIZER_ROLE, nếu sở hữu vé Minted thì cũng không mua được qua hàm này
-      // (Test này kiểm tra logic check role của seller trong code)
+
+      // Simulate organizer transferring a Minted ticket away.
+      await ticket
+        .connect(organizer)
+        .transferFrom(organizer.address, stranger.address, 5);
+
+      // Primary purchase must be from an ORGANIZER_ROLE holder.
       await expect(
         ticket.connect(buyer).purchaseTicket(5, { value: ticketPrice }),
-      ).to.not.be.reverted;
+      ).to.be.revertedWithCustomError(ticket, "InvalidTicketStatus");
     });
   });
 
@@ -386,11 +416,15 @@ describe("Ticket Smart Contract", () => {
       await ticket
         .connect(fundSigner)
         .mintBatch(organizer.address, eventId, ticketPrice, 0, 2);
+
       await ticket.connect(buyer).purchaseTicket(1, { value: ticketPrice });
+      await ticket.connect(buyer).purchaseTicket(2, { value: ticketPrice });
       await ticket.connect(verifier).markAsUsed(1);
 
       const stats = await ticket.getUsageStats(eventId);
-      expect(stats.usageRatio).to.equal(10000); // 100%
+      expect(stats.totalSold).to.equal(2);
+      expect(stats.totalUsed).to.equal(1);
+      expect(stats.usageRatio).to.equal(5000); // 50%
     });
 
     it("TC23: getTotalRevenue matches funds pushed to Fund", async () => {

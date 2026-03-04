@@ -35,6 +35,8 @@ contract Ticket is ERC721, ERC721Enumerable, AccessControl, ReentrancyGuard, ITi
     // Ticket will forward the ticket price to Fund escrow on each purchase.
     error FundNotSet();
 
+    error RefundsNotEnabled();
+
     // ------ Mappings -------
     mapping(uint256 => TicketInfo) public _tickets; // ticketId => TicketInfo
     mapping(uint256 => EventTicketInfo) public _eventTickets; // eventId => EventTicketInfo
@@ -47,6 +49,13 @@ contract Ticket is ERC721, ERC721Enumerable, AccessControl, ReentrancyGuard, ITi
     // FIX: track organizer per event for safer controls.
     // We set it on first mintBatch (to == organizer receiving initial inventory).
     mapping(uint256 => address) public eventOrganizer;
+
+    event TicketRefundClaimed(
+        uint256 indexed tokenId,
+        uint256 indexed eventId,
+        address indexed owner,
+        uint256 amount
+    );
 
     // FIX: allow admin to wire Fund contract.
     function setFundContract(address fund) external onlyRole(DEFAULT_ADMIN_ROLE) {
@@ -90,11 +99,7 @@ contract Ticket is ERC721, ERC721Enumerable, AccessControl, ReentrancyGuard, ITi
         returns (uint256[] memory)
     {
         // FIX: allow Fund.sol to mint by setting Ticket.fundContract == Fund address.
-        if (
-            msg.sender != fundContract &&
-            !hasRole(ORGANIZER_ROLE, msg.sender) &&
-            !hasRole(DEFAULT_ADMIN_ROLE, msg.sender)
-        ) {
+        if (msg.sender != fundContract && !hasRole(DEFAULT_ADMIN_ROLE, msg.sender)) {
             revert InvalidTicketStatus();
         }
         if (to == address(0)) revert ZeroAddress();
@@ -111,6 +116,12 @@ contract Ticket is ERC721, ERC721Enumerable, AccessControl, ReentrancyGuard, ITi
         // FIX: register organizer on first mint, and enforce consistency afterwards.
         if (eventOrganizer[eventId] == address(0)) {
             eventOrganizer[eventId] = to;
+
+            // FIX: ensure the organizer can sell inventory without extra off-chain role ops.
+            // This prevents accidental "tickets can't be sold" situations.
+            if (!hasRole(ORGANIZER_ROLE, to)) {
+                _grantRole(ORGANIZER_ROLE, to);
+            }
         } else if (eventOrganizer[eventId] != to) {
             revert InvalidTicketStatus();
         }
@@ -172,8 +183,8 @@ contract Ticket is ERC721, ERC721Enumerable, AccessControl, ReentrancyGuard, ITi
         _eventTickets[ticket.eventId].totalSold += 1;
         _eventTickets[ticket.eventId].totalRevenue += ticket.price;
 
-        // FIX (critical): prevent involuntary sale if a "Minted" ticket was transferred away from organizer.
-        // Only allow primary purchase from an address that has ORGANIZER_ROLE (inventory holder).
+        // FIX (critical): only allow primary purchase from an authorized inventory holder.
+        // This prevents "Minted" tickets transferred to random wallets from being force-sold.
         address seller = ownerOf(tokenId);
         if (!hasRole(ORGANIZER_ROLE, seller)) revert InvalidTicketStatus();
 
@@ -193,6 +204,28 @@ contract Ticket is ERC721, ERC721Enumerable, AccessControl, ReentrancyGuard, ITi
         }
 
         emit TicketPurchased(tokenId, ticket.eventId, msg.sender, ticket.price);
+    }
+
+    /// @notice Ticket owner claims a refund when Fund has refunds enabled for the event.
+    /// @dev Calls into Fund (onlyTicket on Fund side) then marks status as Refunded.
+    function claimRefund(uint256 tokenId) external nonReentrant {
+        if (fundContract == address(0)) revert FundNotSet();
+
+        TicketInfo storage ticket = _tickets[tokenId];
+        if (ticket.status != TicketStatus.Sold) revert InvalidTicketStatus();
+
+        address owner = ownerOf(tokenId);
+        if (owner != msg.sender) revert InvalidTicketStatus();
+
+        // Fund enforces refundsEnabled + pool sufficiency.
+        // If Fund reverts, this function will revert and ticket stays Sold.
+        IFund(fundContract).claimTicketRefund(ticket.eventId, tokenId, owner);
+
+        ticket.status = TicketStatus.Refunded;
+
+        // FIX: emit interface event for off-chain indexing.
+        emit TicketRefunded(tokenId, ticket.eventId, owner, ticket.price);
+        emit TicketRefundClaimed(tokenId, ticket.eventId, owner, ticket.price);
     }
 
     // ------ Usage functions ------
@@ -300,7 +333,6 @@ contract Ticket is ERC721, ERC721Enumerable, AccessControl, ReentrancyGuard, ITi
     }
 
     /// @inheritdoc ITicket
-    // TODO: change this logic after implementing refund and expiration
     function isTransferable(uint256 tokenId) external view override returns (bool) {
         // FIX (blocker): Marketplace requires this to allow listing.
         // For resale marketplace, only allow listing if ticket was sold and not used/expired/refunded.
