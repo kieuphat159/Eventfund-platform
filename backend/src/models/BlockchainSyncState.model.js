@@ -14,7 +14,7 @@ const BlockchainSyncStateSchema = new mongoose.Schema(
     },
     errorMessage: { type: String },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 export const BlockchainSyncState =
