@@ -7,8 +7,14 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
+    "indexer:ticket": "node src/services/blockchain/indexers/ticket/run.js",
+    "indexer:fund": "node src/services/blockchain/indexers/fund/run.js",
+    "indexer:marketplace": "node src/services/blockchain/indexers/marketplace/run.js",
+    "processor:ticket": "node src/services/blockchain/processors/ticket/run.js",
+    "test:blockchain:connections": "node src/services/blockchain/test/connections/all.js",
     "test:mongo": "node src/config/testMongoDB.js",
-    "test:cloudinary": "node src/config/testCloudinary.js"
+    "test:cloudinary": "node src/config/testCloudinary.js",
+    "seed": "node src/scripts/seed.js"
   },
   "keywords": [],
   "author": "",
@@ -16,7 +22,8 @@
   "dependencies": {
     "cloudinary": "^1.41.3",
     "cors": "^2.8.6",
-    "dotenv": "^17.2.3",
+    "dotenv": "^17.3.1",
+    "ethers": "^6.16.0",
     "eventfund-ticket-platform": "file:..",
     "express": "^5.2.1",
     "helmet": "^8.1.0",

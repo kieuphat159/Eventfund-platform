@@ -59,12 +59,25 @@ npm install --prefix contracts
 
 ### 3. Cấu hình môi trường
 
-Tạo file `.env` trong thư mục `backend/`:
+Tạo file `.env` trong thư mục `backend/` (có thể copy từ `backend/.env.example`):
 
 ```env
-PORT=3000
-MONGODB_URI=mongodb://localhost:27017/eventfund
-REDIS_URL=redis://localhost:6379
+PORT=4000
+NODE_ENV=DEV
+
+MONGO_DEV_URI=mongodb+srv://...
+MONGO_PROD_URI=mongodb+srv://...
+
+CLOUDINARY_NAME=your_cloudinary_name
+CLOUDINARY_KEY=your_cloudinary_key
+CLOUDINARY_SECRET=your_cloudinary_secret
+
+RPC_URL=http://127.0.0.1:8545
+
+# get from hardhat deployment (deploy:all sẽ tự ghi 3 biến này)
+TICKET_ADDRESS=0x...
+FUND_ADDRESS=0x...
+MARKETPLACE_ADDRESS=0x...
 ```
 
 Tạo file `.env` trong thư mục `contracts/`:
@@ -89,16 +102,61 @@ npm run backend dev       # Backend tại http://localhost:3000
 ### Smart Contracts
 
 ```bash
-# Compile contracts
-npm run contracts compile
+# Chạy blockchain local (Hardhat node) - mở 1 terminal riêng
+npm run contracts chain
 
-# Chạy tests
-npm run contracts test
-
-# Deploy (local)
-npm run contracts node          # Chạy local node
-npm run contracts ignition deploy ./ignition/modules/Lock.js
+# Deploy cả 3 contracts (Ticket/Fund/Marketplace) lên localhost
+# - Contract nào lỗi sẽ không chặn contract còn lại
+# - Tự ghi TICKET_ADDRESS/FUND_ADDRESS/MARKETPLACE_ADDRESS vào backend/.env
+npm run contracts deploy:all
 ```
+
+### Local blockchain + backend (flow khuyến nghị)
+
+Terminal 1:
+
+```bash
+cd contracts
+npm run chain
+```
+
+Terminal 2:
+
+```bash
+cd contracts
+npm run deploy:all
+```
+
+Terminal 3:
+
+```bash
+cd backend
+npm run dev
+```
+
+Ghi chú:
+
+- Backend đọc address từ `backend/.env` (các biến: `TICKET_ADDRESS`, `FUND_ADDRESS`, `MARKETPLACE_ADDRESS`).
+- Backend được cấu hình để luôn load đúng `backend/.env` dù bạn chạy lệnh từ thư mục nào.
+
+### Blockchain utilities (backend)
+
+```bash
+# Test connection tới RPC + cả 3 contracts (non-blocking)
+npm run backend test:blockchain:connections
+
+# Chạy các indexer loop
+npm run backend indexer:ticket
+npm run backend indexer:fund
+npm run backend indexer:marketplace
+
+# Chạy ticket processor loop (build TicketEvent/TicketStats từ ChainLog)
+npm run backend processor:ticket
+```
+
+Tài liệu chi tiết (Indexer/Processor, reorg handling, env vars, data model):
+
+- `backend/docs/blockchain-indexing.md`
 
 ## Cấu trúc chi tiết
 
@@ -149,10 +207,11 @@ contracts/
 ## Testing
 
 ```bash
-# Backend tests
-npm run backend test
+# Backend
+npm run backend test:blockchain:connections
 
-# Contract tests
-npm run contracts test
+# Contracts (Hardhat)
+cd contracts
+npx hardhat test
 ```
 

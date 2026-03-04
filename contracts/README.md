@@ -17,3 +17,14 @@ REPORT_GAS=true npx hardhat test
 npx hardhat node
 npx hardhat ignition deploy ./ignition/modules/Lock.js
 ```
+
+## Local deploy (3 contracts)
+
+From this folder:
+
+```shell
+npm run chain
+npm run deploy:all
+```
+
+`deploy:all` will also upsert addresses into `../backend/.env`.
