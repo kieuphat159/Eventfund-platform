@@ -61,6 +61,34 @@ async function deployMarketplace(ticketAddress, fundAddress, royaltyBps) {
   return await marketplace.getAddress();
 }
 
+async function wireContracts({ ticketAddress, fundAddress, marketplaceAddress }) {
+  const confirmations = Number(process.env.DEPLOY_CONFIRMATIONS ?? 1);
+
+  // Ticket -> Fund (required for purchaseTicket)
+  {
+    const ticket = await hre.ethers.getContractAt("Ticket", ticketAddress);
+    const tx = await ticket.setFundContract(fundAddress);
+    await tx.wait(confirmations);
+    console.log("[wire] Ticket.setFundContract tx=", tx.hash);
+  }
+
+  // Fund -> Ticket (required for Fund.depositTicketRevenue onlyTicket)
+  {
+    const fund = await hre.ethers.getContractAt("Fund", fundAddress);
+    const tx = await fund.setTicketContract(ticketAddress);
+    await tx.wait(confirmations);
+    console.log("[wire] Fund.setTicketContract tx=", tx.hash);
+  }
+
+  // Fund -> Marketplace (required for Fund.depositRoyalty onlyMarketplace)
+  {
+    const fund = await hre.ethers.getContractAt("Fund", fundAddress);
+    const tx = await fund.setMarketplaceContract(marketplaceAddress);
+    await tx.wait(confirmations);
+    console.log("[wire] Fund.setMarketplaceContract tx=", tx.hash);
+  }
+}
+
 async function main() {
   const envPaths = [
     // Hardhat project env
@@ -113,6 +141,9 @@ async function main() {
     console.log("ticketAddress=", ticketAddress);
     console.log("fundAddress=", fundAddress);
     console.log("royaltyBps=", royaltyBps);
+
+    // Wire contracts together so primary sale + royalty flows work end-to-end.
+    await wireContracts({ ticketAddress, fundAddress, marketplaceAddress });
   } catch (e) {
     console.error("[deployAll] Marketplace deploy failed:", e);
   }
