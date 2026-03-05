@@ -84,6 +84,7 @@ Tạo file `.env` trong thư mục `contracts/`:
 
 ```env
 PRIVATE_KEY=your_wallet_private_key
+SEPOLIA_RPC_URL=https://...
 ```
 
 ## Chạy ứng dụng
@@ -110,6 +111,17 @@ npm run contracts chain
 # - Tự ghi TICKET_ADDRESS/FUND_ADDRESS/MARKETPLACE_ADDRESS vào backend/.env
 npm run contracts deploy:all
 ```
+
+### Deploy Sepolia testnet
+
+Từ thư mục gốc:
+
+```bash
+# đảm bảo contracts/.env có PRIVATE_KEY và SEPOLIA_RPC_URL
+npm run contracts deploy:sepolia
+```
+
+Chi tiết (các biến env optional, wiring tự động Ticket/Fund/Marketplace, upsert vào backend/.env): xem `contracts/README.md`.
 
 ### Local blockchain + backend (flow khuyến nghị)
 
