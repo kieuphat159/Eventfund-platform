@@ -1,49 +1,39 @@
 import * as ListingRepo from '../../repositories/listing.repo.js';
 import * as TicketRepo from '../../repositories/ticket.repo.js';
+import { multiplyBigInt, divideBigInt, toBigInt } from '../../utils/bigint.js';
+import { NotFoundError, ForbiddenError, BadRequestError } from '../../utils/customErrors.js';
 
 /**
  * Get marketplace listings with filters and pagination
- * @param {Object} filters - Query filters
- * @param {Object} pagination - Pagination options
+ * @param {Object} query - Query parameters from request
  * @param {Object} repositories - Injected repositories (for testing)
  * @returns {Promise<Object>} Paginated listings
  */
-export async function getListings(filters = {}, pagination = {}, repositories = {}) {
+export async function getListings(query = {}, repositories = {}) {
   const listingRepo = repositories.listing || ListingRepo;
-  const query = {};
 
-  // Apply filters
-  if (filters.eventId) {
-    query.eventId = filters.eventId;
-  }
-  if (filters.status) {
-    query.status = filters.status;
-  } else {
-    // Default to active listings only
-    query.status = 'active';
-  }
+  const { eventId, status, minPrice, maxPrice, page, limit, sort } = query;
 
-  // Price range filter
-  if (filters.minPrice || filters.maxPrice) {
-    query.price = {};
-    if (filters.minPrice) {
-      query.price.$gte = filters.minPrice;
+  const dbQuery = {
+    ...(eventId && { eventId }),
+    ...(status ? { status } : { status: 'active' }),
+    ...(minPrice || maxPrice) && {
+      price: {
+        ...(minPrice && { $gte: minPrice }),
+        ...(maxPrice && { $lte: maxPrice })
+      }
     }
-    if (filters.maxPrice) {
-      query.price.$lte = filters.maxPrice;
-    }
-  }
+  };
 
-  // Pagination options
   const options = {
-    page: pagination.page || 1,
-    limit: Math.min(pagination.limit || 20, 100),
-    sort: pagination.sort || '-listedAt',
+    page: page || 1,
+    limit: Math.min(limit || 20, 100),
+    sort: sort || '-listedAt',
     lean: true,
     populate: 'ticketId eventId'
   };
 
-  return await listingRepo.findListings(query, options, repositories.models);
+  return await listingRepo.findListings(dbQuery, options, repositories.models);
 }
 
 /**
@@ -60,39 +50,9 @@ export async function getListingById(listingId, repositories = {}) {
     repositories.models
   );
 
-  if (!listing) {
-    return null;
-  }
+  if (!listing) throw new NotFoundError('Listing not found');
 
-  // Convert to JSON to handle BigInt serialization
-  const listingJson = typeof listing.toJSON === 'function' ? listing.toJSON() : listing;
-
-  // Also convert populated ticket's BigInt fields
-  if (listingJson.ticketId && typeof listingJson.ticketId === 'object') {
-    if (listingJson.ticketId.originalPrice) {
-      listingJson.ticketId.originalPrice = listingJson.ticketId.originalPrice.toString();
-    }
-    if (listingJson.ticketId.transferHistory) {
-      listingJson.ticketId.transferHistory = listingJson.ticketId.transferHistory.map(transfer => {
-        if (transfer.price) {
-          transfer.price = transfer.price.toString();
-        }
-        return transfer;
-      });
-    }
-  }
-
-  // Convert populated event's BigInt fields
-  if (listingJson.eventId && typeof listingJson.eventId === 'object') {
-    const bigIntFields = ['organizerStake', 'minStakeRequired', 'fundingGoal', 'currentFunding', 'totalRevenue'];
-    bigIntFields.forEach(field => {
-      if (listingJson.eventId[field] !== undefined && listingJson.eventId[field] !== null) {
-        listingJson.eventId[field] = listingJson.eventId[field].toString();
-      }
-    });
-  }
-
-  return listingJson;
+  return listing;
 }
 
 /**
@@ -106,50 +66,41 @@ export async function createListing(listingData, sellerWallet, repositories = {}
   const listingRepo = repositories.listing || ListingRepo;
   const ticketRepo = repositories.ticket || TicketRepo;
 
-  // Get ticket using repository - find by _id
-  const ticket = await ticketRepo.findById(listingData.ticketId, { lean: false }, repositories.models);
+  const { ticketId, price, expiresAt } = listingData;
 
-  if (!ticket) {
-    throw new Error('Ticket not found');
-  }
+  const ticket = await ticketRepo.findById(ticketId, { lean: false }, repositories.models);
+  if (!ticket) throw new NotFoundError('Ticket not found');
 
-  // Validate ownership
   if (ticket.currentOwner.toLowerCase() !== sellerWallet.toLowerCase()) {
-    throw new Error('Not authorized to list this ticket');
+    throw new ForbiddenError('Not authorized to list this ticket');
   }
 
-  // Validate ticket status
   if (ticket.status !== 'sold') {
-    throw new Error('Ticket must be in sold status to be listed');
+    throw new BadRequestError('Ticket must be in sold status to be listed');
   }
 
-  // Check if already listed
   if (ticket.isListed) {
-    throw new Error('Ticket is already listed');
+    throw new BadRequestError('Ticket is already listed');
   }
 
-  // Calculate max price (1.5x original price - anti-speculation)
-  const maxPrice = (ticket.originalPrice * 15n) / 10n;
+  const maxPrice = divideBigInt(multiplyBigInt(ticket.originalPrice, "15"), "10");
 
-  // Validate price cap
-  if (listingData.price > maxPrice) {
-    throw new Error(`Price exceeds maximum allowed (${maxPrice.toString()})`);
+  if (toBigInt(price) > toBigInt(maxPrice)) {
+    throw new BadRequestError(`Price exceeds maximum allowed (${maxPrice})`);
   }
 
-  // Create listing using repository
   const listing = await listingRepo.createListing({
     ticketId: ticket._id,
     tokenId: ticket.tokenId,
     eventId: ticket.eventId,
     seller: sellerWallet.toLowerCase(),
-    price: listingData.price,
+    price,
     maxPrice,
     status: 'active',
     listedAt: new Date(),
-    expiresAt: listingData.expiresAt
+    expiresAt: new Date(expiresAt)
   }, repositories.models);
 
-  // Update ticket using repository
   await ticketRepo.updateListingStatus(ticket._id, true, repositories.models);
 
   return listing;
@@ -167,22 +118,16 @@ export async function cancelListing(listingId, sellerWallet, repositories = {}) 
   const ticketRepo = repositories.ticket || TicketRepo;
 
   const listing = await listingRepo.findById(listingId, { lean: false }, repositories.models);
+  if (!listing) throw new NotFoundError('Listing not found');
 
-  if (!listing) {
-    throw new Error('Listing not found');
-  }
-
-  // Validate seller
   if (listing.seller.toLowerCase() !== sellerWallet.toLowerCase()) {
-    throw new Error('Not authorized to cancel this listing');
+    throw new ForbiddenError('Not authorized to cancel this listing');
   }
 
-  // Validate status
   if (listing.status !== 'active') {
-    throw new Error('Listing is not active');
+    throw new BadRequestError('Listing is not active');
   }
 
-  // Update listing using repository
   const updatedListing = await listingRepo.updateStatus(
     listingId,
     'cancelled',
@@ -190,7 +135,6 @@ export async function cancelListing(listingId, sellerWallet, repositories = {}) 
     repositories.models
   );
 
-  // Update ticket using repository
   await ticketRepo.updateListingStatus(listing.ticketId, false, repositories.models);
 
   return updatedListing;
@@ -207,10 +151,7 @@ export async function updateListingStatus(listingId, status, repositories = {}) 
   const listingRepo = repositories.listing || ListingRepo;
 
   const listing = await listingRepo.findById(listingId, { lean: false }, repositories.models);
-
-  if (!listing) {
-    throw new Error('Listing not found');
-  }
+  if (!listing) throw new NotFoundError('Listing not found');
 
   return await listingRepo.updateStatus(listingId, status, {}, repositories.models);
 }
@@ -231,9 +172,9 @@ export async function getMarketplaceStats(repositories = {}) {
     activeListings: stats.active || 0,
     soldListings: stats.sold || 0,
     cancelledListings: stats.cancelled || 0,
-    totalVolume: stats.totalVolume || 0n,
+    totalVolume: stats.totalVolume || "0",
     averagePrice: stats.active > 0 && stats.totalVolume
-      ? stats.totalVolume / BigInt(stats.active)
-      : 0n
+      ? divideBigInt(stats.totalVolume, String(stats.active))
+      : "0"
   };
 }

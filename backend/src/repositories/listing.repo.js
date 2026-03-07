@@ -153,20 +153,12 @@ export async function deleteById(listingId, models = {}) {
 export async function getMarketplaceStats(models = {}) {
   const Listing = models.Listing || DefaultListing;
 
+  // Đếm số lượng theo status
   const stats = await Listing.aggregate([
     {
       $group: {
         _id: '$status',
-        count: { $sum: 1 },
-        totalVolume: {
-          $sum: {
-            $cond: [
-              { $eq: ['$status', 'sold'] },
-              { $toLong: '$price' },
-              0
-            ]
-          }
-        }
+        count: { $sum: 1 }
       }
     }
   ]);
@@ -178,16 +170,63 @@ export async function getMarketplaceStats(models = {}) {
     sold: 0,
     cancelled: 0,
     expired: 0,
-    totalVolume: 0n
+    totalVolume: "0" // String để lưu BigInt
   };
 
   stats.forEach(stat => {
     result[stat._id] = stat.count;
     result.total += stat.count;
-    if (stat._id === 'sold' && stat.totalVolume) {
-      result.totalVolume = BigInt(stat.totalVolume);
+  });
+
+  // Tính totalVolume bằng BigInt để tránh overflow
+  // Fetch tất cả listings đã sold và tính tổng bằng BigInt
+  const soldListings = await Listing.find({ status: 'sold' }).select('price').lean();
+
+  let totalVolumeBigInt = BigInt(0);
+  soldListings.forEach(listing => {
+    if (listing.price) {
+      // Chuyển price sang BigInt (price có thể là string hoặc number)
+      const priceBigInt = typeof listing.price === 'string'
+        ? BigInt(listing.price)
+        : BigInt(listing.price);
+      totalVolumeBigInt += priceBigInt;
     }
   });
 
+  // Lưu kết quả dưới dạng string
+  result.totalVolume = totalVolumeBigInt.toString();
+
   return result;
+}
+
+/**
+ * Count listings by query
+ * @param {Object} query - Query filters
+ * @param {Object} models - Injected models (optional)
+ * @returns {Promise<number>} Count
+ */
+export async function countListings(query = {}, models = {}) {
+  const Listing = models.Listing || DefaultListing;
+  return await Listing.countDocuments(query);
+}
+
+/**
+ * Get listing statistics (total, active, sold)
+ * @param {Object} models - Injected models (optional)
+ * @returns {Promise<Object>} Listing stats with total, active, sold counts
+ */
+export async function getListingStats(models = {}) {
+  const Listing = models.Listing || DefaultListing;
+
+  const [total, active, sold] = await Promise.all([
+    Listing.countDocuments(),
+    Listing.countDocuments({ status: 'active' }),
+    Listing.countDocuments({ status: 'sold' })
+  ]);
+
+  return {
+    total,
+    active,
+    sold
+  };
 }

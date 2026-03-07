@@ -37,12 +37,12 @@ const marketplaceController = new MarketplaceController();
  *         name: minPrice
  *         schema:
  *           type: string
- *         description: Minimum price filter (BigInt string)
+ *         description: Minimum price filter (string representation of wei amount)
  *       - in: query
  *         name: maxPrice
  *         schema:
  *           type: string
- *         description: Maximum price filter (BigInt string)
+ *         description: Maximum price filter (string representation of wei amount)
  *       - in: query
  *         name: page
  *         schema:
@@ -101,6 +101,7 @@ const marketplaceController = new MarketplaceController();
  *                             type: string
  *                           price:
  *                             type: string
+ *                             description: Listing price (string representation of wei amount)
  *                           status:
  *                             type: string
  *                           listedAt:
@@ -164,8 +165,10 @@ router.get('/listings', validate({ query: marketplaceSchemas.queryListings }), (
  *                       type: string
  *                     price:
  *                       type: string
+ *                       description: Listing price (string representation of wei amount)
  *                     maxPrice:
  *                       type: string
+ *                       description: Maximum allowed price (string representation of wei amount)
  *                     status:
  *                       type: string
  *                     listedAt:
@@ -205,7 +208,7 @@ router.get('/listings/:id', (req, res, next) => marketplaceController.getListing
  *                 description: ID of the ticket to list
  *               price:
  *                 type: string
- *                 description: Listing price (BigInt string, max 1.5x original price)
+ *                 description: Listing price (string representation of wei amount, max 1.5x original price)
  *                 example: "1000000000000000000"
  *               expiresAt:
  *                 type: string
@@ -321,10 +324,10 @@ router.delete('/listings/:id', authenticate, (req, res, next) => marketplaceCont
  *                       description: Total number of completed sales
  *                     totalVolume:
  *                       type: string
- *                       description: Total sales volume (BigInt string)
+ *                       description: Total sales volume (string representation of wei amount)
  *                     averagePrice:
  *                       type: string
- *                       description: Average listing price (BigInt string)
+ *                       description: Average listing price (string representation of wei amount)
  *                     listingsByEvent:
  *                       type: array
  *                       items:
