@@ -4,6 +4,7 @@ import { authenticate } from '../middlewares/auth.middleware.js';
 import { requireOrganizer } from '../middlewares/roles.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
 import { eventSchemas } from '../validators/event.validator.js';
+import { uploadEventImages, validateMultipleImages } from '../middlewares/image.middleware.js';
 
 const router = express.Router();
 const controller = new EventsController();
@@ -70,7 +71,7 @@ const controller = new EventsController();
  *       500:
  *         description: Server error
  */
-router.get('/', validate({ query: eventSchemas.queryEvents }), (req, res, next) => controller.getEvents(req, res, next));
+router.get('/', validate({ query: eventSchemas.queryEvents }), controller.getEvents);
 
 /**
  * @swagger
@@ -106,9 +107,11 @@ router.get('/', validate({ query: eventSchemas.queryEvents }), (req, res, next) 
  *                 example: "conference"
  *               fundingGoal:
  *                 type: string
+ *                 description: Funding goal amount (string representation of wei amount)
  *                 example: "5000000000000000000"
  *               minStakeRequired:
  *                 type: string
+ *                 description: Minimum stake required (string representation of wei amount)
  *                 example: "1000000000000000000"
  *               fundingDeadline:
  *                 type: string
@@ -134,17 +137,9 @@ router.get('/', validate({ query: eventSchemas.queryEvents }), (req, res, next) 
  *                   address:
  *                     type: string
  *                     example: "123 Innovation Drive"
- *                   city:
- *                     type: string
- *                     example: "San Francisco"
- *                   country:
- *                     type: string
- *                     example: "USA"
  *                 example:
  *                   name: "Tech Convention Center"
  *                   address: "123 Innovation Drive"
- *                   city: "San Francisco"
- *                   country: "USA"
  *           example:
  *             title: "Web3 Developer Conference 2026"
  *             description: "Annual conference for blockchain developers and Web3 enthusiasts"
@@ -158,8 +153,6 @@ router.get('/', validate({ query: eventSchemas.queryEvents }), (req, res, next) 
  *             venue:
  *               name: "Tech Convention Center"
  *               address: "123 Innovation Drive"
- *               city: "San Francisco"
- *               country: "USA"
  *     responses:
  *       201:
  *         description: Event created successfully
@@ -172,7 +165,7 @@ router.get('/', validate({ query: eventSchemas.queryEvents }), (req, res, next) 
  *       500:
  *         description: Server error
  */
-router.post('/', authenticate, requireOrganizer, validate({ body: eventSchemas.createEvent }), (req, res, next) => controller.createEvent(req, res, next));
+router.post('/', authenticate, requireOrganizer, uploadEventImages, validateMultipleImages, validate({ body: eventSchemas.createEvent }), controller.createEvent);
 
 /**
  * @swagger
@@ -196,7 +189,7 @@ router.post('/', authenticate, requireOrganizer, validate({ body: eventSchemas.c
  *       500:
  *         description: Server error
  */
-router.get('/:id', (req, res, next) => controller.getEventById(req, res, next));
+router.get('/:id', controller.getEventById);
 
 /**
  * @swagger
@@ -237,15 +230,9 @@ router.get('/:id', (req, res, next) => controller.getEventById(req, res, next));
  *                     type: string
  *                   address:
  *                     type: string
- *                   city:
- *                     type: string
- *                   country:
- *                     type: string
  *                 example:
  *                   name: "New Convention Center"
  *                   address: "456 Tech Boulevard"
- *                   city: "San Francisco"
- *                   country: "USA"
  *           example:
  *             title: "Web3 Developer Conference 2026 - Updated"
  *             description: "Updated description with more details about speakers and workshops"
@@ -253,8 +240,6 @@ router.get('/:id', (req, res, next) => controller.getEventById(req, res, next));
  *             venue:
  *               name: "New Convention Center"
  *               address: "456 Tech Boulevard"
- *               city: "San Francisco"
- *               country: "USA"
  *     responses:
  *       200:
  *         description: Event updated successfully
@@ -269,7 +254,7 @@ router.get('/:id', (req, res, next) => controller.getEventById(req, res, next));
  *       500:
  *         description: Server error
  */
-router.patch('/:id', authenticate, requireOrganizer, validate({ body: eventSchemas.updateEvent }), (req, res, next) => controller.updateEvent(req, res, next));
+router.patch('/:id', authenticate, requireOrganizer, uploadEventImages, validateMultipleImages, validate({ body: eventSchemas.updateEvent }), controller.updateEvent);
 
 /**
  * @swagger
@@ -301,7 +286,44 @@ router.patch('/:id', authenticate, requireOrganizer, validate({ body: eventSchem
  *       500:
  *         description: Server error
  */
-router.delete('/:id', authenticate, requireOrganizer, (req, res, next) => controller.deleteEvent(req, res, next));
+router.delete('/:id', authenticate, requireOrganizer, controller.deleteEvent);
+
+/**
+ * @swagger
+ * /events/{id}/images/{imageUrl}:
+ *   delete:
+ *     summary: Delete a specific image from an event
+ *     tags: [Events]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Event ID
+ *         example: "507f1f77bcf86cd799439011"
+ *       - in: path
+ *         name: imageUrl
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: URL-encoded image URL to delete
+ *         example: "https%3A%2F%2Fres.cloudinary.com%2Fdemo%2Fimage%2Fupload%2Fv123%2Fevents%2F123%2Fimage.jpg"
+ *     responses:
+ *       200:
+ *         description: Image deleted successfully
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Not authorized (requires organizer role and ownership)
+ *       404:
+ *         description: Event or image not found
+ *       500:
+ *         description: Server error
+ */
+router.delete('/:id/images/:imageUrl', authenticate, requireOrganizer, controller.deleteEventImage);
 
 /**
  * @swagger
@@ -325,6 +347,6 @@ router.delete('/:id', authenticate, requireOrganizer, (req, res, next) => contro
  *       500:
  *         description: Server error
  */
-router.get('/:id/stats', (req, res, next) => controller.getEventStats(req, res, next));
+router.get('/:id/stats', controller.getEventStats);
 
 export default router;

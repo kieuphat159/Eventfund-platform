@@ -1,75 +1,67 @@
-import * as eventRepo from '../repositories/event.repo.js';
+import * as eventRepo from '../../repositories/event.repo.js';
+import { compareBigInt, toBigInt } from '../../utils/bigint.js';
+import { NotFoundError, ForbiddenError, BadRequestError } from '../../utils/customErrors.js';
+import UploadService from '../upload/upload.service.js';
+
+// Default upload service instance (lazy initialization for future use)
+let defaultUploadService = null;
+function getDefaultUploadService() {
+  if (!defaultUploadService) {
+    defaultUploadService = new UploadService();
+  }
+  return defaultUploadService;
+}
 
 /**
  * Create a new event in draft status
  * @param {Object} eventData - Event data
- * @param {string} organizerWallet - Organizer wallet address
+ * @param {Object} user - User object with walletAddress and role
  * @param {Object} repos - Injected repositories (for testing)
  * @returns {Promise<Object>} Created event
  */
-export async function createEvent(eventData, organizerWallet, repos = {}) {
+export async function createEvent(eventData, user, repos = {}) {
   const repository = repos.eventRepo || eventRepo;
-
-  console.log('[createEvent service] Starting...');
-  console.log('[createEvent service] Organizer:', organizerWallet);
-  console.log('[createEvent service] Event data:', eventData);
-
-  // Validate organizer wallet format
-  if (!organizerWallet || !/^0x[a-fA-F0-9]{40}$/.test(organizerWallet)) {
-    throw new Error('Invalid organizer wallet address');
-  }
-
-  // Validate funding goal is positive
-  if (eventData.fundingGoal && eventData.fundingGoal <= 0n) {
-    throw new Error('Funding goal must be positive');
-  }
 
   // Create event with draft status
   const event = await repository.createEvent({
     ...eventData,
-    organizer: organizerWallet.toLowerCase(),
+    organizer: user.walletAddress.toLowerCase(),
     status: 'draft',
-    currentFunding: 0n,
+    currentFunding: "0",
     ticketsSold: 0,
     totalTicketsUsed: 0
   });
-
-  console.log('[createEvent service] Event saved:', event);
 
   return event;
 }
 
 /**
  * Get events with filters, pagination, and sorting
- * @param {Object} filters - Query filters
- * @param {Object} pagination - Pagination options
+ * @param {Object} query - Query parameters from request
  * @param {Object} repos - Injected repositories (for testing)
  * @returns {Promise<Object>} Paginated events
  */
-export async function getEvents(filters = {}, pagination = {}, repos = {}) {
+export async function getEvents(query = {}, repos = {}) {
   const repository = repos.eventRepo || eventRepo;
-  const query = {};
 
-  // Apply filters
-  if (filters.status) {
-    query.status = filters.status;
-  }
-  if (filters.category) {
-    query.category = filters.category;
-  }
-  if (filters.organizer) {
-    query.organizer = filters.organizer.toLowerCase();
-  }
+  const { status, category, organizer, page, limit, sort } = query;
 
-  // Pagination options
+  // Build query with short-circuiting
+  const dbQuery = {
+    ...(status && { status }),
+    ...(category && { category }),
+    ...(organizer && { organizer: organizer.toLowerCase() })
+  };
+
+  // Pagination options with defaults
   const options = {
-    page: pagination.page || 1,
-    limit: Math.min(pagination.limit || 20, 100),
-    sort: pagination.sort || '-createdAt',
+    page: page ? parseInt(page, 10) : 1,
+    limit: Math.min(limit ? parseInt(limit, 10) : 20, 100),
+    sort: sort || '-createdAt',
     lean: true
   };
 
-  return await repository.findEvents(query, options);
+  return await repository.findEvents(dbQuery, options);
 }
 
 /**
@@ -81,69 +73,104 @@ export async function getEvents(filters = {}, pagination = {}, repos = {}) {
 export async function getEventById(eventId, repos = {}) {
   const repository = repos.eventRepo || eventRepo;
 
-  // Repository already returns plain object or null
-  return await repository.findById(eventId);
+  const event = await repository.findById(eventId);
+
+  if (!event) {
+    throw new NotFoundError('Event not found');
+  }
+
+  return event;
 }
 
 /**
  * Update event
  * @param {string} eventId - Event ID
  * @param {Object} updates - Updates to apply
- * @param {string} userWallet - User wallet address
+ * @param {Object} user - User object with walletAddress
  * @param {Object} repos - Injected repositories (for testing)
  * @returns {Promise<Object>} Updated event
  */
-export async function updateEvent(eventId, updates, userWallet, repos = {}) {
+export async function updateEvent(eventId, updates, user, repos = {}) {
   const repository = repos.eventRepo || eventRepo;
+
   const event = await repository.findById(eventId);
 
   if (!event) {
-    throw new Error('Event not found');
+    throw new NotFoundError('Event not found');
   }
 
   // Check authorization
-  if (event.organizer.toLowerCase() !== userWallet.toLowerCase()) {
-    throw new Error('Not authorized to update this event');
+  if (event.organizer.toLowerCase() !== user.walletAddress.toLowerCase()) {
+    throw new ForbiddenError('Not authorized to update this event');
   }
 
-  // Prevent changing organizer
-  if (updates.organizer) {
-    delete updates.organizer;
-  }
+  // Allowlist: only allow specific fields to be updated
+  const allowedFields = [
+    'title',
+    'description',
+    'category',
+    'startDate',
+    'endDate',
+    'venue',
+    'imageUrls',
+    'metadataUri',
+    'totalTickets',
+    'ticketUsageThreshold'
+  ];
+
+  const sanitizedUpdates = {};
+  allowedFields.forEach(field => {
+    if (updates[field] !== undefined) {
+      sanitizedUpdates[field] = updates[field];
+    }
+  });
 
   // Prevent changing funding goal after funding starts
   if (updates.fundingGoal && event.status !== 'draft') {
-    throw new Error('Cannot change funding goal after funding starts');
+    throw new BadRequestError('Cannot change funding goal after funding starts');
   }
 
   // Apply updates
-  const updatedEvent = await repository.updateById(eventId, updates);
+  const updatedEvent = await repository.updateById(eventId, sanitizedUpdates);
   return updatedEvent;
 }
 
 /**
  * Delete event (only draft events)
  * @param {string} eventId - Event ID
- * @param {string} userWallet - User wallet address
+ * @param {Object} user - User object with walletAddress
  * @param {Object} repos - Injected repositories (for testing)
+ * @param {Object} uploadSvc - Upload service for deleting images (for testing)
  * @returns {Promise<boolean>} Success status
  */
-export async function deleteEvent(eventId, userWallet, repos = {}) {
+export async function deleteEvent(eventId, user, repos = {}, uploadSvc = null) {
   const repository = repos.eventRepo || eventRepo;
+  const uploader = uploadSvc || getDefaultUploadService();
+
   const event = await repository.findById(eventId);
 
   if (!event) {
-    throw new Error('Event not found');
+    throw new NotFoundError('Event not found');
   }
 
   // Check authorization
-  if (event.organizer.toLowerCase() !== userWallet.toLowerCase()) {
-    throw new Error('Not authorized to delete this event');
+  if (event.organizer.toLowerCase() !== user.walletAddress.toLowerCase()) {
+    throw new ForbiddenError('Not authorized to delete this event');
   }
 
   // Only allow deleting draft events
   if (event.status !== 'draft') {
-    throw new Error('Only draft events can be deleted');
+    throw new BadRequestError('Only draft events can be deleted');
+  }
+
+  // Delete all event images from Cloudinary before deleting the event
+  if (event.imageUrls && event.imageUrls.length > 0) {
+    try {
+      await uploader.deleteMultipleImages(event.imageUrls);
+    } catch (error) {
+      // Log error but don't fail event deletion
+      console.error('Failed to delete event images from Cloudinary:', error);
+    }
   }
 
   return await repository.deleteById(eventId);
@@ -160,12 +187,12 @@ export async function getEventStats(eventId, repos = {}) {
   const event = await repository.findById(eventId);
 
   if (!event) {
-    return null;
+    throw new NotFoundError('Event not found');
   }
 
   // Calculate funding progress
-  const fundingProgress = event.fundingGoal > 0n
-    ? Number((event.currentFunding * 100n) / event.fundingGoal)
+  const fundingProgress = toBigInt(event.fundingGoal) > toBigInt("0")
+    ? Number((toBigInt(event.currentFunding) * toBigInt("100")) / toBigInt(event.fundingGoal))
     : 0;
 
   // Calculate ticket availability
@@ -217,9 +244,53 @@ export async function updateFundingStatus(eventId, fundingData, repos = {}) {
     ? fundingData.currentFunding
     : event.currentFunding;
 
-  if (newFunding >= event.fundingGoal && event.status === 'funding') {
+  if (compareBigInt(newFunding, event.fundingGoal) >= 0 && event.status === 'funding') {
     updates.status = 'funded';
   }
 
   return await repository.updateFundingStatus(eventId, updates);
+}
+
+/**
+ * Delete a specific image from an event
+ * @param {string} eventId - Event ID
+ * @param {string} imageUrl - Image URL to delete
+ * @param {Object} user - User object with walletAddress
+ * @param {Object} repos - Injected repositories (for testing)
+ * @param {Object} uploadSvc - Upload service for deleting images (for testing)
+ * @returns {Promise<Object>} Updated event
+ */
+export async function deleteEventImage(eventId, imageUrl, user, repos = {}, uploadSvc = null) {
+  const repository = repos.eventRepo || eventRepo;
+  const uploader = uploadSvc || getDefaultUploadService();
+
+  const event = await repository.findById(eventId);
+
+  if (!event) {
+    throw new NotFoundError('Event not found');
+  }
+
+  // Check authorization
+  if (event.organizer.toLowerCase() !== user.walletAddress.toLowerCase()) {
+    throw new ForbiddenError('Not authorized to modify this event');
+  }
+
+  // Check if image exists in event
+  if (!event.imageUrls || !event.imageUrls.includes(imageUrl)) {
+    throw new NotFoundError('Image not found in event');
+  }
+
+  // Delete image from Cloudinary
+  try {
+    await uploader.deleteImage(imageUrl);
+  } catch (error) {
+    console.error('Failed to delete image from Cloudinary:', error);
+    // Continue with database update even if Cloudinary deletion fails
+  }
+
+  // Remove image URL from event
+  const updatedImageUrls = event.imageUrls.filter(url => url !== imageUrl);
+  const updatedEvent = await repository.updateById(eventId, { imageUrls: updatedImageUrls });
+
+  return updatedEvent;
 }

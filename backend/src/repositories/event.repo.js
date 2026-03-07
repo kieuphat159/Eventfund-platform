@@ -10,7 +10,7 @@ export async function createEvent(eventData, models = {}) {
   const Event = models.Event || DefaultEvent;
   const event = new Event(eventData);
   await event.save();
-  return event.toObject();
+  return event.toObject(); // Cần toObject() vì đây là document mới tạo
 }
 
 /**
@@ -21,8 +21,7 @@ export async function createEvent(eventData, models = {}) {
  */
 export async function findById(eventId, models = {}) {
   const Event = models.Event || DefaultEvent;
-  const event = await Event.findById(eventId);
-  return event ? event.toObject() : null;
+  return await Event.findById(eventId).lean();
 }
 
 /**
@@ -55,12 +54,11 @@ export async function findEvents(query, options, models = {}) {
  */
 export async function updateById(eventId, updates, models = {}) {
   const Event = models.Event || DefaultEvent;
-  const event = await Event.findByIdAndUpdate(
+  return await Event.findByIdAndUpdate(
     eventId,
     updates,
-    { new: true, runValidators: true }
+    { new: true, runValidators: true, lean: true }
   );
-  return event ? event.toObject() : null;
 }
 
 /**
@@ -84,12 +82,11 @@ export async function deleteById(eventId, models = {}) {
  */
 export async function updateFundingStatus(eventId, fundingData, models = {}) {
   const Event = models.Event || DefaultEvent;
-  const event = await Event.findByIdAndUpdate(
+  return await Event.findByIdAndUpdate(
     eventId,
     fundingData,
-    { new: true, runValidators: true }
+    { new: true, runValidators: true, lean: true }
   );
-  return event ? event.toObject() : null;
 }
 
 /**
@@ -112,10 +109,52 @@ export async function incrementTicketCounters(eventId, increments, models = {}) 
     updateOperation.$inc.totalTicketsUsed = increments.totalTicketsUsed;
   }
 
-  const event = await Event.findByIdAndUpdate(
+  return await Event.findByIdAndUpdate(
     eventId,
     updateOperation,
-    { new: true, runValidators: true }
+    { new: true, runValidators: true, lean: true }
   );
-  return event ? event.toObject() : null;
+}
+
+/**
+ * Count events by query
+ * @param {Object} query - Query filters
+ * @param {Object} models - Injected models (optional)
+ * @returns {Promise<number>} Count
+ */
+export async function countEvents(query = {}, models = {}) {
+  const Event = models.Event || DefaultEvent;
+  return await Event.countDocuments(query);
+}
+
+/**
+ * Aggregate revenue statistics
+ * @param {Object} models - Injected models (optional)
+ * @returns {Promise<Object>} Revenue stats with totalRevenue and totalFunding as strings
+ */
+export async function getRevenueStats(models = {}) {
+  const Event = models.Event || DefaultEvent;
+
+  // Lấy tất cả events với chỉ các trường cần thiết
+  const events = await Event.find({}, { totalRevenue: 1, currentFunding: 1 }).lean();
+
+  // Tính tổng bằng BigInt (vì totalRevenue và currentFunding là String để tránh sai số)
+  let totalRevenue = 0n;
+  let totalFunding = 0n;
+
+  for (const event of events) {
+    if (event.totalRevenue) {
+      totalRevenue += BigInt(event.totalRevenue);
+    }
+    if (event.currentFunding) {
+      totalFunding += BigInt(event.currentFunding);
+    }
+  }
+
+  // Chuyển lại thành String để lưu/trả về
+  return {
+    _id: null,
+    totalRevenue: totalRevenue.toString(),
+    totalFunding: totalFunding.toString()
+  };
 }
