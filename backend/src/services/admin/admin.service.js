@@ -2,8 +2,18 @@ import * as userRepo from '../../repositories/user.repo.js';
 import * as eventRepo from '../../repositories/event.repo.js';
 import * as ticketRepo from '../../repositories/ticket.repo.js';
 import * as listingRepo from '../../repositories/listing.repo.js';
-import { Event as DefaultEvent } from '../../models/index.js';
 import mongoose from 'mongoose';
+import UploadService from '../upload/upload.service.js';
+import { NotFoundError, BadRequestError } from '../../utils/customErrors.js';
+
+// Default upload service instance (lazy initialization for future use)
+let defaultUploadService = null;
+function getDefaultUploadService() {
+  if (!defaultUploadService) {
+    defaultUploadService = new UploadService();
+  }
+  return defaultUploadService;
+}
 
 /**
  * Get platform-wide statistics
@@ -16,53 +26,35 @@ export async function getPlatformStats(repos = {}) {
   const ticketRepository = repos.ticketRepo || ticketRepo;
   const listingRepository = repos.listingRepo || listingRepo;
 
-  // For aggregation, we need to use the Event model directly
-  const Event = repos.Event || DefaultEvent;
-
-  // User stats
-  const totalUsers = await userRepository.countUsers();
-  const organizers = await userRepository.countUsers({ role: 'organizer' });
-  const verifiers = await userRepository.countUsers({ role: 'verifier' });
-  const admins = await userRepository.countUsers({ role: 'admin' });
-
-  // Event stats - using countDocuments through model for now
-  // (repositories don't have a countEvents method)
-  const totalEvents = await Event.countDocuments();
-  const draftEvents = await Event.countDocuments({ status: 'draft' });
-  const fundingEvents = await Event.countDocuments({ status: 'funding' });
-  const activeEvents = await Event.countDocuments({ status: 'ongoing' });
-  const completedEvents = await Event.countDocuments({ status: 'completed' });
-  const cancelledEvents = await Event.countDocuments({ status: 'cancelled' });
-
-  // Ticket stats - using countDocuments through model for now
-  // (repositories don't have a countTickets method)
-  const Ticket = repos.Ticket || (await import('../models/index.js')).Ticket;
-  const totalTickets = await Ticket.countDocuments();
-  const soldTickets = await Ticket.countDocuments({ status: 'sold' });
-  const usedTickets = await Ticket.countDocuments({ status: 'used' });
-
-  // Listing stats - using countDocuments through model for now
-  // (repositories don't have a countListings method)
-  const Listing = repos.Listing || (await import('../models/index.js')).Listing;
-  const totalListings = await Listing.countDocuments();
-  const activeListings = await Listing.countDocuments({ status: 'active' });
-  const soldListings = await Listing.countDocuments({ status: 'sold' });
-
-  // Revenue stats - using aggregation through model
-  const revenueStats = await Event.aggregate([
-    {
-      $group: {
-        _id: null,
-        totalRevenue: { $sum: '$totalRevenue' },
-        totalFunding: { $sum: '$currentFunding' }
-      }
-    }
+  // Nhóm các Promise theo domain
+  const userStatsPromise = Promise.all([
+    userRepository.countUsers(),
+    userRepository.countUsers({ role: 'organizer' }),
+    userRepository.countUsers({ role: 'verifier' }),
+    userRepository.countUsers({ role: 'admin' })
   ]);
 
-  const revenue = revenueStats.length > 0 ? revenueStats[0] : {
-    totalRevenue: 0n,
-    totalFunding: 0n
-  };
+  const eventStatsPromise = Promise.all([
+    eventRepository.countEvents(),
+    eventRepository.countEvents({ status: 'draft' }),
+    eventRepository.countEvents({ status: 'funding' }),
+    eventRepository.countEvents({ status: 'ongoing' }),
+    eventRepository.countEvents({ status: 'completed' }),
+    eventRepository.countEvents({ status: 'cancelled' })
+  ]);
+
+  // Chạy các nhóm song song
+  const [userResults, eventResults, ticketStats, listingStats, revenueStats] = await Promise.all([
+    userStatsPromise,
+    eventStatsPromise,
+    ticketRepository.getTicketStats(),
+    listingRepository.getListingStats(),
+    eventRepository.getRevenueStats()
+  ]);
+
+  // Destructuring
+  const [totalUsers, organizers, verifiers, admins] = userResults;
+  const [totalEvents, draftEvents, fundingEvents, activeEvents, completedEvents, cancelledEvents] = eventResults;
 
   return {
     users: {
@@ -79,53 +71,42 @@ export async function getPlatformStats(repos = {}) {
       completed: completedEvents,
       cancelled: cancelledEvents
     },
-    tickets: {
-      total: totalTickets,
-      sold: soldTickets,
-      used: usedTickets,
-      available: totalTickets - soldTickets
-    },
-    listings: {
-      total: totalListings,
-      active: activeListings,
-      sold: soldListings
-    },
+    tickets: ticketStats,
+    listings: listingStats,
     revenue: {
-      total: revenue.totalRevenue,
-      funding: revenue.totalFunding
+      total: revenueStats.totalRevenue,
+      funding: revenueStats.totalFunding
     }
   };
 }
 
 /**
  * Get all users with filters
- * @param {Object} filters - Query filters
- * @param {Object} pagination - Pagination options
+ * @param {Object} query - Query parameters from request
  * @param {Object} repos - Injected repositories (for testing)
  * @returns {Promise<Object>} Paginated users
  */
-export async function getUsers(filters = {}, pagination = {}, repos = {}) {
+export async function getUsers(query = {}, repos = {}) {
   const userRepository = repos.userRepo || userRepo;
 
-  const query = {};
+  // Destructure with defaults
+  const { role, isActive, page = 1, limit = 20, sort = '-createdAt' } = query;
 
-  // Apply filters
-  if (filters.role) {
-    query.role = filters.role;
-  }
-  if (filters.isActive !== undefined) {
-    query.isActive = filters.isActive;
-  }
+  // Build query using short-circuit evaluation
+  const dbQuery = {
+    ...(role && { role }),
+    ...(isActive !== undefined && { isActive: isActive === 'true' })
+  };
 
-  // Pagination options
+  // Setup pagination options
   const options = {
-    page: pagination.page || 1,
-    limit: Math.min(pagination.limit || 20, 100),
-    sort: pagination.sort || '-createdAt',
+    page: parseInt(page, 10),
+    limit: Math.min(parseInt(limit, 10), 100),
+    sort,
     lean: true
   };
 
-  return await userRepository.findUsers(query, options);
+  return await userRepository.findUsers(dbQuery, options);
 }
 
 /**
@@ -138,16 +119,10 @@ export async function getUsers(filters = {}, pagination = {}, repos = {}) {
 export async function updateUserRole(walletAddress, newRole, repos = {}) {
   const userRepository = repos.userRepo || userRepo;
 
-  // Validate role
-  const validRoles = ['user', 'organizer', 'verifier', 'admin'];
-  if (!validRoles.includes(newRole)) {
-    throw new Error('Invalid role. Must be one of: ' + validRoles.join(', '));
-  }
-
   const user = await userRepository.findByWalletAddress(walletAddress);
 
   if (!user) {
-    throw new Error('User not found');
+    throw new NotFoundError('User not found');
   }
 
   return await userRepository.updateRole(walletAddress, newRole);
@@ -155,33 +130,31 @@ export async function updateUserRole(walletAddress, newRole, repos = {}) {
 
 /**
  * Get all events (admin view)
- * @param {Object} filters - Query filters
- * @param {Object} pagination - Pagination options
+ * @param {Object} query - Query parameters from request
  * @param {Object} repos - Injected repositories (for testing)
  * @returns {Promise<Object>} Paginated events
  */
-export async function getEvents(filters = {}, pagination = {}, repos = {}) {
+export async function getEvents(query = {}, repos = {}) {
   const eventRepository = repos.eventRepo || eventRepo;
 
-  const query = {};
+  // Destructure with defaults
+  const { status, organizer, page = 1, limit = 20, sort = '-createdAt' } = query;
 
-  // Apply filters
-  if (filters.status) {
-    query.status = filters.status;
-  }
-  if (filters.organizer) {
-    query.organizer = filters.organizer.toLowerCase();
-  }
+  // Build query using short-circuit evaluation
+  const dbQuery = {
+    ...(status && { status }),
+    ...(organizer && { organizer: organizer.toLowerCase() })
+  };
 
-  // Pagination options
+  // Setup pagination options
   const options = {
-    page: pagination.page || 1,
-    limit: Math.min(pagination.limit || 20, 100),
-    sort: pagination.sort || '-createdAt',
+    page: parseInt(page, 10),
+    limit: Math.min(parseInt(limit, 10), 100),
+    sort,
     lean: true
   };
 
-  return await eventRepository.findEvents(query, options);
+  return await eventRepository.findEvents(dbQuery, options);
 }
 
 /**
@@ -197,7 +170,11 @@ export async function updateEventStatus(eventId, newStatus, repos = {}) {
   const event = await eventRepository.findById(eventId);
 
   if (!event) {
-    throw new Error('Event not found');
+    throw new NotFoundError('Event not found');
+  }
+
+  if (event.status === 'completed') {
+    throw new BadRequestError('Cannot change status of a completed event');
   }
 
   return await eventRepository.updateById(eventId, { status: newStatus });
@@ -230,4 +207,41 @@ export async function getSystemHealth(options = {}) {
     },
     timestamp: new Date()
   };
+}
+
+/**
+ * Delete user by wallet address
+ * Cascades to delete user's avatar from Cloudinary
+ * @param {string} walletAddress - Wallet address
+ * @param {Object} repos - Injected repositories (for testing)
+ * @param {Object} uploadSvc - Injected upload service (for testing)
+ * @returns {Promise<Object>} Deleted user
+ */
+export async function deleteUser(walletAddress, repos = {}, uploadSvc = null) {
+  const userRepository = repos.userRepo || userRepo;
+  const uploadServiceInstance = uploadSvc || uploadService;
+
+  const user = await userRepository.findByWalletAddress(walletAddress);
+
+  if (!user) {
+    throw new NotFoundError('User not found');
+  }
+
+  // Delete avatar from Cloudinary if exists
+  if (user.avatarUrl) {
+    try {
+      await uploadServiceInstance.deleteImage(user.avatarUrl);
+    } catch (error) {
+      // Log but don't fail if avatar deletion fails
+      console.warn('Failed to delete user avatar from Cloudinary', {
+        walletAddress,
+        avatarUrl: user.avatarUrl,
+        error: error.message
+      });
+    }
+  }
+
+  const deletedUser = await userRepository.deleteByWalletAddress(walletAddress);
+
+  return deletedUser;
 }

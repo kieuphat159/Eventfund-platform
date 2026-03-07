@@ -74,8 +74,10 @@ const controller = new AdminController();
  *                       properties:
  *                         total:
  *                           type: string
+ *                           description: Total revenue (string representation of wei amount)
  *                         funding:
  *                           type: string
+ *                           description: Total funding (string representation of wei amount)
  *       401:
  *         description: Not authenticated
  *       403:
@@ -83,7 +85,7 @@ const controller = new AdminController();
  *       500:
  *         description: Server error
  */
-router.get('/stats', authenticate, requireAdmin, (req, res, next) => controller.getPlatformStats(req, res, next));
+router.get('/stats', authenticate, requireAdmin, controller.getPlatformStats);
 
 /**
  * @swagger
@@ -160,7 +162,7 @@ router.get('/stats', authenticate, requireAdmin, (req, res, next) => controller.
  *       500:
  *         description: Server error
  */
-router.get('/users', authenticate, requireAdmin, (req, res, next) => controller.getUsers(req, res, next));
+router.get('/users', authenticate, requireAdmin, controller.getUsers);
 
 /**
  * @swagger
@@ -218,7 +220,48 @@ router.get('/users', authenticate, requireAdmin, (req, res, next) => controller.
  *       500:
  *         description: Server error
  */
-router.patch('/users/:walletAddress/role', authenticate, requireAdmin, validate({ body: adminSchemas.updateUserRole }), (req, res, next) => controller.updateUserRole(req, res, next));
+router.patch('/users/:walletAddress/role', authenticate, requireAdmin, validate({ body: adminSchemas.updateUserRole }), controller.updateUserRole);
+
+/**
+ * @swagger
+ * /admin/users/{walletAddress}:
+ *   delete:
+ *     summary: Delete user
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: walletAddress
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: User wallet address
+ *     responses:
+ *       200:
+ *         description: User deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     walletAddress:
+ *                       type: string
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Not authorized (requires admin role)
+ *       404:
+ *         description: User not found
+ *       500:
+ *         description: Server error
+ */
+router.delete('/users/:walletAddress', authenticate, requireAdmin, controller.deleteUser);
 
 /**
  * @swagger
@@ -295,7 +338,7 @@ router.patch('/users/:walletAddress/role', authenticate, requireAdmin, validate(
  *       500:
  *         description: Server error
  */
-router.get('/events', authenticate, requireAdmin, (req, res, next) => controller.getEvents(req, res, next));
+router.get('/events', authenticate, requireAdmin, controller.getEvents);
 
 /**
  * @swagger
@@ -353,7 +396,7 @@ router.get('/events', authenticate, requireAdmin, (req, res, next) => controller
  *       500:
  *         description: Server error
  */
-router.patch('/events/:id/status', authenticate, requireAdmin, validate({ body: adminSchemas.updateEventStatus }), (req, res, next) => controller.updateEventStatus(req, res, next));
+router.patch('/events/:id/status', authenticate, requireAdmin, validate({ body: adminSchemas.updateEventStatus }), controller.updateEventStatus);
 
 /**
  * @swagger
@@ -399,6 +442,6 @@ router.patch('/events/:id/status', authenticate, requireAdmin, validate({ body: 
  *       500:
  *         description: Server error
  */
-router.get('/health', authenticate, requireAdmin, (req, res, next) => controller.getSystemHealth(req, res, next));
+router.get('/health', authenticate, requireAdmin, controller.getSystemHealth);
 
 export default router;
