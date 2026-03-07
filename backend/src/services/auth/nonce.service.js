@@ -7,6 +7,19 @@ import { AUTH_CONSTANTS } from '../../constants/auth.constants.js';
  */
 class NonceService {
   async generateNonce(walletAddress) {
+    // Validate wallet address
+    if (!walletAddress) {
+      const error = new Error('Wallet address is required');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    if (!/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) {
+      const error = new Error('Invalid Ethereum address format');
+      error.statusCode = 400;
+      throw error;
+    }
+
     const normalizedAddress = walletAddress.toLowerCase();
 
     // Generate cryptographically secure random nonce
@@ -108,6 +121,19 @@ class NonceService {
    * @returns {Promise<{nonce: string, expiresAt: Date}|null>} Nonce data or null
    */
   async getNonce(walletAddress) {
+    // Validate wallet address
+    if (!walletAddress) {
+      const error = new Error('Wallet address is required');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    if (!/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) {
+      const error = new Error('Invalid Ethereum address format');
+      error.statusCode = 400;
+      throw error;
+    }
+
     const normalizedAddress = walletAddress.toLowerCase();
 
     const user = await User.findOne({ walletAddress: normalizedAddress });

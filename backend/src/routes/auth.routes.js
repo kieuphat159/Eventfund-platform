@@ -1,11 +1,22 @@
 import express from 'express';
 import AuthController from '../controllers/auth.controller.js';
+import AuthService from '../services/auth/auth.service.js';
+import NonceService from '../services/auth/nonce.service.js';
+import SIWEService from '../services/auth/siwe.service.js';
+import JWTService from '../services/auth/jwt.service.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
 import { authSchemas } from '../validators/auth.validator.js';
+import config from '../config/env.js';
 
 const router = express.Router();
-const controller = new AuthController();
+
+// Dependency Injection: Create services and inject into controller
+const nonceService = new NonceService();
+const siweService = new SIWEService();
+const jwtService = new JWTService(config.jwt.secret);
+const authService = new AuthService(nonceService, siweService, jwtService);
+const controller = new AuthController(authService);
 
 /**
  * @swagger
@@ -56,7 +67,7 @@ const controller = new AuthController();
  *       400:
  *         description: Invalid wallet address
  */
-router.post('/nonce', validate({ body: authSchemas.nonce }), (req, res, next) => controller.getNonce(req, res, next));
+router.post('/nonce', validate({ body: authSchemas.nonce }), controller.getNonce);
 
 /**
  * @swagger
@@ -104,7 +115,7 @@ router.post('/nonce', validate({ body: authSchemas.nonce }), (req, res, next) =>
  *       400:
  *         description: Invalid wallet address or no nonce found
  */
-router.post('/message', validate({ body: authSchemas.message }), (req, res, next) => controller.getMessage(req, res, next));
+router.post('/message', validate({ body: authSchemas.message }), controller.getMessage);
 
 /**
  * @swagger
@@ -156,7 +167,7 @@ router.post('/message', validate({ body: authSchemas.message }), (req, res, next
  *       401:
  *         description: Invalid signature or expired nonce
  */
-router.post('/verify', validate({ body: authSchemas.verify }), (req, res, next) => controller.verifySignature(req, res, next));
+router.post('/verify', validate({ body: authSchemas.verify }), controller.verifySignature);
 
 /**
  * @swagger
@@ -172,7 +183,7 @@ router.post('/verify', validate({ body: authSchemas.verify }), (req, res, next) 
  *       401:
  *         description: Not authenticated
  */
-router.post('/logout', authenticate, (req, res, next) => controller.logout(req, res, next));
+router.post('/logout', authenticate, controller.logout);
 
 /**
  * @swagger
@@ -200,6 +211,6 @@ router.post('/logout', authenticate, (req, res, next) => controller.logout(req, 
  *       401:
  *         description: Not authenticated
  */
-router.post('/refresh', authenticate, (req, res, next) => controller.refreshToken(req, res, next));
+router.post('/refresh', authenticate, controller.refreshToken);
 
 export default router;

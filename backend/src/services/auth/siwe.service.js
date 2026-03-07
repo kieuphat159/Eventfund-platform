@@ -86,6 +86,8 @@ class SIWEService {
    *
    * @param {string} message - SIWE message string
    * @param {string} signature - Signature from wallet
+   * @param {string} expectedDomain - Expected domain (optional, defaults to config)
+   * @param {string} expectedUri - Expected URI (optional, defaults to config)
    * @returns {Promise<{valid: boolean, address?: string, error?: string}>} Verification result
    *
    * Preconditions:
@@ -96,11 +98,30 @@ class SIWEService {
    * - Returns verification result with recovered address if valid
    * - Returns error message if invalid
    * - Signature is cryptographically verified
+   * - Domain and URI are validated against expected values
    */
-  async verifySIWE(message, signature) {
+  async verifySIWE(message, signature, expectedDomain, expectedUri) {
     try {
       // Parse message
       const siweMessage = new SiweMessage(message);
+
+      // Validate domain and URI to prevent phishing attacks
+      const domain = expectedDomain || config.siwe.domain;
+      const uri = expectedUri || config.siwe.uri;
+
+      if (siweMessage.domain !== domain) {
+        return {
+          valid: false,
+          error: `Domain mismatch: expected ${domain}, got ${siweMessage.domain}`,
+        };
+      }
+
+      if (siweMessage.uri !== uri) {
+        return {
+          valid: false,
+          error: `URI mismatch: expected ${uri}, got ${siweMessage.uri}`,
+        };
+      }
 
       // Verify signature
       const fields = await siweMessage.verify({ signature });

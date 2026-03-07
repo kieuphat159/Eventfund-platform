@@ -1,3 +1,5 @@
+import { UnauthorizedError, ForbiddenError } from '../utils/customErrors.js';
+
 /**
  * Role-based access control middleware
  * Enforces role requirements on protected endpoints
@@ -11,16 +13,10 @@
  * @returns {Function} Express middleware function
  */
 export function requireRole(...roles) {
-  return (req, res, next) => {
+  return (req, _res, next) => {
     // Check if user is authenticated
     if (!req.user) {
-      return res.status(401).json({
-        success: false,
-        error: {
-          code: 'UNAUTHORIZED',
-          message: 'Authentication required',
-        },
-      });
+      return next(new UnauthorizedError('Authentication required'));
     }
 
     // Admin role has access to everything
@@ -30,13 +26,7 @@ export function requireRole(...roles) {
 
     // Check if user has required role
     if (!roles.includes(req.user.role)) {
-      return res.status(403).json({
-        success: false,
-        error: {
-          code: 'FORBIDDEN',
-          message: 'Insufficient permissions',
-        },
-      });
+      return next(new ForbiddenError('Insufficient permissions'));
     }
 
     next();
