@@ -86,7 +86,7 @@ router.get('/', validate({ query: ticketSchemas.queryTickets }), (req, res, next
  *       500:
  *         description: Server error
  */
-router.get('/:tokenId', (req, res, next) => ticketsController.getTicketById(req, res, next));
+router.get('/:tokenId', validate({ params: ticketSchemas.tokenIdParams }), (req, res, next) => ticketsController.getTicketById(req, res, next));
 
 /**
  * @swagger
@@ -120,7 +120,7 @@ router.get('/:tokenId', (req, res, next) => ticketsController.getTicketById(req,
  *       500:
  *         description: Server error
  */
-router.get('/user/:walletAddress', (req, res, next) => ticketsController.getUserTickets(req, res, next));
+router.get('/user/:walletAddress', validate({ params: ticketSchemas.walletAddressParams, query: ticketSchemas.userTicketsQuery }), (req, res, next) => ticketsController.getUserTickets(req, res, next));
 
 /**
  * @swagger
@@ -189,7 +189,7 @@ router.post('/verify', authenticate, requireRole('verifier', 'admin'), validate(
  *       500:
  *         description: Server error
  */
-router.post('/:tokenId/use', authenticate, requireRole('verifier', 'admin'), validate({ body: ticketSchemas.useTicket }), (req, res, next) => ticketsController.markTicketAsUsed(req, res, next));
+router.post('/:tokenId/use', authenticate, requireRole('verifier', 'admin'), validate({ params: ticketSchemas.tokenIdParams, body: ticketSchemas.useTicket }), (req, res, next) => ticketsController.markTicketAsUsed(req, res, next));
 
 /**
  * @swagger
@@ -210,6 +210,6 @@ router.post('/:tokenId/use', authenticate, requireRole('verifier', 'admin'), val
  *       500:
  *         description: Server error
  */
-router.get('/event/:eventId/stats', (req, res, next) => ticketsController.getTicketStats(req, res, next));
+router.get('/event/:eventId/stats', validate({ params: ticketSchemas.eventIdParams }), (req, res, next) => ticketsController.getTicketStats(req, res, next));
 
 export default router;

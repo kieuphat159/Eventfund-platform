@@ -1,39 +1,33 @@
 import mongoose from 'mongoose';
 import * as ticketRepo from '../../repositories/ticket.repo.js';
 import * as eventRepo from '../../repositories/event.repo.js';
+import { NotFoundError, BadRequestError } from '../../utils/customErrors.js';
 
 /**
  * Get tickets with filters and pagination
- * @param {Object} filters - Query filters
- * @param {Object} pagination - Pagination options
+ * @param {Object} query - Query parameters from request
  * @param {Object} repos - Injected repositories (optional)
  * @returns {Promise<Object>} Paginated tickets
  */
-export async function getTickets(filters = {}, pagination = {}, repos = {}) {
+export async function getTickets(query = {}, repos = {}) {
   const ticketRepository = repos.ticketRepo || ticketRepo;
 
-  const query = {};
+  const { eventId, status, owner, page, limit, sort } = query;
 
-  // Apply filters
-  if (filters.eventId) {
-    query.eventId = filters.eventId;
-  }
-  if (filters.status) {
-    query.status = filters.status;
-  }
-  if (filters.currentOwner) {
-    query.currentOwner = filters.currentOwner.toLowerCase();
-  }
+  const dbQuery = {
+    ...(eventId && { eventId }),
+    ...(status && { status }),
+    ...(owner && { currentOwner: owner.toLowerCase() })
+  };
 
-  // Pagination options
   const options = {
-    page: pagination.page || 1,
-    limit: Math.min(pagination.limit || 20, 100),
-    sort: pagination.sort || '-createdAt',
+    page: page ? parseInt(page, 10) : 1,
+    limit: Math.min(limit ? parseInt(limit, 10) : 20, 100),
+    sort: sort || '-createdAt',
     lean: true
   };
 
-  return await ticketRepository.findTickets(query, options);
+  return await ticketRepository.findTickets(dbQuery, options);
 }
 
 /**
@@ -48,27 +42,28 @@ export async function getTicketById(tokenId, repos = {}) {
   const ticket = await ticketRepository.findByTokenId(tokenId, { lean: false });
 
   if (!ticket) {
-    return null;
+    throw new NotFoundError('Ticket not found');
   }
 
-  // Convert to JSON to apply toJSON transformation (BigInt to string)
-  return typeof ticket.toJSON === 'function' ? ticket.toJSON() : ticket;
+  return ticket;
 }
 
 /**
  * Get all tickets for a wallet address
  * @param {string} walletAddress - Wallet address
- * @param {Object} pagination - Pagination options
+ * @param {Object} query - Query parameters from request
  * @param {Object} repos - Injected repositories (optional)
  * @returns {Promise<Object>} Paginated tickets
  */
-export async function getUserTickets(walletAddress, pagination = {}, repos = {}) {
+export async function getUserTickets(walletAddress, query = {}, repos = {}) {
   const ticketRepository = repos.ticketRepo || ticketRepo;
 
+  const { page, limit, sort } = query;
+
   const options = {
-    page: pagination.page || 1,
-    limit: Math.min(pagination.limit || 20, 100),
-    sort: pagination.sort || '-createdAt',
+    page: page ? parseInt(page, 10) : 1,
+    limit: Math.min(limit ? parseInt(limit, 10) : 20, 100),
+    sort: sort || '-createdAt',
     lean: true,
     populate: 'eventId'
   };
@@ -109,35 +104,35 @@ export async function markTicketAsUsed(tokenId, verifierWallet, repos = {}) {
   const ticket = await ticketRepository.findByTokenId(tokenId, { lean: false });
 
   if (!ticket) {
-    throw new Error('Ticket not found');
+    throw new NotFoundError('Ticket not found');
   }
 
   // Check if already used (idempotent)
   if (ticket.status === 'used') {
-    return typeof ticket.toJSON === 'function' ? ticket.toJSON() : ticket;
+    return ticket;
   }
 
   // Validate ticket status
   if (ticket.status !== 'sold') {
-    throw new Error('Ticket must be in sold status to be marked as used');
+    throw new BadRequestError('Ticket must be in sold status to be marked as used');
   }
 
   // Get event and validate
   const event = await eventRepository.findById(ticket.eventId);
 
   if (!event) {
-    throw new Error('Event not found');
+    throw new NotFoundError('Event not found');
   }
 
   // Validate event status
   if (event.status !== 'ongoing') {
-    throw new Error('Event must be in ongoing status');
+    throw new BadRequestError('Event must be in ongoing status');
   }
 
   // Validate current time is within event dates
   const now = new Date();
   if (now < event.startDate || now > event.endDate) {
-    throw new Error('Current time must be within event dates');
+    throw new BadRequestError('Current time must be within event dates');
   }
 
   // Update ticket using repository
@@ -153,8 +148,7 @@ export async function markTicketAsUsed(tokenId, verifierWallet, repos = {}) {
     totalTicketsUsed: 1
   });
 
-  // Return ticket with toJSON transformation
-  return typeof updatedTicket.toJSON === 'function' ? updatedTicket.toJSON() : updatedTicket;
+  return updatedTicket;
 }
 
 /**
@@ -178,5 +172,29 @@ export async function getTicketStats(eventId, repos = {}) {
     usedTickets: stats.used || 0,
     mintedTickets: stats.minted || 0,
     availableTickets: stats.minted || 0
+  };
+}
+
+/**
+ * Verify ticket ownership and return ticket details
+ * @param {string} tokenId - Token ID
+ * @param {string} walletAddress - Wallet address to verify
+ * @param {Object} repos - Injected repositories (optional)
+ * @returns {Promise<Object>} Verification result with ticket details
+ */
+export async function verifyTicket(tokenId, walletAddress, repos = {}) {
+  const ticketRepository = repos.ticketRepo || ticketRepo;
+
+  const ticket = await ticketRepository.findByTokenId(tokenId, { lean: false });
+
+  if (!ticket) {
+    throw new NotFoundError('Ticket not found');
+  }
+
+  const isOwner = ticket.currentOwner.toLowerCase() === walletAddress.toLowerCase();
+
+  return {
+    isOwner,
+    ticket
   };
 }

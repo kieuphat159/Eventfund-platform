@@ -2,7 +2,7 @@ import Joi from 'joi';
 
 // Custom validator for Ethereum address
 const ethereumAddress = Joi.string()
-  .pattern(/^0x[a-fA-F0-9]{40}$/)
+  .pattern(/^0x[a-fA-F0-9]{40}$/i)
   .message('must be a valid Ethereum address');
 
 // Custom validator for MongoDB ObjectId
@@ -17,7 +17,7 @@ const ticketStatusEnum = ['minted', 'sold', 'used', 'expired'];
 const verifyTicketSchema = Joi.object({
   tokenId: Joi.string().min(1).required(),
   eventId: objectId.required(),
-  walletAddress: ethereumAddress.optional()
+  walletAddress: ethereumAddress.required()
 });
 
 // Schema for POST /tickets/:tokenId/use
@@ -33,11 +33,38 @@ const queryTicketsSchema = Joi.object({
   status: Joi.string().valid(...ticketStatusEnum).optional(),
   isListed: Joi.boolean().optional(),
   page: Joi.number().integer().min(1).optional(),
-  limit: Joi.number().integer().min(1).max(100).optional()
+  limit: Joi.number().integer().min(1).max(100).optional(),
+  sort: Joi.string().optional()
+});
+
+// Schema for GET /tickets/:tokenId params
+const tokenIdParamsSchema = Joi.object({
+  tokenId: Joi.string().min(1).required()
+});
+
+// Schema for GET /tickets/user/:walletAddress params
+const walletAddressParamsSchema = Joi.object({
+  walletAddress: ethereumAddress.required()
+});
+
+// Schema for GET /tickets/event/:eventId/stats params
+const eventIdParamsSchema = Joi.object({
+  eventId: objectId.required()
+});
+
+// Schema for GET /tickets/user/:walletAddress query
+const userTicketsQuerySchema = Joi.object({
+  page: Joi.number().integer().min(1).optional(),
+  limit: Joi.number().integer().min(1).max(100).optional(),
+  sort: Joi.string().optional()
 });
 
 export const ticketSchemas = {
   verifyTicket: verifyTicketSchema,
   useTicket: useTicketSchema,
-  queryTickets: queryTicketsSchema
+  queryTickets: queryTicketsSchema,
+  tokenIdParams: tokenIdParamsSchema,
+  walletAddressParams: walletAddressParamsSchema,
+  eventIdParams: eventIdParamsSchema,
+  userTicketsQuery: userTicketsQuerySchema
 };

@@ -1,4 +1,25 @@
+import mongoose from 'mongoose';
 import { Ticket as DefaultTicket } from '../models/index.js';
+
+/**
+ * Helper function to apply query options (populate, lean)
+ * @param {Object} query - Mongoose query
+ * @param {Object} options - Query options
+ * @returns {Object} Modified query
+ */
+function applyQueryOptions(query, options) {
+  // Handle population - Mongoose accepts array directly
+  if (options.populate) {
+    query = query.populate(options.populate);
+  }
+
+  // Handle lean query
+  if (options.lean !== false) {
+    query = query.lean();
+  }
+
+  return query;
+}
 
 /**
  * Find ticket by token ID
@@ -11,22 +32,7 @@ export async function findByTokenId(tokenId, options = {}, models = {}) {
   const Ticket = models.Ticket || DefaultTicket;
 
   let query = Ticket.findOne({ tokenId });
-
-  // Handle population
-  if (options.populate) {
-    if (Array.isArray(options.populate)) {
-      options.populate.forEach(field => {
-        query = query.populate(field);
-      });
-    } else {
-      query = query.populate(options.populate);
-    }
-  }
-
-  // Handle lean query
-  if (options.lean !== false) {
-    query = query.lean();
-  }
+  query = applyQueryOptions(query, options);
 
   const ticket = await query;
 
@@ -49,22 +55,7 @@ export async function findById(ticketId, options = {}, models = {}) {
   const Ticket = models.Ticket || DefaultTicket;
 
   let query = Ticket.findById(ticketId);
-
-  // Handle population
-  if (options.populate) {
-    if (Array.isArray(options.populate)) {
-      options.populate.forEach(field => {
-        query = query.populate(field);
-      });
-    } else {
-      query = query.populate(options.populate);
-    }
-  }
-
-  // Handle lean query
-  if (options.lean !== false) {
-    query = query.lean();
-  }
+  query = applyQueryOptions(query, options);
 
   const ticket = await query;
 
@@ -211,9 +202,12 @@ export async function updateListingStatus(ticketId, isListed, models = {}) {
 export async function getTicketStatsByEvent(eventId, models = {}) {
   const Ticket = models.Ticket || DefaultTicket;
 
+  // Cast eventId to ObjectId for aggregation
+  const objectId = new mongoose.Types.ObjectId(eventId);
+
   const stats = await Ticket.aggregate([
     {
-      $match: { eventId: eventId }
+      $match: { eventId: objectId }
     },
     {
       $group: {
@@ -238,4 +232,37 @@ export async function getTicketStatsByEvent(eventId, models = {}) {
   });
 
   return result;
+}
+
+/**
+ * Count tickets by query
+ * @param {Object} query - Query filters
+ * @param {Object} models - Injected models (optional)
+ * @returns {Promise<number>} Count
+ */
+export async function countTickets(query = {}, models = {}) {
+  const Ticket = models.Ticket || DefaultTicket;
+  return await Ticket.countDocuments(query);
+}
+
+/**
+ * Get ticket statistics (total, sold, used)
+ * @param {Object} models - Injected models (optional)
+ * @returns {Promise<Object>} Ticket stats with total, sold, used counts
+ */
+export async function getTicketStats(models = {}) {
+  const Ticket = models.Ticket || DefaultTicket;
+
+  const [total, sold, used] = await Promise.all([
+    Ticket.countDocuments(),
+    Ticket.countDocuments({ status: 'sold' }),
+    Ticket.countDocuments({ status: 'used' })
+  ]);
+
+  return {
+    total,
+    sold,
+    used,
+    available: total - sold
+  };
 }
