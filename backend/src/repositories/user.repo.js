@@ -9,14 +9,12 @@ import { User as DefaultUser } from '../models/index.js';
 export async function createUser(userData, models = {}) {
   const User = models.User || DefaultUser;
 
-  // Normalize wallet address to lowercase
   const normalizedData = {
     ...userData,
     walletAddress: userData.walletAddress?.toLowerCase()
   };
 
-  const user = new User(normalizedData);
-  await user.save();
+  const user = await User.create(normalizedData);
   return user.toObject();
 }
 
@@ -29,11 +27,10 @@ export async function createUser(userData, models = {}) {
 export async function findByWalletAddress(walletAddress, models = {}) {
   const User = models.User || DefaultUser;
 
-  // Normalize wallet address to lowercase for consistent querying
   const normalizedAddress = walletAddress?.toLowerCase();
 
-  const user = await User.findOne({ walletAddress: normalizedAddress });
-  return user ? user.toObject() : null;
+  // Thay thế .toObject() rườm rà bằng .lean()
+  return await User.findOne({ walletAddress: normalizedAddress }).lean();
 }
 
 /**
@@ -44,8 +41,7 @@ export async function findByWalletAddress(walletAddress, models = {}) {
  */
 export async function findById(userId, models = {}) {
   const User = models.User || DefaultUser;
-  const user = await User.findById(userId);
-  return user ? user.toObject() : null;
+  return await User.findById(userId).lean();
 }
 
 /**
@@ -58,18 +54,16 @@ export async function findById(userId, models = {}) {
 export async function findUsers(query, options, models = {}) {
   const User = models.User || DefaultUser;
 
-  // Normalize wallet address in query if present
   const normalizedQuery = { ...query };
   if (normalizedQuery.walletAddress) {
     normalizedQuery.walletAddress = normalizedQuery.walletAddress.toLowerCase();
   }
 
-  // Default options
   const paginationOptions = {
     page: options.page || 1,
     limit: options.limit || 20,
     sort: options.sort || '-createdAt',
-    lean: options.lean !== false // Default to true
+    lean: options.lean !== false
   };
 
   return await User.paginate(normalizedQuery, paginationOptions);
@@ -85,15 +79,13 @@ export async function findUsers(query, options, models = {}) {
 export async function updateProfile(walletAddress, updates, models = {}) {
   const User = models.User || DefaultUser;
 
-  // Normalize wallet address to lowercase for consistent querying
   const normalizedAddress = walletAddress?.toLowerCase();
 
-  const user = await User.findOneAndUpdate(
+  return await User.findOneAndUpdate(
     { walletAddress: normalizedAddress },
     updates,
-    { new: true, runValidators: true }
+    { new: true, runValidators: true, lean: true } // Đưa lean vào tận đây
   );
-  return user ? user.toObject() : null;
 }
 
 /**
@@ -106,15 +98,13 @@ export async function updateProfile(walletAddress, updates, models = {}) {
 export async function updateRole(walletAddress, role, models = {}) {
   const User = models.User || DefaultUser;
 
-  // Normalize wallet address to lowercase for consistent querying
   const normalizedAddress = walletAddress?.toLowerCase();
 
-  const user = await User.findOneAndUpdate(
+  return await User.findOneAndUpdate(
     { walletAddress: normalizedAddress },
     { role },
-    { new: true, runValidators: true }
+    { new: true, runValidators: true, lean: true }
   );
-  return user ? user.toObject() : null;
 }
 
 /**
@@ -126,11 +116,25 @@ export async function updateRole(walletAddress, role, models = {}) {
 export async function countUsers(query = {}, models = {}) {
   const User = models.User || DefaultUser;
 
-  // Normalize wallet address in query if present
   const normalizedQuery = { ...query };
   if (normalizedQuery.walletAddress) {
     normalizedQuery.walletAddress = normalizedQuery.walletAddress.toLowerCase();
   }
 
   return await User.countDocuments(normalizedQuery);
+}
+
+/**
+ * Delete user by wallet address
+ * @param {string} walletAddress - Wallet address
+ * @param {Object} models - Injected models (optional)
+ * @returns {Promise<Object|null>} Deleted user as plain object or null
+ */
+export async function deleteByWalletAddress(walletAddress, models = {}) {
+  const User = models.User || DefaultUser;
+
+  const normalizedAddress = walletAddress?.toLowerCase();
+
+  // Dùng .lean() thay cho .toObject()
+  return await User.findOneAndDelete({ walletAddress: normalizedAddress }).lean();
 }

@@ -1,6 +1,6 @@
 import asyncHandler from '../utils/asyncHandler.js';
 import * as usersService from '../services/users/users.service.js';
-import { convertBigIntToString } from '../utils/bigint.js';
+import { BadRequestError } from '../utils/customErrors.js';
 
 /**
  * UsersController - Handles user profile and portfolio endpoints
@@ -8,99 +8,89 @@ import { convertBigIntToString } from '../utils/bigint.js';
 class UsersController {
   constructor(service = usersService) {
     this.usersService = service;
+    this.BadRequestError = BadRequestError;
   }
 
-  getProfile = asyncHandler(async (req, res, next) => {
-    // Check authentication
-    if (!req.user) {
-      const error = new Error('Authentication required');
-      error.statusCode = 401;
-      return next(error);
-    }
+  getProfile = asyncHandler(async (req, res) => {
+    const walletAddress = req.user.walletAddress;
 
-    // Get user profile
-    const user = await this.usersService.getProfile(req.user.walletAddress);
-
-    if (!user) {
-      const error = new Error('User not found');
-      error.statusCode = 404;
-      return next(error);
-    }
+    const user = await this.usersService.getProfile(walletAddress);
 
     res.status(200).json({
       success: true,
-      data: convertBigIntToString(user)
+      data: user
     });
   });
 
-  updateProfile = asyncHandler(async (req, res, next) => {
-    // Check authentication
-    if (!req.user) {
-      const error = new Error('Authentication required');
-      error.statusCode = 401;
-      return next(error);
+  updateProfile = asyncHandler(async (req, res) => {
+    const startTime = Date.now();
+    const updateData = req.validated?.body || req.body;
+    const file = req.file;
+    const walletAddress = req.user.walletAddress;
+
+    // Check if at least one field or file is provided
+    const hasBodyFields = updateData && Object.keys(updateData).length > 0;
+    const hasFile = !!file;
+
+    if (!hasBodyFields && !hasFile) {
+      const error = new this.BadRequestError('Validation failed');
+      error.code = 'VALIDATION_ERROR';
+      error.details = [{ field: 'body', message: 'At least one field must be provided', type: 'any.required' }];
+      throw error;
     }
 
-    // Get validated data or fallback to body
-    const validatedData = req.validated?.body || req.body;
+    const result = await this.usersService.updateProfileWithAvatar(walletAddress, updateData, file);
 
-    // Update profile
-    const user = await this.usersService.updateProfile(req.user.walletAddress, validatedData);
+    const totalDuration = Date.now() - startTime;
+    res.setHeader('X-Request-Duration', totalDuration);
 
     res.status(200).json({
       success: true,
-      data: convertBigIntToString(user)
+      data: result
     });
   });
 
-  getUserPortfolio = asyncHandler(async (req, res, next) => {
-    // Check authentication
-    if (!req.user) {
-      const error = new Error('Authentication required');
-      error.statusCode = 401;
-      return next(error);
-    }
+  getUserPortfolio = asyncHandler(async (req, res) => {
+    const walletAddress = req.user.walletAddress;
 
-    // Get portfolio
-    const portfolio = await this.usersService.getUserPortfolio(req.user.walletAddress);
+    const portfolio = await this.usersService.getUserPortfolio(walletAddress);
 
     res.status(200).json({
       success: true,
-      data: convertBigIntToString(portfolio)
+      data: portfolio
     });
   });
 
-  getUserShares = asyncHandler(async (req, res, next) => {
-    // Check authentication
-    if (!req.user) {
-      const error = new Error('Authentication required');
-      error.statusCode = 401;
-      return next(error);
-    }
+  getUserShares = asyncHandler(async (req, res) => {
+    const walletAddress = req.user.walletAddress;
 
-    // Get shares
-    const shares = await this.usersService.getUserShares(req.user.walletAddress);
+    const shares = await this.usersService.getUserShares(walletAddress);
 
     res.status(200).json({
       success: true,
-      data: convertBigIntToString(shares)
+      data: shares
     });
   });
 
-  getUserRewards = asyncHandler(async (req, res, next) => {
-    // Check authentication
-    if (!req.user) {
-      const error = new Error('Authentication required');
-      error.statusCode = 401;
-      return next(error);
-    }
+  getUserRewards = asyncHandler(async (req, res) => {
+    const walletAddress = req.user.walletAddress;
 
-    // Get rewards
-    const rewards = await this.usersService.getUserRewards(req.user.walletAddress);
+    const rewards = await this.usersService.getUserRewards(walletAddress);
 
     res.status(200).json({
       success: true,
-      data: convertBigIntToString(rewards)
+      data: rewards
+    });
+  });
+
+  getUserByWallet = asyncHandler(async (req, res) => {
+    const { walletAddress } = req.params;
+
+    const user = await this.usersService.getUserByWallet(walletAddress);
+
+    res.status(200).json({
+      success: true,
+      data: user
     });
   });
 }

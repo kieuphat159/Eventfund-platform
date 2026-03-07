@@ -3,6 +3,7 @@ import UsersController from '../controllers/users.controller.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
 import { userSchemas } from '../validators/user.validator.js';
+import { uploadAvatar, validateSingleImage } from '../middlewares/image.middleware.js';
 
 const router = express.Router();
 const controller = new UsersController();
@@ -66,7 +67,7 @@ const controller = new UsersController();
  *       500:
  *         description: Server error
  */
-router.get('/profile', authenticate, (req, res, next) => controller.getProfile(req, res, next));
+router.get('/profile', authenticate, controller.getProfile);
 
 /**
  * @swagger
@@ -79,6 +80,23 @@ router.get('/profile', authenticate, (req, res, next) => controller.getProfile(r
  *     requestBody:
  *       required: true
  *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               username:
+ *                 type: string
+ *                 minLength: 3
+ *                 maxLength: 50
+ *                 example: "john_doe"
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 example: "john@example.com"
+ *               avatar:
+ *                 type: string
+ *                 format: binary
+ *                 description: Avatar image file (jpg, jpeg, png, gif, webp, max 5MB)
  *         application/json:
  *           schema:
  *             type: object
@@ -124,7 +142,7 @@ router.get('/profile', authenticate, (req, res, next) => controller.getProfile(r
  *       500:
  *         description: Server error
  */
-router.patch('/profile', authenticate, validate({ body: userSchemas.updateProfile }), (req, res, next) => controller.updateProfile(req, res, next));
+router.patch('/profile', authenticate, uploadAvatar, validateSingleImage, validate({ body: userSchemas.updateProfile }), controller.updateProfile);
 
 /**
  * @swagger
@@ -170,7 +188,7 @@ router.patch('/profile', authenticate, validate({ body: userSchemas.updateProfil
  *                           description: Number of events with shares
  *                         totalContribution:
  *                           type: string
- *                           description: Total contribution amount (BigInt string)
+ *                           description: Total contribution amount (string representation of wei amount)
  *                         totalSharePercentage:
  *                           type: number
  *                           description: Sum of share percentages across all events
@@ -179,16 +197,16 @@ router.patch('/profile', authenticate, validate({ body: userSchemas.updateProfil
  *                       properties:
  *                         claimed:
  *                           type: string
- *                           description: Total claimed rewards (BigInt string)
+ *                           description: Total claimed rewards (string representation of wei amount)
  *                         pending:
  *                           type: string
- *                           description: Total pending rewards (BigInt string)
+ *                           description: Total pending rewards (string representation of wei amount)
  *       401:
  *         description: Not authenticated
  *       500:
  *         description: Server error
  */
-router.get('/portfolio', authenticate, (req, res, next) => controller.getUserPortfolio(req, res, next));
+router.get('/portfolio', authenticate, controller.getUserPortfolio);
 
 /**
  * @swagger
@@ -219,21 +237,21 @@ router.get('/portfolio', authenticate, (req, res, next) => controller.getUserPor
  *                         type: string
  *                       contributionAmount:
  *                         type: string
- *                         description: Contribution amount (BigInt string)
+ *                         description: Contribution amount (string representation of wei amount)
  *                       sharePercentage:
  *                         type: number
  *                       claimedReward:
  *                         type: string
- *                         description: Claimed reward (BigInt string)
+ *                         description: Claimed reward (string representation of wei amount)
  *                       pendingReward:
  *                         type: string
- *                         description: Pending reward (BigInt string)
+ *                         description: Pending reward (string representation of wei amount)
  *       401:
  *         description: Not authenticated
  *       500:
  *         description: Server error
  */
-router.get('/shares', authenticate, (req, res, next) => controller.getUserShares(req, res, next));
+router.get('/shares', authenticate, controller.getUserShares);
 
 /**
  * @swagger
@@ -267,7 +285,7 @@ router.get('/shares', authenticate, (req, res, next) => controller.getUserShares
  *                             type: string
  *                           rewardAmount:
  *                             type: string
- *                             description: Reward amount (BigInt string)
+ *                             description: Reward amount (string representation of wei amount)
  *                           claimedAt:
  *                             type: string
  *                             format: date-time
@@ -284,7 +302,7 @@ router.get('/shares', authenticate, (req, res, next) => controller.getUserShares
  *                             type: string
  *                           rewardAmount:
  *                             type: string
- *                             description: Reward amount (BigInt string)
+ *                             description: Reward amount (string representation of wei amount)
  *                           sharePercentage:
  *                             type: number
  *       401:
@@ -292,6 +310,52 @@ router.get('/shares', authenticate, (req, res, next) => controller.getUserShares
  *       500:
  *         description: Server error
  */
-router.get('/rewards', authenticate, (req, res, next) => controller.getUserRewards(req, res, next));
+router.get('/rewards', authenticate, controller.getUserRewards);
+
+/**
+ * @swagger
+ * /users/{walletAddress}:
+ *   get:
+ *     summary: Get user by wallet address
+ *     tags: [Users]
+ *     parameters:
+ *       - in: path
+ *         name: walletAddress
+ *         required: true
+ *         schema:
+ *           type: string
+ *           pattern: ^0x[a-fA-F0-9]{40}$
+ *         description: Ethereum wallet address
+ *     responses:
+ *       200:
+ *         description: User found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     walletAddress:
+ *                       type: string
+ *                     username:
+ *                       type: string
+ *                     email:
+ *                       type: string
+ *                     avatarUrl:
+ *                       type: string
+ *                     role:
+ *                       type: string
+ *       400:
+ *         description: Invalid wallet address format
+ *       404:
+ *         description: User not found
+ *       500:
+ *         description: Server error
+ */
+router.get('/:walletAddress', validate({ params: userSchemas.walletAddressParams }), controller.getUserByWallet);
 
 export default router;
