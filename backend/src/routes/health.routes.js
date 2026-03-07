@@ -47,7 +47,7 @@ const controller = new HealthController();
  *       500:
  *         description: Server error
  */
-router.get('/', (req, res, next) => controller.healthCheck(req, res, next));
+router.get('/', controller.healthCheck);
 
 /**
  * @swagger
@@ -95,6 +95,6 @@ router.get('/', (req, res, next) => controller.healthCheck(req, res, next));
  *                       type: string
  *                       example: Database unavailable
  */
-router.get('/db', (req, res, next) => controller.databaseHealth(req, res, next));
+router.get('/db', controller.databaseHealth);
 
 export default router;
