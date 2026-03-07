@@ -1,97 +1,52 @@
-/**
- * Validation middleware using Joi
- * Validates request body, params, and query against schemas
- */
+import { BadRequestError } from '../utils/customErrors.js';
 
 /**
  * Validate request data against Joi schemas
- * Validates req.body, req.params, and req.query
+ * Validates req.body, req.params, and req.query dynamically
  * Attaches validated data to req.validated
- *
- * @param {Object} schema - Validation schema object
- * @param {Object} schema.body - Joi schema for request body
- * @param {Object} schema.params - Joi schema for request params
- * @param {Object} schema.query - Joi schema for request query
- * @returns {Function} Express middleware function
  */
 export function validate(schema) {
-  return (req, res, next) => {
+  return (req, _res, next) => {
     const errors = [];
     const validated = {};
 
-    // Validate body
-    if (schema.body) {
-      const { error, value } = schema.body.validate(req.body, {
-        abortEarly: false,
-        stripUnknown: true,
-      });
+    // 1. Kỹ thuật DRY: Dùng vòng lặp thay vì viết lại 3 lần
+    const validationTargets = ['body', 'params', 'query'];
 
-      if (error) {
-        error.details.forEach((detail) => {
-          errors.push({
-            field: detail.path.join('.'),
-            message: detail.message,
-            type: detail.type,
-          });
+    validationTargets.forEach((target) => {
+      if (schema[target]) {
+        const { error, value } = schema[target].validate(req[target], {
+          abortEarly: false,
+          stripUnknown: true,
         });
-      } else {
-        validated.body = value;
-      }
-    }
 
-    // Validate params
-    if (schema.params) {
-      const { error, value } = schema.params.validate(req.params, {
-        abortEarly: false,
-        stripUnknown: true,
-      });
-
-      if (error) {
-        error.details.forEach((detail) => {
-          errors.push({
-            field: detail.path.join('.'),
-            message: detail.message,
-            type: detail.type,
+        if (error) {
+          // Gom mảng lỗi
+          error.details.forEach((detail) => {
+            errors.push({
+              field: detail.path.join('.'),
+              message: detail.message.replace(/"/g, ''), // Gọt bỏ dấu ngoặc kép Joi tự sinh ra cho đẹp
+              type: detail.type,
+            });
           });
-        });
-      } else {
-        validated.params = value;
+        } else {
+          // Lưu dữ liệu đã được làm sạch
+          validated[target] = value;
+        }
       }
-    }
+    });
 
-    // Validate query
-    if (schema.query) {
-      const { error, value } = schema.query.validate(req.query, {
-        abortEarly: false,
-        stripUnknown: true,
-      });
-
-      if (error) {
-        error.details.forEach((detail) => {
-          errors.push({
-            field: detail.path.join('.'),
-            message: detail.message,
-            type: detail.type,
-          });
-        });
-      } else {
-        validated.query = value;
-      }
-    }
-
-    // Return validation errors if any
+    // 2. Chuyển giao nhiệm vụ cho Global Error Handler
     if (errors.length > 0) {
-      return res.status(400).json({
-        success: false,
-        error: {
-          code: 'VALIDATION_ERROR',
-          message: 'Validation failed',
-          details: errors,
-        },
-      });
+      // Always use generic message for consistency
+      const mainMessage = 'Validation failed';
+      const validationError = new BadRequestError(mainMessage);
+      validationError.code = 'VALIDATION_ERROR';
+      validationError.details = errors; // error.middleware.js sẽ tự động nhặt cái details này!
+      return next(validationError);
     }
 
-    // Attach validated data to request
+    // 3. Đính kèm data an toàn vào request
     req.validated = validated;
 
     next();

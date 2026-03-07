@@ -1,9 +1,10 @@
 /**
  * BigInt Utilities
  *
- * Utilities for handling BigInt values in Ethereum context.
- * Mongoose natively supports BigInt type (stored as BSON Long in MongoDB).
- * These utilities provide validation and arithmetic operations.
+ * Utilities for handling large numeric values in Ethereum context.
+ * Values are stored as Strings in MongoDB to avoid JSON serialization issues.
+ * These utilities provide validation, conversion, and arithmetic operations
+ * by temporarily converting to BigInt for calculations, then back to String.
  *
  * @module utils/bigint
  */
@@ -61,11 +62,72 @@ export const toBigInt = (value) => {
     return value;
   }
 
+  // Validate string format
+  if (typeof value === 'string') {
+    if (value === '') {
+      throw new Error('Cannot convert empty string to BigInt');
+    }
+    if (!/^-?[0-9]+$/.test(value)) {
+      throw new Error(`Invalid string format for BigInt conversion: "${value}". Must match pattern /^-?[0-9]+$/`);
+    }
+  }
+
+  // Validate number is integer
+  if (typeof value === 'number') {
+    if (!Number.isInteger(value)) {
+      throw new Error(`Cannot convert non-integer number to BigInt: ${value}`);
+    }
+  }
+
   try {
     return BigInt(value);
   } catch (error) {
     throw new Error(`Cannot convert value to BigInt: ${value}`);
   }
+};
+
+/**
+ * Converts a value to String representation
+ *
+ * @param {bigint|number|string} value - Value to convert
+ * @returns {string} String representation of the value
+ * @throws {Error} If value cannot be converted
+ *
+ * @example
+ * toStringBigInt(1000n) // "1000"
+ * toStringBigInt("1000000000000000000") // "1000000000000000000"
+ * toStringBigInt(1000) // "1000"
+ */
+export const toStringBigInt = (value) => {
+  if (value === null || value === undefined) {
+    throw new Error('Value cannot be null or undefined');
+  }
+
+  // If already a string, validate and return
+  if (typeof value === 'string') {
+    if (value === '') {
+      throw new Error('Cannot convert empty string');
+    }
+    if (!/^-?[0-9]+$/.test(value)) {
+      throw new Error(`Invalid string format: "${value}". Must match pattern /^-?[0-9]+$/`);
+    }
+    return value;
+  }
+
+  // If BigInt, convert to string
+  if (typeof value === 'bigint') {
+    return value.toString();
+  }
+
+  // If number, validate integer and convert to BigInt first then to string
+  if (typeof value === 'number') {
+    if (!Number.isInteger(value)) {
+      throw new Error(`Cannot convert non-integer number to string: ${value}`);
+    }
+    return BigInt(value).toString();
+  }
+
+  throw new Error(`Cannot convert value to string: ${value}`);
 };
 
 /**
@@ -135,16 +197,17 @@ export const isNonNegativeBigInt = (value) => {
  *
  * @param {bigint|number|string} a - First value
  * @param {bigint|number|string} b - Second value
- * @returns {bigint} Sum
+ * @returns {string} Sum as string
  *
  * @example
- * addBigInt(1000n, 2000n) // 3000n
- * addBigInt("1000", "2000") // 3000n
+ * addBigInt(1000n, 2000n) // "3000"
+ * addBigInt("1000", "2000") // "3000"
  */
 export const addBigInt = (a, b) => {
   const bigIntA = toBigInt(a);
   const bigIntB = toBigInt(b);
-  return bigIntA + bigIntB;
+  const result = bigIntA + bigIntB;
+  return toStringBigInt(result);
 };
 
 /**
@@ -152,16 +215,17 @@ export const addBigInt = (a, b) => {
  *
  * @param {bigint|number|string} a - First value
  * @param {bigint|number|string} b - Second value
- * @returns {bigint} Difference
+ * @returns {string} Difference as string
  *
  * @example
- * subtractBigInt(2000n, 1000n) // 1000n
- * subtractBigInt("2000", "1000") // 1000n
+ * subtractBigInt(2000n, 1000n) // "1000"
+ * subtractBigInt("2000", "1000") // "1000"
  */
 export const subtractBigInt = (a, b) => {
   const bigIntA = toBigInt(a);
   const bigIntB = toBigInt(b);
-  return bigIntA - bigIntB;
+  const result = bigIntA - bigIntB;
+  return toStringBigInt(result);
 };
 
 /**
@@ -169,16 +233,17 @@ export const subtractBigInt = (a, b) => {
  *
  * @param {bigint|number|string} a - First value
  * @param {bigint|number|string} b - Second value
- * @returns {bigint} Product
+ * @returns {string} Product as string
  *
  * @example
- * multiplyBigInt(1000n, 2n) // 2000n
- * multiplyBigInt("1000", "2") // 2000n
+ * multiplyBigInt(1000n, 2n) // "2000"
+ * multiplyBigInt("1000", "2") // "2000"
  */
 export const multiplyBigInt = (a, b) => {
   const bigIntA = toBigInt(a);
   const bigIntB = toBigInt(b);
-  return bigIntA * bigIntB;
+  const result = bigIntA * bigIntB;
+  return toStringBigInt(result);
 };
 
 /**
@@ -186,22 +251,23 @@ export const multiplyBigInt = (a, b) => {
  *
  * @param {bigint|number|string} a - Dividend
  * @param {bigint|number|string} b - Divisor
- * @returns {bigint} Quotient
+ * @returns {string} Quotient as string
  * @throws {Error} If divisor is zero
  *
  * @example
- * divideBigInt(1000n, 2n) // 500n
- * divideBigInt("1000", "2") // 500n
+ * divideBigInt(1000n, 2n) // "500"
+ * divideBigInt("1000", "2") // "500"
  */
 export const divideBigInt = (a, b) => {
   const bigIntA = toBigInt(a);
   const bigIntB = toBigInt(b);
 
   if (bigIntB === 0n) {
-    throw new Error('Division by zero');
+    throw new Error('Division by zero: Cannot divide by zero');
   }
 
-  return bigIntA / bigIntB;
+  const result = bigIntA / bigIntB;
+  return toStringBigInt(result);
 };
 
 /**
@@ -209,11 +275,11 @@ export const divideBigInt = (a, b) => {
  *
  * @param {bigint|number|string} value - Value to calculate percentage of
  * @param {number} percentage - Percentage (0-100)
- * @returns {bigint} Calculated percentage
+ * @returns {string} Calculated percentage as string
  *
  * @example
- * percentageOf(1000n, 10) // 100n (10% of 1000)
- * percentageOf("1000000", 5) // 50000n (5% of 1000000)
+ * percentageOf(1000n, 10) // "100" (10% of 1000)
+ * percentageOf("1000000", 5) // "50000" (5% of 1000000)
  */
 export const percentageOf = (value, percentage) => {
   if (percentage < 0 || percentage > 100) {
@@ -222,12 +288,14 @@ export const percentageOf = (value, percentage) => {
 
   const bigIntValue = toBigInt(value);
   const percentageBigInt = BigInt(Math.floor(percentage * 100)); // Convert to basis points
-  return (bigIntValue * percentageBigInt) / 10000n;
+  const result = (bigIntValue * percentageBigInt) / 10000n;
+  return toStringBigInt(result);
 };
 
 export default {
   isValidBigInt,
   toBigInt,
+  toStringBigInt,
   compareBigInt,
   isPositiveBigInt,
   isNonNegativeBigInt,
