@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import User from '../../models/User.js';
+import User from '../../models/User.model.js';
 import { AUTH_CONSTANTS } from '../../constants/auth.constants.js';
 
 /**

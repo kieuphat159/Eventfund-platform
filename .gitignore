@@ -20,7 +20,7 @@ Thumbs.db
 
 # === Backend ===
 backend/dist/
-
+backend/src/models_backup
 # === Frontend ===
 frontend/dist/
 frontend/dist-ssr/

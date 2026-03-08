@@ -82,11 +82,12 @@ export function errorHandler(err, req, res, next) {
     // Mongoose validation error
     statusCode = 400;
     errorCode = 'VALIDATION_ERROR';
-    message = 'Validation failed';
     details = Object.keys(err.errors).map((key) => ({
       field: key,
       message: err.errors[key].message,
     }));
+    // Use first error message as main message if only one error
+    message = details.length === 1 ? details[0].message : 'Validation failed';
   } else if (err.name === 'MongoError' && err.code === 11000) {
     // MongoDB duplicate key error
     statusCode = 400;

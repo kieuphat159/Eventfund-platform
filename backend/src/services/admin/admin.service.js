@@ -219,7 +219,7 @@ export async function getSystemHealth(options = {}) {
  */
 export async function deleteUser(walletAddress, repos = {}, uploadSvc = null) {
   const userRepository = repos.userRepo || userRepo;
-  const uploadServiceInstance = uploadSvc || uploadService;
+  const uploadServiceInstance = uploadSvc || getDefaultUploadService();
 
   const user = await userRepository.findByWalletAddress(walletAddress);
 

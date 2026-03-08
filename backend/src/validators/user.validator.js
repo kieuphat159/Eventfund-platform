@@ -14,7 +14,7 @@ const updateProfileSchema = Joi.object({
     .email()
     .optional()
 })
-  .min(1); // Require at least one field
+  .min(0); // Allow empty body for avatar-only uploads
   // Allow unknown fields to be stripped by middleware's stripUnknown: true
 
 // Schema for GET /users/:walletAddress params

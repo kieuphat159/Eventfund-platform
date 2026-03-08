@@ -38,8 +38,8 @@ export function validate(schema) {
 
     // 2. Chuyển giao nhiệm vụ cho Global Error Handler
     if (errors.length > 0) {
-      // Always use generic message for consistency
-      const mainMessage = 'Validation failed';
+      // Use first error message if only one error, otherwise generic message
+      const mainMessage = errors.length === 1 ? errors[0].message : 'Validation failed';
       const validationError = new BadRequestError(mainMessage);
       validationError.code = 'VALIDATION_ERROR';
       validationError.details = errors; // error.middleware.js sẽ tự động nhặt cái details này!
