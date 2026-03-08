@@ -24,35 +24,131 @@ function sanitizeForMongo(value) {
   if (Array.isArray(value)) return value.map(sanitizeForMongo);
   if (value && typeof value === "object") {
     const out = {};
-    for (const [k, v] of Object.entries(value)) out[k] = sanitizeForMongo(v);
+    for (const [k, v] of Object.entries(value)) {
+      out[k] = sanitizeForMongo(v);
+    }
     return out;
   }
   return value;
 }
 
-function resultToArgsObject(result) {
+function resultToArgsObject(eventName, result) {
   if (!result) return undefined;
 
-  // ethers v6 Result is array-like + has named keys.
   const out = {};
+
   for (const [k, v] of Object.entries(result)) {
-    // Skip numeric keys; we prefer named args when present.
     if (/^\d+$/.test(k)) continue;
     out[k] = sanitizeForMongo(v);
   }
 
-  // If there were no named keys, fall back to numeric indices.
-  if (Object.keys(out).length === 0) {
-    for (let i = 0; i < result.length; i += 1) {
-      out[String(i)] = sanitizeForMongo(result[i]);
-    }
+  if (Object.keys(out).length > 0) {
+    return out;
   }
 
-  return out;
+  const values = [];
+  for (let i = 0; i < result.length; i += 1) {
+    values.push(sanitizeForMongo(result[i]));
+  }
+
+  switch (eventName) {
+    /**
+     * emit TicketMintedBatch(to, eventId, ticketIds, price, ticketType)
+     */
+    case "TicketMintedBatch":
+      return {
+        to: values[0],
+        eventId: values[1],
+        ticketIds: values[2],
+        price: values[3],
+        ticketType: values[4],
+      };
+
+    /**
+     * emit TicketPurchased(tokenId, eventId, buyer, price)
+     */
+    case "TicketPurchased":
+      return {
+        tokenId: values[0],
+        eventId: values[1],
+        buyer: values[2],
+        price: values[3],
+      };
+
+    /**
+     * emit TicketUsed(tokenId, eventId, owner, verifier, usedAt)
+     */
+    case "TicketUsed":
+      return {
+        tokenId: values[0],
+        eventId: values[1],
+        owner: values[2],
+        verifier: values[3],
+        usedAt: values[4],
+      };
+
+    /**
+     * emit TicketExpired(tokenId, eventId)
+     */
+    case "TicketExpired":
+      return {
+        tokenId: values[0],
+        eventId: values[1],
+      };
+
+    /**
+     * emit TicketRefunded(tokenId, eventId, owner, refundAmount)
+     */
+    case "TicketRefunded":
+      return {
+        tokenId: values[0],
+        eventId: values[1],
+        owner: values[2],
+        refundAmount: values[3],
+      };
+
+    /**
+     * emit TicketRefundClaimed(tokenId, eventId, owner, amount)
+     */
+    case "TicketRefundClaimed":
+      return {
+        tokenId: values[0],
+        eventId: values[1],
+        owner: values[2],
+        amount: values[3],
+      };
+
+    /**
+     * emit FundContractSet(fund)
+     */
+    case "FundContractSet":
+      return {
+        fund: values[0],
+      };
+
+    /**
+     * ERC721 Transfer(from, to, tokenId)
+     */
+    case "Transfer":
+      return {
+        from: values[0],
+        to: values[1],
+        tokenId: values[2],
+      };
+
+    default: {
+      const indexed = {};
+      for (let i = 0; i < values.length; i += 1) {
+        indexed[String(i)] = values[i];
+      }
+      return indexed;
+    }
+  }
 }
 
 async function deleteLogsInRange(contractAddress, fromBlock, toBlock) {
   await ChainLog.deleteMany({
+    contractName: CONTRACT_NAME,
     contractAddress: contractAddress.toLowerCase(),
     blockNumber: { $gte: fromBlock, $lte: toBlock },
   });
@@ -66,7 +162,10 @@ async function storeLogs(contractAddress, logs) {
   const docs = logs.map((log) => {
     let parsed;
     try {
-      parsed = ticket.interface.parseLog({ topics: log.topics, data: log.data });
+      parsed = ticket.interface.parseLog({
+        topics: log.topics,
+        data: log.data,
+      });
     } catch {
       parsed = undefined;
     }
@@ -82,11 +181,12 @@ async function storeLogs(contractAddress, logs) {
       topics: log.topics,
       data: log.data,
       eventName: parsed?.name,
-      args: parsed?.args ? resultToArgsObject(parsed.args) : undefined,
+      args: parsed?.args
+        ? resultToArgsObject(parsed.name, parsed.args)
+        : undefined,
     };
   });
 
-  // Insert with ordered:false so duplicates (rare) don't abort the batch.
   await ChainLog.insertMany(docs, { ordered: false });
 }
 
@@ -112,10 +212,15 @@ export async function syncTicketLogsOnce() {
     lastProcessedBlock: syncState.lastProcessedBlock,
     reorgBuffer,
   });
+
   const target = plan.targetBlock;
 
   if (!plan.shouldSync) {
-    return { latest, target, processedTo: syncState.lastProcessedBlock };
+    return {
+      latest,
+      target,
+      processedTo: syncState.lastProcessedBlock,
+    };
   }
 
   const from = plan.fromBlock;
@@ -126,7 +231,6 @@ export async function syncTicketLogsOnce() {
   while (currentFrom <= target) {
     const currentTo = Math.min(target, currentFrom + chunkSize - 1);
 
-    // Reorg-handling strategy: for the rescan range, wipe then re-insert logs.
     await deleteLogsInRange(contractAddressLower, currentFrom, currentTo);
 
     const logs = await provider.getLogs({
@@ -149,7 +253,11 @@ export async function syncTicketLogsOnce() {
 
   await markSynced(CONTRACT_NAME);
 
-  return { latest, target, processedTo: target };
+  return {
+    latest,
+    target,
+    processedTo: target,
+  };
 }
 
 export async function runTicketIndexerLoop() {
@@ -161,9 +269,6 @@ export async function runTicketIndexerLoop() {
       await syncTicketLogsOnce();
     } catch (err) {
       await markError(CONTRACT_NAME, err);
-
-      // Keep process alive; next iteration may recover.
-      // eslint-disable-next-line no-console
       console.error("Ticket indexer error:", err);
     }
 

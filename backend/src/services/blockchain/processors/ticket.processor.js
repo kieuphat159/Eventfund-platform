@@ -39,6 +39,27 @@ function safeBigInt(value) {
   }
 }
 
+function toDateFromUnix(value) {
+  if (value === undefined || value === null || value === "") return undefined;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return undefined;
+  return new Date(n * 1000);
+}
+
+/**
+ * Hỗ trợ đọc arg theo cả 2 kiểu:
+ * - args.eventId
+ * - args["1"]
+ */
+function getArg(args, name, index) {
+  if (!args) return undefined;
+  if (args[name] !== undefined && args[name] !== null) return args[name];
+  if (index !== undefined && args[String(index)] !== undefined && args[String(index)] !== null) {
+    return args[String(index)];
+  }
+  return undefined;
+}
+
 function mapChainLogToTicketEventDoc(chainLog, contractAddressLower) {
   const eventName = chainLog.eventName || "Unknown";
   const args = chainLog.args || {};
@@ -55,76 +76,145 @@ function mapChainLogToTicketEventDoc(chainLog, contractAddressLower) {
   };
 
   switch (eventName) {
+    /**
+     * emit TicketMintedBatch(to, eventId, ticketIds, price, ticketType)
+     * named:
+     * - to
+     * - eventId
+     * - ticketIds
+     * - price
+     * - ticketType
+     *
+     * positional:
+     * 0: to
+     * 1: eventId
+     * 2: ticketIds
+     * 3: price
+     * 4: ticketType
+     */
     case "TicketMintedBatch": {
-      const eventId = toStringId(args.eventId);
-      const ticketIds = Array.isArray(args.ticketIds)
-        ? args.ticketIds.map(toStringId).filter(Boolean)
+      const eventId = toStringId(getArg(args, "eventId", 1));
+      const ticketIdsRaw = getArg(args, "ticketIds", 2);
+      const ticketIds = Array.isArray(ticketIdsRaw)
+        ? ticketIdsRaw.map(toStringId).filter(Boolean)
         : undefined;
+
       return {
         ...base,
         eventId,
-        organizer: lowerAddress(args.to),
+        organizer: lowerAddress(getArg(args, "to", 0)),
         ticketIds,
-        priceWei: toStringId(args.price),
-        ticketType:
-          args.ticketType !== undefined && args.ticketType !== null
-            ? Number(args.ticketType)
-            : undefined,
+        priceWei: toStringId(getArg(args, "price", 3)),
+        ticketType: getArg(args, "ticketType", 4) !== undefined
+          ? Number(getArg(args, "ticketType", 4))
+          : undefined,
       };
     }
 
+    /**
+     * emit TicketPurchased(tokenId, eventId, buyer, price)
+     * named:
+     * - tokenId
+     * - eventId
+     * - buyer
+     * - price
+     *
+     * positional:
+     * 0: tokenId
+     * 1: eventId
+     * 2: buyer
+     * 3: price
+     */
     case "TicketPurchased": {
       return {
         ...base,
-        eventId: toStringId(args.eventId),
-        tokenId: toStringId(args.tokenId),
-        buyer: lowerAddress(args.buyer),
-        priceWei: toStringId(args.price),
+        eventId: toStringId(getArg(args, "eventId", 1)),
+        tokenId: toStringId(getArg(args, "tokenId", 0)),
+        buyer: lowerAddress(getArg(args, "buyer", 2)),
+        priceWei: toStringId(getArg(args, "price", 3)),
       };
     }
 
+    /**
+     * emit TicketUsed(tokenId, eventId, owner, verifier, usedAt)
+     * positional:
+     * 0: tokenId
+     * 1: eventId
+     * 2: owner
+     * 3: verifier
+     * 4: usedAt
+     */
     case "TicketUsed": {
+      const usedAtRaw = getArg(args, "usedAt", 4);
+
       return {
         ...base,
-        eventId: toStringId(args.eventId),
-        tokenId: toStringId(args.tokenId),
-        owner: lowerAddress(args.owner),
-        verifier: lowerAddress(args.verifier),
-        usedAt: toStringId(args.usedAt),
+        eventId: toStringId(getArg(args, "eventId", 1)),
+        tokenId: toStringId(getArg(args, "tokenId", 0)),
+        owner: lowerAddress(getArg(args, "owner", 2)),
+        verifier: lowerAddress(getArg(args, "verifier", 3)),
+        usedAt: toStringId(usedAtRaw),
+        usedAtDate: toDateFromUnix(usedAtRaw),
       };
     }
 
+    /**
+     * emit TicketExpired(tokenId, eventId)
+     * positional:
+     * 0: tokenId
+     * 1: eventId
+     */
     case "TicketExpired": {
       return {
         ...base,
-        eventId: toStringId(args.eventId),
-        tokenId: toStringId(args.tokenId),
+        eventId: toStringId(getArg(args, "eventId", 1)),
+        tokenId: toStringId(getArg(args, "tokenId", 0)),
       };
     }
 
+    /**
+     * emit TicketRefunded(tokenId, eventId, owner, refundAmount)
+     * positional:
+     * 0: tokenId
+     * 1: eventId
+     * 2: owner
+     * 3: refundAmount
+     */
     case "TicketRefunded": {
       return {
         ...base,
-        eventId: toStringId(args.eventId),
-        tokenId: toStringId(args.tokenId),
-        owner: lowerAddress(args.owner),
-        refundAmountWei: toStringId(args.refundAmount),
+        eventId: toStringId(getArg(args, "eventId", 1)),
+        tokenId: toStringId(getArg(args, "tokenId", 0)),
+        owner: lowerAddress(getArg(args, "owner", 2)),
+        refundAmountWei: toStringId(getArg(args, "refundAmount", 3)),
       };
     }
 
+    /**
+     * emit FundContractSet(fund)
+     * positional:
+     * 0: fund
+     */
     case "FundContractSet": {
       return {
         ...base,
-        to: lowerAddress(args.fund),
+        to: lowerAddress(getArg(args, "fund", 0)),
       };
     }
 
+    /**
+     * ERC721 Transfer(from, to, tokenId)
+     * positional:
+     * 0: from
+     * 1: to
+     * 2: tokenId
+     */
     case "Transfer": {
       return {
         ...base,
-        tokenId: toStringId(args.tokenId),
-        from: lowerAddress(args.from),
-        to: lowerAddress(args.to),
+        tokenId: toStringId(getArg(args, "tokenId", 2)),
+        from: lowerAddress(getArg(args, "from", 0)),
+        to: lowerAddress(getArg(args, "to", 1)),
       };
     }
 
@@ -148,6 +238,7 @@ async function rebuildStatsForEventIds(contractAddressLower, eventIds) {
   const uniqueEventIds = Array.from(
     new Set(eventIds.map(toStringId).filter(Boolean)),
   );
+
   if (uniqueEventIds.length === 0) return;
 
   for (const eventId of uniqueEventIds) {
@@ -158,6 +249,7 @@ async function rebuildStatsForEventIds(contractAddressLower, eventIds) {
     })
       .select({ ticketIds: 1 })
       .lean();
+
     const totalMinted = mintedDocs.reduce(
       (sum, d) => sum + (Array.isArray(d.ticketIds) ? d.ticketIds.length : 0),
       0,
@@ -220,6 +312,7 @@ async function rebuildStatsForEventIds(contractAddressLower, eventIds) {
 export async function processTicketLogsOnce() {
   const ticket = getTicket();
   const { confirmations, reorgBuffer, chunkSize } = readReorgPolicyFromEnv();
+
   const startBlock = getNumberEnv(
     "TICKET_PROCESSOR_START_BLOCK",
     getNumberEnv("TICKET_START_BLOCK", 0),
@@ -235,6 +328,7 @@ export async function processTicketLogsOnce() {
   });
 
   const latest = await provider.getBlockNumber();
+
   const plan = planReorgSafeSync({
     latestBlock: latest,
     confirmations,
@@ -256,7 +350,6 @@ export async function processTicketLogsOnce() {
   while (currentFrom <= target) {
     const currentTo = Math.min(target, currentFrom + chunkSize - 1);
 
-    // Reorg-safe: wipe derived docs in the rescan window.
     await deleteDerivedEventsInRange(
       contractAddressLower,
       currentFrom,
@@ -278,7 +371,11 @@ export async function processTicketLogsOnce() {
 
     if (docs.length > 0) {
       await TicketEvent.insertMany(docs, { ordered: false });
-      const affectedEventIds = docs.map((d) => d.eventId).filter(Boolean);
+
+      const affectedEventIds = docs
+        .map((d) => d.eventId)
+        .filter(Boolean);
+
       await rebuildStatsForEventIds(contractAddressLower, affectedEventIds);
     }
 
@@ -293,6 +390,7 @@ export async function processTicketLogsOnce() {
   }
 
   await markSynced(PROCESSOR_NAME);
+
   return { latest, target, processedTo: target };
 }
 
@@ -308,8 +406,6 @@ export async function runTicketProcessorLoop() {
       await processTicketLogsOnce();
     } catch (err) {
       await markError(PROCESSOR_NAME, err);
-
-      // eslint-disable-next-line no-console
       console.error("Ticket processor error:", err);
     }
 

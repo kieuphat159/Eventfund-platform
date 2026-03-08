@@ -24,54 +24,83 @@ import {
 const CONTRACT_NAME = "Fund";
 const PROCESSOR_NAME = "FundProcessor";
 
-// --- Helper Utilities ---
+// -------------------------
+// Helper utils
+// -------------------------
 const toStringId = (v) =>
   v === undefined || v === null ? undefined : String(v);
+
+const toNumberSafe = (v) => {
+  if (v === undefined || v === null) return 0;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
+
 const lowerAddress = (v) => (v ? String(v).toLowerCase() : undefined);
 
+function getEventStatusLabel(statusValue) {
+  const map = {
+    0: "none",
+    1: "funding",
+    2: "funded",
+    3: "ticketing",
+    4: "completed",
+    5: "cancelled",
+  };
+
+  const n = Number(statusValue);
+  return map[n] ?? `unknown_${statusValue}`;
+}
+
 /**
- * REBUILD LOGIC: Tính toán lại toàn bộ trạng thái tài chính của một Event.
- * Đảm bảo tính nhất quán giữa Contribution, Share và Event Funding.
+ * Rebuild lại funding + shares từ bảng Contribution
+ * Chỉ tính những contribution confirmed chưa bị refunded
  */
 async function rebuildFundState(eventObjectId) {
-  // 1. Lấy tất cả contribution đã xác nhận
   const contributions = await Contribution.find({
     eventId: eventObjectId,
     status: "confirmed",
   }).lean();
 
   const totalFunding = contributions.reduce(
-    (sum, c) => sum + (c.amount || 0),
+    (sum, c) => sum + toNumberSafe(c.amount),
     0,
   );
 
-  // 2. Cập nhật con số tổng vào Event
   await Event.updateOne(
     { _id: eventObjectId },
     { $set: { currentFunding: totalFunding } },
   );
 
-  if (totalFunding === 0) return;
-
-  // 3. Tính toán lại tỷ lệ cổ phần (%) cho từng Holder
   const holderMap = {};
+
   for (const c of contributions) {
     const addr = lowerAddress(c.contributor);
+    if (!addr) continue;
+
     if (!holderMap[addr]) {
-      holderMap[addr] = { amount: 0 };
+      holderMap[addr] = {
+        contributionAmount: 0,
+      };
     }
-    holderMap[addr].amount += c.amount;
+
+    holderMap[addr].contributionAmount += toNumberSafe(c.amount);
   }
 
   const shareOps = Object.entries(holderMap).map(([holder, data]) => {
-    const percentage = (data.amount / totalFunding) * 100;
+    const sharePercentage =
+      totalFunding > 0 ? (data.contributionAmount / totalFunding) * 100 : 0;
+
     return {
       updateOne: {
         filter: { eventId: eventObjectId, holder },
         update: {
           $set: {
-            contributionAmount: data.amount,
-            sharePercentage: percentage,
+            contributionAmount: data.contributionAmount,
+            sharePercentage,
+          },
+          $setOnInsert: {
+            claimedReward: 0,
           },
         },
         upsert: true,
@@ -85,164 +114,554 @@ async function rebuildFundState(eventObjectId) {
 }
 
 /**
- * LOGIC XỬ LÝ EVENT CHI TIẾT
+ * Tìm Event theo contractEventId.
+ * Nếu chưa có thì trả null.
  */
-async function processFundLog(log) {
-  const { eventName, args, transactionHash, blockNumber } = log;
-  const txHash = transactionHash.toLowerCase();
-  const contractEventId = toStringId(args.eventId);
+async function findReferencedEvent(contractEventId) {
+  if (!contractEventId) return null;
 
-  // Tìm Event tham chiếu
-  const eventDoc = await Event.findOne({ contractEventId })
-    .select("_id organizer")
+  return Event.findOne({ contractEventId })
+    .select("_id organizer contractEventId")
     .lean();
-  if (!eventDoc) return;
+}
 
-  switch (eventName) {
-    case "ContributionReceived": {
-      const amount = Number(args.amount);
-      const contributor = lowerAddress(args.contributor);
-      const isOrganizer = contributor === lowerAddress(eventDoc.organizer);
+/**
+ * Xử lý EventCreated
+ * Tạo mới hoặc cập nhật Event local DB
+ */
+async function handleEventCreated(log) {
+  const { args, transactionHash, blockNumber } = log;
 
-      await Contribution.updateOne(
-        { txHash }, // Idempotency dựa trên txHash
-        {
-          $set: {
-            eventId: eventDoc._id,
-            contributor,
-            amount,
-            type: isOrganizer ? "organizer_stake" : "donator_contribution",
-            status: "confirmed",
-            txHash,
-            blockNumber,
-            timestamp: new Date(),
-          },
+  const contractEventId = toStringId(args.eventId);
+  const organizer = lowerAddress(args.organizer);
+
+  await Event.updateOne(
+    { contractEventId },
+    {
+      $set: {
+        contractEventId,
+        organizer,
+        fundingGoal: toNumberSafe(args.fundingGoal),
+        fundingDeadline: toNumberSafe(args.fundingDeadline),
+        minStakeRequired: toNumberSafe(args.minStakeRequired),
+        organizerShareBps: toNumberSafe(args.organizerShareBps),
+        ticketPrice: toNumberSafe(args.ticketPrice),
+        maxTickets: toNumberSafe(args.maxTickets),
+        usedThreshold: toNumberSafe(args.usedThreshold),
+        organizerStakeLocked: toNumberSafe(args.stakeAmount),
+        currentFunding: 0,
+        totalRevenue: 0,
+        refundedAmount: 0,
+        status: "funding",
+        escrowStatus: "holding",
+        createdByTxHash: transactionHash?.toLowerCase(),
+        createdBlockNumber: blockNumber,
+      },
+      $setOnInsert: {
+        createdAt: new Date(),
+      },
+    },
+    { upsert: true },
+  );
+
+  // stake ban đầu của organizer cũng lưu vào Contribution cho dễ rebuild
+  if (toNumberSafe(args.stakeAmount) > 0) {
+    const eventDoc = await findReferencedEvent(contractEventId);
+    if (!eventDoc) return;
+
+    await Contribution.updateOne(
+      {
+        txHash: transactionHash.toLowerCase(),
+        type: "organizer_stake",
+      },
+      {
+        $set: {
+          eventId: eventDoc._id,
+          contributor: organizer,
+          amount: toNumberSafe(args.stakeAmount),
+          type: "organizer_stake",
+          status: "confirmed",
+          contractEventId,
+          txHash: transactionHash.toLowerCase(),
+          blockNumber,
+          timestamp: new Date(),
         },
-        { upsert: true },
-      );
-
-      await rebuildFundState(eventDoc._id);
-      break;
-    }
-
-    case "RevenueDistributed": {
-      const totalRevenue = Number(args.totalRevenue);
-      const platformFee = Number(args.platformFee);
-
-      await RevenueDistribution.updateOne(
-        { txHash },
-        {
-          $set: {
-            eventId: eventDoc._id,
-            totalRevenue,
-            platformFee,
-            platformFeePercentage:
-              totalRevenue > 0 ? (platformFee / totalRevenue) * 100 : 0,
-            organizerShare: Number(args.organizerShare),
-            organizerSharePercentage:
-              totalRevenue > 0
-                ? (Number(args.organizerShare) / totalRevenue) * 100
-                : 0,
-            donatorPool: Number(args.donatorPool),
-            status: "completed",
-            txHash,
-            triggeredAt: new Date(),
-            completedAt: new Date(),
-            triggerType: "threshold_reached",
-          },
-        },
-        { upsert: true },
-      );
-
-      await Event.updateOne(
-        { _id: eventDoc._id },
-        {
-          $set: {
-            status: "completed",
-            escrowStatus: "released",
-            totalRevenue: totalRevenue,
-            revenueDistributedAt: new Date(),
-          },
-        },
-      );
-      break;
-    }
-
-    case "OrganizerPenalized": {
-      const penaltyAmount = Number(args.penaltyAmount);
-      const originalStake = Number(args.originalStake);
-
-      await Penalty.updateOne(
-        { txHash },
-        {
-          $set: {
-            eventId: eventDoc._id,
-            organizer: lowerAddress(eventDoc.organizer),
-            stakeAmount: originalStake,
-            penaltyAmount,
-            penaltyPercentage:
-              originalStake > 0 ? (penaltyAmount / originalStake) * 100 : 0,
-            reason: args.reason || "threshold_not_met",
-            txHash,
-            status: "processed",
-            processedAt: new Date(),
-          },
-        },
-        { upsert: true },
-      );
-      break;
-    }
-
-    case "RewardClaimed": {
-      const amount = Number(args.amount);
-      const claimer = lowerAddress(args.claimer);
-
-      await RewardClaim.updateOne(
-        { txHash },
-        {
-          $set: {
-            eventId: eventDoc._id,
-            claimer,
-            rewardAmount: amount,
-            status: "confirmed",
-            txHash,
-            claimedAt: new Date(),
-          },
-        },
-        { upsert: true },
-      );
-
-      // Cập nhật số dư đã nhận vào bảng Share
-      await Share.updateOne(
-        { eventId: eventDoc._id, holder: claimer },
-        { $inc: { claimedReward: amount } },
-      );
-      break;
-    }
-
-    case "FundRefunded": {
-      await Contribution.updateMany(
-        { eventId: eventDoc._id },
-        { $set: { status: "refunded" } },
-      );
-      await Event.updateOne(
-        { _id: eventDoc._id },
-        { $set: { status: "failed", escrowStatus: "refunded" } },
-      );
-      break;
-    }
+      },
+      { upsert: true },
+    );
   }
 }
 
 /**
- * HÀM CHẠY ĐỒNG BỘ CHÍNH
+ * Xử lý contribution của donator
  */
+async function handleContributionMade(log, eventDoc) {
+  const { args, transactionHash, blockNumber } = log;
+
+  const contributor = lowerAddress(args.donator);
+  const amount = toNumberSafe(args.amount);
+
+  await Contribution.updateOne(
+    {
+      txHash: transactionHash.toLowerCase(),
+      type: "donator_contribution",
+    },
+    {
+      $set: {
+        eventId: eventDoc._id,
+        contributor,
+        amount,
+        type: "donator_contribution",
+        status: "confirmed",
+        contractEventId: eventDoc.contractEventId,
+        txHash: transactionHash.toLowerCase(),
+        blockNumber,
+        timestamp: new Date(),
+      },
+    },
+    { upsert: true },
+  );
+
+  await rebuildFundState(eventDoc._id);
+}
+
+/**
+ * Xử lý SharesIssued
+ * Có thể dùng để cập nhật Share ngay nếu muốn bám theo on-chain shares
+ */
+async function handleSharesIssued(log, eventDoc) {
+  const { args } = log;
+
+  const holder = lowerAddress(args.donator);
+  const sharesMinted = toNumberSafe(args.sharesMinted);
+
+  await Share.updateOne(
+    { eventId: eventDoc._id, holder },
+    {
+      $inc: {
+        mintedShares: sharesMinted,
+      },
+      $setOnInsert: {
+        claimedReward: 0,
+      },
+    },
+    { upsert: true },
+  );
+
+  await rebuildFundState(eventDoc._id);
+}
+
+async function handleFundingSuccessful(eventDoc) {
+  await Event.updateOne(
+    { _id: eventDoc._id },
+    {
+      $set: {
+        status: "funded",
+      },
+    },
+  );
+}
+
+async function handleFundingFinalized(log, eventDoc) {
+  const { args } = log;
+
+  await Event.updateOne(
+    { _id: eventDoc._id },
+    {
+      $set: {
+        status: getEventStatusLabel(args.statusAfterFinalize),
+        sharesFinalized: true,
+        totalShares: toNumberSafe(args.totalShares),
+        fundingFinalizedAt: new Date(),
+      },
+    },
+  );
+}
+
+async function handleTicketingStarted(log, eventDoc) {
+  const { args } = log;
+
+  await Event.updateOne(
+    { _id: eventDoc._id },
+    {
+      $set: {
+        status: "ticketing",
+        totalMinted: toNumberSafe(args.mintedQty),
+        ticketType: toNumberSafe(args.ticketType),
+        ticketingStartedAt: new Date(),
+      },
+    },
+  );
+}
+
+async function handleCompleted(log, eventDoc) {
+  const { args } = log;
+
+  await Event.updateOne(
+    { _id: eventDoc._id },
+    {
+      $set: {
+        status: "completed",
+        usedTickets: toNumberSafe(args.usedTickets),
+        completedAt: new Date(),
+      },
+    },
+  );
+}
+
+async function handleRevenueReleased(log, eventDoc) {
+  const { args, transactionHash } = log;
+
+  const totalRevenue = toNumberSafe(args.totalRevenue);
+  const platformFee = toNumberSafe(args.platformFee);
+  const organizerShare = toNumberSafe(args.organizerShare);
+  const donatorPool = toNumberSafe(args.donatorPool);
+  const newAccRewardPerShare = toNumberSafe(args.newAccRewardPerShare);
+
+  await RevenueDistribution.updateOne(
+    { txHash: transactionHash.toLowerCase() },
+    {
+      $set: {
+        eventId: eventDoc._id,
+        totalRevenue,
+        platformFee,
+        platformFeePercentage:
+          totalRevenue > 0 ? (platformFee / totalRevenue) * 100 : 0,
+        organizerShare,
+        organizerSharePercentage:
+          totalRevenue > 0 ? (organizerShare / totalRevenue) * 100 : 0,
+        donatorPool,
+        accRewardPerShare: newAccRewardPerShare,
+        status: "completed",
+        txHash: transactionHash.toLowerCase(),
+        triggeredAt: new Date(),
+        completedAt: new Date(),
+        triggerType: "manual_release",
+      },
+    },
+    { upsert: true },
+  );
+
+  await Event.updateOne(
+    { _id: eventDoc._id },
+    {
+      $set: {
+        status: "completed",
+        escrowStatus: "released",
+        totalRevenue,
+        platformFee,
+        organizerShare,
+        donatorPool,
+        revenueReleased: true,
+        revenueDistributedAt: new Date(),
+      },
+    },
+  );
+}
+
+async function handleRewardClaimed(log, eventDoc) {
+  const { args, transactionHash } = log;
+
+  const claimer = lowerAddress(args.donator);
+  const amount = toNumberSafe(args.amount);
+
+  await RewardClaim.updateOne(
+    { txHash: transactionHash.toLowerCase() },
+    {
+      $set: {
+        eventId: eventDoc._id,
+        claimer,
+        rewardAmount: amount,
+        status: "confirmed",
+        txHash: transactionHash.toLowerCase(),
+        claimedAt: new Date(),
+      },
+    },
+    { upsert: true },
+  );
+
+  await Share.updateOne(
+    { eventId: eventDoc._id, holder: claimer },
+    { $inc: { claimedReward: amount } },
+  );
+}
+
+async function handleRefundsEnabled(log, eventDoc) {
+  const { args } = log;
+
+  await Event.updateOne(
+    { _id: eventDoc._id },
+    {
+      $set: {
+        escrowStatus: "refund_enabled",
+        refundsEnabled: true,
+        refundPool: toNumberSafe(args.refundPoolAmount),
+        refundEnabledAt: new Date(),
+      },
+    },
+  );
+}
+
+async function handleTicketRefundPaid(log, eventDoc) {
+  const { args } = log;
+
+  const amount = toNumberSafe(args.amount);
+
+  await Event.updateOne(
+    { _id: eventDoc._id },
+    {
+      $inc: {
+        refundedAmount: amount,
+      },
+      $set: {
+        escrowStatus: "refunding",
+        lastRefundedAt: new Date(),
+      },
+    },
+  );
+}
+
+async function handleRefundPoolDeposited(log, eventDoc) {
+  const { args } = log;
+
+  await Event.updateOne(
+    { _id: eventDoc._id },
+    {
+      $set: {
+        refundPool: toNumberSafe(args.newRefundPool),
+        escrowStatus: "refund_pool_funded",
+        lastRefundPoolDepositAt: new Date(),
+      },
+      $inc: {
+        extraRefundPoolDeposited: toNumberSafe(args.amount),
+      },
+    },
+  );
+}
+
+async function handlePenaltyApplied(log, eventDoc) {
+  const { args, transactionHash } = log;
+
+  const penaltyAmount = toNumberSafe(args.amount);
+  const penaltyBps = toNumberSafe(args.penaltyBps);
+
+  await Penalty.updateOne(
+    { txHash: transactionHash.toLowerCase() },
+    {
+      $set: {
+        eventId: eventDoc._id,
+        organizer: lowerAddress(eventDoc.organizer),
+        penaltyAmount,
+        penaltyPercentage: penaltyBps / 100,
+        penaltyBps,
+        reason: args.reason ?? "unknown",
+        txHash: transactionHash.toLowerCase(),
+        status: "processed",
+        processedAt: new Date(),
+      },
+    },
+    { upsert: true },
+  );
+
+  await Event.updateOne(
+    { _id: eventDoc._id },
+    {
+      $inc: {
+        totalPenaltyAmount: penaltyAmount,
+      },
+      $set: {
+        lastPenaltyAt: new Date(),
+      },
+    },
+  );
+}
+
+async function handleTicketRevenueDeposited(log, eventDoc) {
+  const { args } = log;
+
+  await Event.updateOne(
+    { _id: eventDoc._id },
+    {
+      $set: {
+        escrowStatus: "holding_revenue",
+        escrowedRevenue: toNumberSafe(args.newEscrowedRevenue),
+        lastTicketRevenueAt: new Date(),
+      },
+      $inc: {
+        ticketRevenueDeposited: toNumberSafe(args.amount),
+      },
+    },
+  );
+}
+
+async function handleRoyaltyDeposited(log, eventDoc) {
+  const { args } = log;
+
+  await Event.updateOne(
+    { _id: eventDoc._id },
+    {
+      $set: {
+        escrowStatus: "holding_revenue",
+        escrowedRevenue: toNumberSafe(args.newEscrowedRevenue),
+        lastRoyaltyRevenueAt: new Date(),
+      },
+      $inc: {
+        royaltyRevenueDeposited: toNumberSafe(args.amount),
+      },
+    },
+  );
+}
+
+async function handleContributionRefunded(log, eventDoc) {
+  const { args } = log;
+
+  const contributor = lowerAddress(args.donator);
+  const amount = toNumberSafe(args.amount);
+
+  await Contribution.updateMany(
+    {
+      eventId: eventDoc._id,
+      contributor,
+      status: "confirmed",
+    },
+    {
+      $set: {
+        status: "refunded",
+        refundedAt: new Date(),
+      },
+    },
+  );
+
+  await Event.updateOne(
+    { _id: eventDoc._id },
+    {
+      $inc: {
+        refundedAmount: amount,
+      },
+      $set: {
+        status: "cancelled",
+        escrowStatus: "refunded",
+        lastContributionRefundAt: new Date(),
+      },
+    },
+  );
+
+  await rebuildFundState(eventDoc._id);
+}
+
+async function handleStakeWithdrawn(log, eventDoc) {
+  const { args } = log;
+
+  await Event.updateOne(
+    { _id: eventDoc._id },
+    {
+      $set: {
+        organizerStakeWithdrawn: toNumberSafe(args.amount),
+        stakeWithdrawnAt: new Date(),
+      },
+    },
+  );
+}
+
+// -------------------------
+// Main log processor
+// -------------------------
+async function processFundLog(log) {
+  const { eventName, args } = log;
+
+  if (!eventName) return;
+
+  // EventCreated phải xử lý trước vì lúc này event local có thể chưa tồn tại
+  if (eventName === "EventCreated") {
+    await handleEventCreated(log);
+    return;
+  }
+
+  const contractEventId = toStringId(args?.eventId);
+  const eventDoc = await findReferencedEvent(contractEventId);
+
+  if (!eventDoc) return;
+
+  switch (eventName) {
+    case "ContributionMade":
+      await handleContributionMade(log, eventDoc);
+      break;
+
+    case "SharesIssued":
+      await handleSharesIssued(log, eventDoc);
+      break;
+
+    case "FundingSuccessful":
+      await handleFundingSuccessful(eventDoc);
+      break;
+
+    case "FundingFinalized":
+      await handleFundingFinalized(log, eventDoc);
+      break;
+
+    case "TicketingStarted":
+      await handleTicketingStarted(log, eventDoc);
+      break;
+
+    case "Completed":
+      await handleCompleted(log, eventDoc);
+      break;
+
+    case "RevenueReleased":
+      await handleRevenueReleased(log, eventDoc);
+      break;
+
+    case "RewardClaimed":
+      await handleRewardClaimed(log, eventDoc);
+      break;
+
+    case "RefundsEnabled":
+      await handleRefundsEnabled(log, eventDoc);
+      break;
+
+    case "TicketRefundPaid":
+      await handleTicketRefundPaid(log, eventDoc);
+      break;
+
+    case "RefundPoolDeposited":
+      await handleRefundPoolDeposited(log, eventDoc);
+      break;
+
+    case "PenaltyApplied":
+      await handlePenaltyApplied(log, eventDoc);
+      break;
+
+    case "TicketRevenueDeposited":
+      await handleTicketRevenueDeposited(log, eventDoc);
+      break;
+
+    case "RoyaltyDeposited":
+      await handleRoyaltyDeposited(log, eventDoc);
+      break;
+
+    case "ContributionRefunded":
+      await handleContributionRefunded(log, eventDoc);
+      break;
+
+    case "StakeWithdrawn":
+      await handleStakeWithdrawn(log, eventDoc);
+      break;
+
+    default:
+      break;
+  }
+}
+
+// -------------------------
+// Main processor loop once
+// -------------------------
 export async function processFundLogsOnce() {
   const fund = getFund();
   const { confirmations, reorgBuffer, chunkSize } = readReorgPolicyFromEnv();
   const startBlock = getNumberEnv("FUND_START_BLOCK", 0);
 
   const contractAddress = (await fund.getAddress()).toLowerCase();
+
   const syncState = await getOrInitSyncState({
     contractName: PROCESSOR_NAME,
     contractAddress,
@@ -258,7 +677,13 @@ export async function processFundLogsOnce() {
     reorgBuffer,
   });
 
-  if (!plan.shouldSync) return { latest, target: plan.targetBlock };
+  if (!plan.shouldSync) {
+    return {
+      latest,
+      target: plan.targetBlock,
+      processedTo: syncState.lastProcessedBlock,
+    };
+  }
 
   await markSyncing(PROCESSOR_NAME);
 
@@ -291,18 +716,30 @@ export async function processFundLogsOnce() {
   }
 
   await markSynced(PROCESSOR_NAME);
-  return { latest, target };
+
+  return {
+    latest,
+    target,
+    processedTo: target,
+  };
 }
 
+// -------------------------
+// Infinite loop runner
+// -------------------------
 export async function runFundProcessorLoop() {
-  const intervalMs = getNumberEnv("CHAIN_PROCESS_INTERVAL_MS", 10000);
+  const intervalMs = getNumberEnv("CHAIN_PROCESS_INTERVAL_MS", 10_000);
+
+  // eslint-disable-next-line no-constant-condition
   while (true) {
     try {
       await processFundLogsOnce();
     } catch (err) {
       await markError(PROCESSOR_NAME, err);
+      // eslint-disable-next-line no-console
       console.error("Fund processor error:", err);
     }
+
     await new Promise((r) => setTimeout(r, intervalMs));
   }
 }
