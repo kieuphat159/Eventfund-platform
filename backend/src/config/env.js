@@ -7,3 +7,112 @@ const __dirname = path.dirname(__filename);
 
 // Always load backend/.env (not dependent on the process working directory).
 dotenv.config({ path: path.resolve(__dirname, "../../.env") });
+
+/**
+ * Validate required environment variables at startup
+ * Throws error if any required variable is missing
+ */
+function validateEnv() {
+  const required = [
+    'PORT',
+    'NODE_ENV',
+    'MONGO_DEV_URI'
+  ];
+
+  // Check for Cloudinary variables (either generic or environment-specific)
+  const hasCloudinary =
+    (process.env.CLOUDINARY_NAME && process.env.CLOUDINARY_KEY && process.env.CLOUDINARY_SECRET) ||
+    (process.env.CLOUDINARY_DEV_NAME && process.env.CLOUDINARY_DEV_KEY && process.env.CLOUDINARY_DEV_SECRET) ||
+    (process.env.CLOUDINARY_PROD_NAME && process.env.CLOUDINARY_PROD_KEY && process.env.CLOUDINARY_PROD_SECRET);
+
+  if (!hasCloudinary) {
+    required.push('CLOUDINARY_NAME', 'CLOUDINARY_KEY', 'CLOUDINARY_SECRET');
+  }
+
+  const missing = required.filter(key => !process.env[key]);
+
+  if (missing.length > 0) {
+    throw new Error(
+      `Missing required environment variables: ${missing.join(', ')}\n` +
+      'Please check your .env file and ensure all required variables are set.'
+    );
+  }
+
+  // Validate NODE_ENV value
+  const validEnvs = ['DEV', 'PROD', 'TEST', 'Dev', 'Prod', 'Test'];
+  const nodeEnv = process.env.NODE_ENV || 'DEV';
+  if (!validEnvs.includes(nodeEnv) && !validEnvs.map(e => e.toLowerCase()).includes(nodeEnv.toLowerCase())) {
+    throw new Error(
+      `Invalid NODE_ENV value: ${nodeEnv}\n` +
+      `Must be one of: ${validEnvs.join(', ')}`
+    );
+  }
+
+  console.log('✓ Environment variables validated successfully');
+}
+
+/**
+ * Get environment-specific configuration
+ */
+export const config = {
+  // Server
+  port: process.env.PORT || 4000,
+  nodeEnv: process.env.NODE_ENV?.toUpperCase() || 'DEV',
+  isDev: process.env.NODE_ENV?.toUpperCase() === 'DEV',
+  isProd: process.env.NODE_ENV?.toUpperCase() === 'PROD',
+  isTest: process.env.NODE_ENV?.toUpperCase() === 'TEST',
+
+  // Database
+  mongoUri: process.env.NODE_ENV?.toUpperCase() === 'PROD'
+    ? process.env.MONGO_PROD_URI
+    : process.env.MONGO_DEV_URI,
+
+  // JWT (will be added later)
+  jwt: {
+    secret: process.env.JWT_SECRET || 'dev-secret-change-in-production',
+    expiresIn: process.env.JWT_EXPIRES_IN || '7d'
+  },
+
+  // SIWE (will be added later)
+  siwe: {
+    domain: process.env.SIWE_DOMAIN || 'localhost:4000',
+    uri: process.env.SIWE_URI || 'http://localhost:4000',
+    chainId: parseInt(process.env.SIWE_CHAIN_ID) || 1
+  },
+
+  // Rate Limiting
+  rateLimit: {
+    windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 900000, // 15 minutes
+    maxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
+    authMaxRequests: parseInt(process.env.AUTH_RATE_LIMIT_MAX) || 5
+  },
+
+  // Redis
+  redis: {
+    url: process.env.REDIS_URL || 'redis://localhost:6379'
+  },
+
+  // Logging
+  logLevel: process.env.LOG_LEVEL || 'info',
+
+  // Cloudinary - support both generic and environment-specific variables
+  cloudinary: {
+    name: process.env.CLOUDINARY_NAME ||
+          (process.env.NODE_ENV?.toUpperCase() === 'PROD'
+            ? process.env.CLOUDINARY_PROD_NAME
+            : process.env.CLOUDINARY_DEV_NAME),
+    key: process.env.CLOUDINARY_KEY ||
+         (process.env.NODE_ENV?.toUpperCase() === 'PROD'
+           ? process.env.CLOUDINARY_PROD_KEY
+           : process.env.CLOUDINARY_DEV_KEY),
+    secret: process.env.CLOUDINARY_SECRET ||
+            (process.env.NODE_ENV?.toUpperCase() === 'PROD'
+              ? process.env.CLOUDINARY_PROD_SECRET
+              : process.env.CLOUDINARY_DEV_SECRET)
+  }
+};
+
+// Validate environment on module load
+validateEnv();
+
+export default config;

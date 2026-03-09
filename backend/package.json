@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
+    "test": "cross-env NODE_ENV=test NODE_OPTIONS=--experimental-vm-modules jest --runInBand",
     "indexer:ticket": "node src/services/blockchain/indexers/ticket/run.js",
     "indexer:fund": "node src/services/blockchain/indexers/fund/run.js",
     "indexer:marketplace": "node src/services/blockchain/indexers/marketplace/run.js",
@@ -26,14 +27,32 @@
     "ethers": "^6.16.0",
     "eventfund-ticket-platform": "file:..",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.2.1",
+    "file-type": "^21.3.0",
     "helmet": "^8.1.0",
     "ioredis": "^5.9.2",
+    "joi": "^18.0.2",
+    "jsonwebtoken": "^9.0.3",
     "mongodb": "^7.1.0",
     "mongoose": "^9.1.5",
+    "mongoose-paginate-v2": "^1.9.1",
+    "morgan": "^1.10.1",
     "multer": "^2.0.2",
-    "multer-storage-cloudinary": "^4.0.0"
+    "multer-storage-cloudinary": "^4.0.0",
+    "rate-limit-redis": "^4.3.1",
+    "siwe": "^3.0.0",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.1",
+    "winston": "^3.19.0"
   },
   "devDependencies": {
-    "nodemon": "^3.1.11"
+    "@types/jest": "^30.0.0",
+    "cross-env": "^10.1.0",
+    "fast-check": "^4.5.3",
+    "jest": "^30.2.0",
+    "mongodb-memory-server": "^11.0.1",
+    "nodemon": "^3.1.11",
+    "sinon": "^21.0.1",
+    "supertest": "^7.2.2"
   }
 }

@@ -1,0 +1,70 @@
+import Joi from 'joi';
+
+// Custom validator for Ethereum address
+const ethereumAddress = Joi.string()
+  .pattern(/^0x[a-fA-F0-9]{40}$/i)
+  .message('must be a valid Ethereum address');
+
+// Custom validator for MongoDB ObjectId
+const objectId = Joi.string()
+  .pattern(/^[0-9a-fA-F]{24}$/)
+  .message('must be a valid MongoDB ObjectId');
+
+// Ticket status enum
+const ticketStatusEnum = ['minted', 'sold', 'used', 'expired'];
+
+// Schema for POST /tickets/verify
+const verifyTicketSchema = Joi.object({
+  tokenId: Joi.string().min(1).required(),
+  eventId: objectId.required(),
+  walletAddress: ethereumAddress.required()
+});
+
+// Schema for POST /tickets/:tokenId/use
+const useTicketSchema = Joi.object({
+  tokenId: Joi.string().min(1).required(),
+  eventId: objectId.optional()
+});
+
+// Schema for GET /tickets query parameters
+const queryTicketsSchema = Joi.object({
+  eventId: objectId.optional(),
+  owner: ethereumAddress.optional(),
+  status: Joi.string().valid(...ticketStatusEnum).optional(),
+  isListed: Joi.boolean().optional(),
+  page: Joi.number().integer().min(1).optional(),
+  limit: Joi.number().integer().min(1).max(100).optional(),
+  sort: Joi.string().optional()
+});
+
+// Schema for GET /tickets/:tokenId params
+const tokenIdParamsSchema = Joi.object({
+  tokenId: Joi.string().min(1).required()
+});
+
+// Schema for GET /tickets/user/:walletAddress params
+const walletAddressParamsSchema = Joi.object({
+  walletAddress: ethereumAddress.required()
+});
+
+// Schema for GET /tickets/event/:eventId/stats params
+const eventIdParamsSchema = Joi.object({
+  eventId: objectId.required()
+});
+
+// Schema for GET /tickets/user/:walletAddress query
+const userTicketsQuerySchema = Joi.object({
+  page: Joi.number().integer().min(1).optional(),
+  limit: Joi.number().integer().min(1).max(100).optional(),
+  sort: Joi.string().optional()
+});
+
+export const ticketSchemas = {
+  verifyTicket: verifyTicketSchema,
+  useTicket: useTicketSchema,
+  queryTickets: queryTicketsSchema,
+  tokenIdParams: tokenIdParamsSchema,
+  walletAddressParams: walletAddressParamsSchema,
+  eventIdParams: eventIdParamsSchema,
+  userTicketsQuery: userTicketsQuerySchema
+};
