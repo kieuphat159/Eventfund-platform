@@ -5,6 +5,7 @@ on:
     branches: [dev, master]
   pull_request:
     branches: [dev, master]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -77,6 +78,27 @@ jobs:
           cache: npm
           cache-dependency-path: |
             backend/package-lock.json
+
+      - name: Debug backend folder
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          echo "pwd=$(pwd)"
+          ls -la
+          echo "--- package.json (head) ---"
+          sed -n '1,80p' package.json || true
+          echo "--- end package.json (head) ---"
+
+          echo "Validating package.json JSON..."
+          python3 -m json.tool package.json >/dev/null
+          echo "package.json valid"
+
+          if [ -f package-lock.json ]; then
+            echo "package-lock.json present"
+            python3 -c "import json; print('lockfileVersion=', json.load(open('package-lock.json'))['lockfileVersion'])"
+          else
+            echo "package-lock.json MISSING"
+          fi
 
       - name: Install dependencies
         working-directory: backend
