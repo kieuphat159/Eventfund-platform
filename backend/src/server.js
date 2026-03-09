@@ -2,8 +2,8 @@ import app from './app.js';
 import config from './config/env.js';
 import logger from './config/logger.js';
 import { connectDB, disconnectDB } from './config/mongoDB.js';
-
 const PORT = config.port;
+import "./config/env.js";
 
 // Store server instance for graceful shutdown
 let server;

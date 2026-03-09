@@ -30,6 +30,9 @@ interface IFund {
     // FIX (critical): Marketplace royalty must be accounted per event as well.
     function depositRoyalty(uint256 eventId) external payable;
 
+    /// @notice Top up refund pool for an event. Used to fund ticket refunds.
+    function depositRefundPool(uint256 eventId) external payable;
+
     
     function createEvent(
         uint256 fundingGoal,

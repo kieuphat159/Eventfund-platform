@@ -5,6 +5,7 @@ import morgan from 'morgan';
 import config from './config/env.js';
 import logger from './config/logger.js';
 import { setupSwagger } from './config/swagger.js';
+import { dbErrorHandler } from "./utils/dbErrorHandler.js";
 
 const app = express();
 
@@ -84,5 +85,8 @@ app.use(notFoundHandler);
 
 // Centralized error handling middleware
 app.use(errorHandler);
+
+// Centralized error handler
+app.use(dbErrorHandler);
 
 export default app;
