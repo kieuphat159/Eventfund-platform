@@ -30,14 +30,14 @@ describe("Ticket Smart Contract", () => {
     await fund.setTicketContract(ticket.target);
 
     const ORGANIZER_ROLE = await ticket.ORGANIZER_ROLE();
-    const VERIFIER_ROLE = await ticket.VERIFIER_ROLE();
 
     // Cấp quyền mặc định
     await ticket.grantRole(ORGANIZER_ROLE, fund.target);
-    await ticket.grantRole(VERIFIER_ROLE, verifier.address);
+
+    // Per-event verifier: admin registers verifier for eventId after event creation
+    const eventId = 1;
 
     const ticketPrice = ethers.parseEther("0.1");
-    const eventId = 1;
 
     // Khởi tạo Event trên Fund để các hàm nạp tiền của Ticket không bị revert (EventNotFound)
     const deadline = (await time.latest()) + 7 * 24 * 60 * 60;
@@ -55,6 +55,9 @@ describe("Ticket Smart Contract", () => {
         { value: minStake },
       );
 
+    // Register per-event verifier (admin can do this for any event)
+    await ticket.connect(admin).addEventVerifier(eventId, verifier.address);
+
     return {
       ticket,
       fund,
@@ -64,7 +67,6 @@ describe("Ticket Smart Contract", () => {
       verifier,
       stranger,
       ORGANIZER_ROLE,
-      VERIFIER_ROLE,
       ticketPrice,
       eventId,
     };

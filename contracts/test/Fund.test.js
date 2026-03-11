@@ -35,10 +35,8 @@ describe("Fund Smart Contract", () => {
 
     // Roles Setup
     const ORGANIZER_ROLE = await ticket.ORGANIZER_ROLE();
-    const VERIFIER_ROLE = await ticket.VERIFIER_ROLE();
     await ticket.grantRole(ORGANIZER_ROLE, fund.target);
     await ticket.grantRole(ORGANIZER_ROLE, organizer.address);
-    await ticket.grantRole(VERIFIER_ROLE, verifier.address);
 
     // Use numbers that produce clean integer math for reward distribution.
     const params = {
@@ -384,6 +382,7 @@ describe("Fund Smart Contract", () => {
         fund,
         ticket,
         marketplace,
+        admin,
         organizer,
         donator1,
         donator2,
@@ -438,6 +437,7 @@ describe("Fund Smart Contract", () => {
         .withArgs(eventId, marketplace.target, expectedRoyalty, params.ticketPrice * 3n + expectedRoyalty);
 
       // Check-in 2 tickets => reach threshold
+      await ticket.connect(admin).addEventVerifier(eventId, verifier.address);
       await ticket.connect(verifier).markAsUsed(1);
       await ticket.connect(verifier).markAsUsed(2);
       await expect(fund.connect(organizer).setCompletedIfThresholdMet(eventId))

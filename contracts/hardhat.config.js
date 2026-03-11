@@ -17,7 +17,15 @@ function getAccounts() {
 
 /** @type import('hardhat/config').HardhatUserConfig */
 const config = {
-  solidity: "0.8.20",
+  solidity: {
+    version: "0.8.20",
+    settings: {
+      optimizer: {
+        enabled: true,
+        runs: 200,
+      },
+    },
+  },
   networks: {
     sepolia: {
       url: process.env.SEPOLIA_RPC_URL,
