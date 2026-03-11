@@ -1,0 +1,37 @@
+name: Deploy Contracts (Sepolia)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-contracts-sepolia-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.0'
+          cache: npm
+          cache-dependency-path: |
+            contracts/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --prefix contracts
+
+      - name: Deploy to Sepolia
+        env:
+          SEPOLIA_RPC_URL: ${{ secrets.SEPOLIA_RPC_URL }}
+          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+          ROYALTY_BPS: ${{ secrets.ROYALTY_BPS }}
+          DEPLOY_CONFIRMATIONS: ${{ secrets.DEPLOY_CONFIRMATIONS }}
+        run: npm run --prefix contracts deploy:sepolia
