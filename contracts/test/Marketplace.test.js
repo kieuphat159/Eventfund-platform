@@ -41,10 +41,8 @@ describe("Marketplace Smart Contract", () => {
 
     // Roles
     const ORGANIZER_ROLE = await ticket.ORGANIZER_ROLE();
-    const VERIFIER_ROLE = await ticket.VERIFIER_ROLE();
     await ticket.grantRole(ORGANIZER_ROLE, fund.target);
     await ticket.grantRole(ORGANIZER_ROLE, organizer.address);
-    await ticket.grantRole(VERIFIER_ROLE, admin.address);
 
     const ticketPrice = ethers.parseEther("1");
     const eventId = 1;
@@ -64,6 +62,9 @@ describe("Marketplace Smart Contract", () => {
         2,
         { value: minStake },
       );
+
+    // Register admin as per-event verifier
+    await ticket.connect(admin).addEventVerifier(eventId, admin.address);
 
     return {
       fund,

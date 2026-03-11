@@ -21,7 +21,6 @@ contract Ticket is ERC721, ERC721Enumerable, AccessControl, ReentrancyGuard, ITi
 
     // Role definitions
     bytes32 public constant ORGANIZER_ROLE = keccak256("ORGANIZER_ROLE");
-    bytes32 public constant VERIFIER_ROLE = keccak256("VERIFIER_ROLE");
 
     // ------ Errors -------
     error ZeroAddress();
@@ -57,6 +56,41 @@ contract Ticket is ERC721, ERC721Enumerable, AccessControl, ReentrancyGuard, ITi
         uint256 amount
     );
 
+    // Per-event verifier tracking
+    mapping(uint256 => mapping(address => bool)) public eventVerifiers;
+    event EventVerifierAdded(uint256 indexed eventId, address indexed verifier);
+    event EventVerifierRemoved(uint256 indexed eventId, address indexed verifier);
+
+    error NotEventVerifier();
+
+    // Per-event end date for lazy expiration
+    mapping(uint256 => uint256) public eventEndDate;
+    event EventEndDateSet(uint256 indexed eventId, uint256 endDate);
+
+    /// @notice Returns true if the event's end date has passed.
+    function _isEventEnded(uint256 eventId) internal view returns (bool) {
+        uint256 endDate = eventEndDate[eventId];
+        return endDate != 0 && block.timestamp > endDate;
+    }
+
+    /// @notice Effective status: if Sold but event ended, returns Expired.
+    function _effectiveStatus(uint256 tokenId) internal view returns (TicketStatus) {
+        TicketStatus status = _tickets[tokenId].status;
+        if (status == TicketStatus.Sold && _isEventEnded(_tickets[tokenId].eventId)) {
+            return TicketStatus.Expired;
+        }
+        return status;
+    }
+
+    /// @notice Set the end date for an event. Only admin or event organizer can call.
+    function setEventEndDate(uint256 eventId, uint256 endDate) external {
+        if (!hasRole(DEFAULT_ADMIN_ROLE, msg.sender) && msg.sender != eventOrganizer[eventId]) {
+            revert InvalidTicketStatus();
+        }
+        eventEndDate[eventId] = endDate;
+        emit EventEndDateSet(eventId, endDate);
+    }
+
     // FIX: allow admin to wire Fund contract.
     function setFundContract(address fund) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (fund == address(0)) revert ZeroAddress();
@@ -74,6 +108,32 @@ contract Ticket is ERC721, ERC721Enumerable, AccessControl, ReentrancyGuard, ITi
             revert InvalidTicketStatus();
         }
         _eventTickets[eventId].salesActive = active;
+    }
+
+    // ------ Per-event Verifier Management ------
+
+    /// @notice Add a verifier for a specific event. Only admin or event organizer can call.
+    function addEventVerifier(uint256 eventId, address verifier) external {
+        if (verifier == address(0)) revert ZeroAddress();
+        if (!hasRole(DEFAULT_ADMIN_ROLE, msg.sender) && msg.sender != eventOrganizer[eventId]) {
+            revert InvalidTicketStatus();
+        }
+        eventVerifiers[eventId][verifier] = true;
+        emit EventVerifierAdded(eventId, verifier);
+    }
+
+    /// @notice Remove a verifier for a specific event. Only admin or event organizer can call.
+    function removeEventVerifier(uint256 eventId, address verifier) external {
+        if (!hasRole(DEFAULT_ADMIN_ROLE, msg.sender) && msg.sender != eventOrganizer[eventId]) {
+            revert InvalidTicketStatus();
+        }
+        eventVerifiers[eventId][verifier] = false;
+        emit EventVerifierRemoved(eventId, verifier);
+    }
+
+    /// @notice Check if an address is a verifier for a specific event.
+    function isEventVerifier(uint256 eventId, address account) public view returns (bool) {
+        return eventVerifiers[eventId][account];
     }
 
     //------ Minting -------
@@ -168,8 +228,11 @@ contract Ticket is ERC721, ERC721Enumerable, AccessControl, ReentrancyGuard, ITi
         }
 
         if (_eventTickets[ticket.eventId].salesActive == false) {
-            revert SalesInactive(); // ngưng bán khi event kết thúc hoặc bị hủy
+            revert SalesInactive();
         }
+
+        // Lazy expiration: reject purchase if event already ended
+        if (_isEventEnded(ticket.eventId)) revert SalesInactive();
 
         if (msg.value < ticket.price) {
             revert InsufficientPayment();
@@ -231,9 +294,10 @@ contract Ticket is ERC721, ERC721Enumerable, AccessControl, ReentrancyGuard, ITi
     // ------ Usage functions ------
 
     /// @inheritdoc ITicket
-    function markAsUsed(uint256 tokenId) external override onlyRole(VERIFIER_ROLE) {
+    function markAsUsed(uint256 tokenId) external override {
         TicketInfo storage ticket = _tickets[tokenId];
-        if (ticket.status != TicketStatus.Sold) {
+        if (!eventVerifiers[ticket.eventId][msg.sender]) revert NotEventVerifier();
+        if (_effectiveStatus(tokenId) != TicketStatus.Sold) {
             revert InvalidTicketStatus();
         }
         ticket.status = TicketStatus.Used;
@@ -246,20 +310,28 @@ contract Ticket is ERC721, ERC721Enumerable, AccessControl, ReentrancyGuard, ITi
     }
 
     /// @inheritdoc ITicket
-    function markAsExpired(uint256 tokenId) external override onlyRole(VERIFIER_ROLE) {
+    /// @notice Explicitly marks a ticket as expired. Verifier, organizer, or anyone (if event ended) can call.
+    function markAsExpired(uint256 tokenId) external override {
         TicketInfo storage ticket = _tickets[tokenId];
+
+        if (!_isEventEnded(ticket.eventId)) {
+            if (!eventVerifiers[ticket.eventId][msg.sender] && msg.sender != eventOrganizer[ticket.eventId]) {
+                revert NotEventVerifier();
+            }
+        }
+
         if (ticket.status != TicketStatus.Sold) {
             revert InvalidTicketStatus();
         }
         ticket.status = TicketStatus.Expired;
 
-        // FIX: emit interface event for off-chain indexing.
         emit TicketExpired(tokenId, ticket.eventId);
     }
 
     /// @inheritdoc ITicket
-    function markAsRefunded(uint256 tokenId) external override onlyRole(VERIFIER_ROLE) {
+    function markAsRefunded(uint256 tokenId) external override {
         TicketInfo storage ticket = _tickets[tokenId];
+        if (!eventVerifiers[ticket.eventId][msg.sender]) revert NotEventVerifier();
         if (ticket.status != TicketStatus.Sold) {
             revert InvalidTicketStatus();
         }
@@ -319,7 +391,7 @@ contract Ticket is ERC721, ERC721Enumerable, AccessControl, ReentrancyGuard, ITi
 
     /// @inheritdoc ITicket
     function getTicketStatus(uint256 tokenId) external view override returns (TicketStatus) {
-        return _tickets[tokenId].status;
+        return _effectiveStatus(tokenId);
     }
 
     /// @inheritdoc ITicket
@@ -334,10 +406,7 @@ contract Ticket is ERC721, ERC721Enumerable, AccessControl, ReentrancyGuard, ITi
 
     /// @inheritdoc ITicket
     function isTransferable(uint256 tokenId) external view override returns (bool) {
-        // FIX (blocker): Marketplace requires this to allow listing.
-        // For resale marketplace, only allow listing if ticket was sold and not used/expired/refunded.
-        TicketStatus status = _tickets[tokenId].status;
-        return (status == TicketStatus.Sold);
+        return (_effectiveStatus(tokenId) == TicketStatus.Sold);
     }
 
     // ------ Override supportsInterface ------
@@ -355,9 +424,9 @@ contract Ticket is ERC721, ERC721Enumerable, AccessControl, ReentrancyGuard, ITi
         override(ERC721, ERC721Enumerable)
         returns (address)
     {
-        // Prevent transfer of used/expired/refunded tickets
+        // Prevent transfer of used/expired/refunded tickets (includes lazy expiration)
         if (_ownerOf(tokenId) != address(0)) { // Not minting
-            TicketStatus status = _tickets[tokenId].status;
+            TicketStatus status = _effectiveStatus(tokenId);
             if (status == TicketStatus.Used || 
                 status == TicketStatus.Expired || 
                 status == TicketStatus.Refunded) {
