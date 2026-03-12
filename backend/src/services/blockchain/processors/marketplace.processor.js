@@ -1,9 +1,9 @@
 import { ChainLog } from "../../../models/ChainLog.js";
-import { TicketEvent } from "../../../models/TicketEvent.model.js";
-import { TicketStats } from "../../../models/TicketStats.model.js";
+import Listing from "../../../models/Listing.model.js";
 
 import { provider } from "../core/provider.js";
-import { getTicket } from "../core/contracts/index.js";
+import { getMarketplace } from "../core/contracts/index.js";
+
 import {
   getOrInitSyncState,
   markError,
@@ -11,14 +11,15 @@ import {
   markSyncing,
   updateProgress,
 } from "../core/blockTracker.js";
+
 import {
   getNumberEnv,
   planReorgSafeSync,
   readReorgPolicyFromEnv,
 } from "../sync/reorgPolicy.js";
 
-const CONTRACT_NAME = "Ticket";
-const PROCESSOR_NAME = "TicketProcessor";
+const CONTRACT_NAME = "Marketplace";
+const PROCESSOR_NAME = "MarketplaceProcessor";
 
 function toStringId(value) {
   if (value === undefined || value === null) return undefined;
@@ -30,202 +31,113 @@ function lowerAddress(value) {
   return String(value).toLowerCase();
 }
 
-function safeBigInt(value) {
-  if (value === undefined || value === null || value === "") return 0n;
-  try {
-    return BigInt(value);
-  } catch {
-    return 0n;
-  }
-}
-
-function mapChainLogToTicketEventDoc(chainLog, contractAddressLower) {
+function mapMarketplaceEvent(chainLog, contractAddressLower) {
   const eventName = chainLog.eventName || "Unknown";
   const args = chainLog.args || {};
 
   const base = {
     contractAddress: contractAddressLower,
     blockNumber: chainLog.blockNumber,
-    blockHash: chainLog.blockHash,
     transactionHash: chainLog.transactionHash,
-    transactionIndex: chainLog.transactionIndex,
     logIndex: chainLog.logIndex,
-    eventName,
-    rawArgs: args,
   };
 
   switch (eventName) {
-    case "TicketMintedBatch": {
-      const eventId = toStringId(args.eventId);
-      const ticketIds = Array.isArray(args.ticketIds)
-        ? args.ticketIds.map(toStringId).filter(Boolean)
-        : undefined;
+    case "ListingCreated":
       return {
         ...base,
-        eventId,
-        organizer: lowerAddress(args.to),
-        ticketIds,
+        eventName,
+        listingId: toStringId(args.listingId),
+        tokenId: toStringId(args.tokenId),
+        seller: lowerAddress(args.seller),
         priceWei: toStringId(args.price),
-        ticketType:
-          args.ticketType !== undefined && args.ticketType !== null
-            ? Number(args.ticketType)
-            : undefined,
+        maxPriceWei: toStringId(args.maxPrice),
+        status: "active",
       };
-    }
 
-    case "TicketPurchased": {
+    case "ListingSold":
       return {
         ...base,
-        eventId: toStringId(args.eventId),
+        eventName,
+        listingId: toStringId(args.listingId),
         tokenId: toStringId(args.tokenId),
         buyer: lowerAddress(args.buyer),
+        seller: lowerAddress(args.seller),
         priceWei: toStringId(args.price),
+        royaltyWei: toStringId(args.royaltyAmount),
+        status: "sold",
       };
-    }
 
-    case "TicketUsed": {
+    case "ListingCancelled":
       return {
         ...base,
-        eventId: toStringId(args.eventId),
+        eventName,
+        listingId: toStringId(args.listingId),
         tokenId: toStringId(args.tokenId),
-        owner: lowerAddress(args.owner),
-        verifier: lowerAddress(args.verifier),
-        usedAt: toStringId(args.usedAt),
+        seller: lowerAddress(args.seller),
+        status: "cancelled",
       };
-    }
-
-    case "TicketExpired": {
-      return {
-        ...base,
-        eventId: toStringId(args.eventId),
-        tokenId: toStringId(args.tokenId),
-      };
-    }
-
-    case "TicketRefunded": {
-      return {
-        ...base,
-        eventId: toStringId(args.eventId),
-        tokenId: toStringId(args.tokenId),
-        owner: lowerAddress(args.owner),
-        refundAmountWei: toStringId(args.refundAmount),
-      };
-    }
-
-    case "FundContractSet": {
-      return {
-        ...base,
-        to: lowerAddress(args.fund),
-      };
-    }
-
-    case "Transfer": {
-      return {
-        ...base,
-        tokenId: toStringId(args.tokenId),
-        from: lowerAddress(args.from),
-        to: lowerAddress(args.to),
-      };
-    }
 
     default:
-      return base;
+      return null;
   }
 }
 
-async function deleteDerivedEventsInRange(
-  contractAddressLower,
-  fromBlock,
-  toBlock,
-) {
-  await TicketEvent.deleteMany({
-    contractAddress: contractAddressLower,
-    blockNumber: { $gte: fromBlock, $lte: toBlock },
-  });
-}
+async function processMarketplaceLogs(contractAddressLower, logs) {
+  for (const log of logs) {
+    const event = mapMarketplaceEvent(log, contractAddressLower);
+    if (!event) continue;
 
-async function rebuildStatsForEventIds(contractAddressLower, eventIds) {
-  const uniqueEventIds = Array.from(
-    new Set(eventIds.map(toStringId).filter(Boolean)),
-  );
-  if (uniqueEventIds.length === 0) return;
+    if (event.eventName === "ListingCreated") {
+      await Listing.create({
+        listingId: event.listingId,
+        tokenId: event.tokenId,
+        seller: event.seller,
+        priceWei: event.priceWei,
+        maxPriceWei: event.maxPriceWei,
+        status: "active",
+        blockNumber: event.blockNumber,
+      });
+    }
 
-  for (const eventId of uniqueEventIds) {
-    const mintedDocs = await TicketEvent.find({
-      contractAddress: contractAddressLower,
-      eventId,
-      eventName: "TicketMintedBatch",
-    })
-      .select({ ticketIds: 1 })
-      .lean();
-    const totalMinted = mintedDocs.reduce(
-      (sum, d) => sum + (Array.isArray(d.ticketIds) ? d.ticketIds.length : 0),
-      0,
-    );
-
-    const totalSold = await TicketEvent.countDocuments({
-      contractAddress: contractAddressLower,
-      eventId,
-      eventName: "TicketPurchased",
-    });
-
-    const totalUsed = await TicketEvent.countDocuments({
-      contractAddress: contractAddressLower,
-      eventId,
-      eventName: "TicketUsed",
-    });
-
-    const totalExpired = await TicketEvent.countDocuments({
-      contractAddress: contractAddressLower,
-      eventId,
-      eventName: "TicketExpired",
-    });
-
-    const totalRefunded = await TicketEvent.countDocuments({
-      contractAddress: contractAddressLower,
-      eventId,
-      eventName: "TicketRefunded",
-    });
-
-    const purchasedDocs = await TicketEvent.find({
-      contractAddress: contractAddressLower,
-      eventId,
-      eventName: "TicketPurchased",
-    })
-      .select({ priceWei: 1 })
-      .lean();
-
-    const totalRevenueWei = purchasedDocs
-      .reduce((sum, d) => sum + safeBigInt(d.priceWei), 0n)
-      .toString();
-
-    await TicketStats.updateOne(
-      { contractAddress: contractAddressLower, eventId },
-      {
-        $set: {
-          totalMinted,
-          totalSold,
-          totalUsed,
-          totalExpired,
-          totalRefunded,
-          totalRevenueWei,
-          lastRebuiltAt: new Date(),
+    if (event.eventName === "ListingSold") {
+      await Listing.updateOne(
+        { listingId: event.listingId },
+        {
+          $setOnInsert: {
+            tokenId: event.tokenId,
+            seller: event.seller,
+            priceWei: event.priceWei,
+            maxPriceWei: event.maxPriceWei,
+            status: "active",
+            blockNumber: event.blockNumber,
+          },
         },
-      },
-      { upsert: true },
-    );
+        { upsert: true },
+      );
+    }
+
+    if (event.eventName === "ListingCancelled") {
+      await Listing.updateOne(
+        { listingId: event.listingId },
+        {
+          $set: {
+            status: "cancelled",
+          },
+        },
+      );
+    }
   }
 }
 
-export async function processTicketLogsOnce() {
-  const ticket = getTicket();
-  const { confirmations, reorgBuffer, chunkSize } = readReorgPolicyFromEnv();
-  const startBlock = getNumberEnv(
-    "TICKET_PROCESSOR_START_BLOCK",
-    getNumberEnv("TICKET_START_BLOCK", 0),
-  );
+export async function processMarketplaceLogsOnce() {
+  const marketplace = getMarketplace();
 
-  const contractAddress = await ticket.getAddress();
+  const { confirmations, reorgBuffer, chunkSize } = readReorgPolicyFromEnv();
+
+  const startBlock = getNumberEnv("MARKETPLACE_START_BLOCK", 0);
+
+  const contractAddress = await marketplace.getAddress();
   const contractAddressLower = contractAddress.toLowerCase();
 
   const syncState = await getOrInitSyncState({
@@ -235,6 +147,7 @@ export async function processTicketLogsOnce() {
   });
 
   const latest = await provider.getBlockNumber();
+
   const plan = planReorgSafeSync({
     latestBlock: latest,
     confirmations,
@@ -244,8 +157,9 @@ export async function processTicketLogsOnce() {
   });
 
   const target = plan.targetBlock;
+
   if (!plan.shouldSync) {
-    return { latest, target, processedTo: syncState.lastProcessedBlock };
+    return { latest, target };
   }
 
   const from = plan.fromBlock;
@@ -253,15 +167,9 @@ export async function processTicketLogsOnce() {
   await markSyncing(PROCESSOR_NAME);
 
   let currentFrom = from;
+
   while (currentFrom <= target) {
     const currentTo = Math.min(target, currentFrom + chunkSize - 1);
-
-    // Reorg-safe: wipe derived docs in the rescan window.
-    await deleteDerivedEventsInRange(
-      contractAddressLower,
-      currentFrom,
-      currentTo,
-    );
 
     const logs = await ChainLog.find({
       contractName: CONTRACT_NAME,
@@ -269,18 +177,10 @@ export async function processTicketLogsOnce() {
       blockNumber: { $gte: currentFrom, $lte: currentTo },
       eventName: { $ne: null },
     })
-      .sort({ blockNumber: 1, transactionIndex: 1, logIndex: 1 })
+      .sort({ blockNumber: 1, logIndex: 1 })
       .lean();
 
-    const docs = logs.map((l) =>
-      mapChainLogToTicketEventDoc(l, contractAddressLower),
-    );
-
-    if (docs.length > 0) {
-      await TicketEvent.insertMany(docs, { ordered: false });
-      const affectedEventIds = docs.map((d) => d.eventId).filter(Boolean);
-      await rebuildStatsForEventIds(contractAddressLower, affectedEventIds);
-    }
+    await processMarketplaceLogs(contractAddressLower, logs);
 
     await updateProgress({
       contractName: PROCESSOR_NAME,
@@ -293,24 +193,19 @@ export async function processTicketLogsOnce() {
   }
 
   await markSynced(PROCESSOR_NAME);
-  return { latest, target, processedTo: target };
+
+  return { latest, target };
 }
 
-export async function runTicketProcessorLoop() {
-  const intervalMs = getNumberEnv(
-    "CHAIN_PROCESS_INTERVAL_MS",
-    getNumberEnv("CHAIN_SYNC_INTERVAL_MS", 10_000),
-  );
+export async function runMarketplaceProcessorLoop() {
+  const intervalMs = getNumberEnv("CHAIN_PROCESS_INTERVAL_MS", 10000);
 
-  // eslint-disable-next-line no-constant-condition
   while (true) {
     try {
-      await processTicketLogsOnce();
+      await processMarketplaceLogsOnce();
     } catch (err) {
       await markError(PROCESSOR_NAME, err);
-
-      // eslint-disable-next-line no-console
-      console.error("Ticket processor error:", err);
+      console.error("Marketplace processor error:", err);
     }
 
     await new Promise((r) => setTimeout(r, intervalMs));

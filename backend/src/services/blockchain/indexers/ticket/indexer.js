@@ -32,120 +32,19 @@ function sanitizeForMongo(value) {
   return value;
 }
 
-function resultToArgsObject(eventName, result) {
+function resultToArgsObject(result) {
   if (!result) return undefined;
 
-  const out = {};
+  const args = {};
 
-  for (const [k, v] of Object.entries(result)) {
-    if (/^\d+$/.test(k)) continue;
-    out[k] = sanitizeForMongo(v);
-  }
-
-  if (Object.keys(out).length > 0) {
-    return out;
-  }
-
-  const values = [];
-  for (let i = 0; i < result.length; i += 1) {
-    values.push(sanitizeForMongo(result[i]));
-  }
-
-  switch (eventName) {
-    /**
-     * emit TicketMintedBatch(to, eventId, ticketIds, price, ticketType)
-     */
-    case "TicketMintedBatch":
-      return {
-        to: values[0],
-        eventId: values[1],
-        ticketIds: values[2],
-        price: values[3],
-        ticketType: values[4],
-      };
-
-    /**
-     * emit TicketPurchased(tokenId, eventId, buyer, price)
-     */
-    case "TicketPurchased":
-      return {
-        tokenId: values[0],
-        eventId: values[1],
-        buyer: values[2],
-        price: values[3],
-      };
-
-    /**
-     * emit TicketUsed(tokenId, eventId, owner, verifier, usedAt)
-     */
-    case "TicketUsed":
-      return {
-        tokenId: values[0],
-        eventId: values[1],
-        owner: values[2],
-        verifier: values[3],
-        usedAt: values[4],
-      };
-
-    /**
-     * emit TicketExpired(tokenId, eventId)
-     */
-    case "TicketExpired":
-      return {
-        tokenId: values[0],
-        eventId: values[1],
-      };
-
-    /**
-     * emit TicketRefunded(tokenId, eventId, owner, refundAmount)
-     */
-    case "TicketRefunded":
-      return {
-        tokenId: values[0],
-        eventId: values[1],
-        owner: values[2],
-        refundAmount: values[3],
-      };
-
-    /**
-     * emit TicketRefundClaimed(tokenId, eventId, owner, amount)
-     */
-    case "TicketRefundClaimed":
-      return {
-        tokenId: values[0],
-        eventId: values[1],
-        owner: values[2],
-        amount: values[3],
-      };
-
-    /**
-     * emit FundContractSet(fund)
-     */
-    case "FundContractSet":
-      return {
-        fund: values[0],
-      };
-
-    /**
-     * ERC721 Transfer(from, to, tokenId)
-     */
-    case "Transfer":
-      return {
-        from: values[0],
-        to: values[1],
-        tokenId: values[2],
-      };
-
-    default: {
-      const indexed = {};
-      for (let i = 0; i < values.length; i += 1) {
-        indexed[String(i)] = values[i];
-      }
-      return indexed;
+  for (const [key, value] of Object.entries(result)) {
+    if (Number.isNaN(Number(key))) {
+      args[key] = sanitizeForMongo(value);
     }
   }
-}
 
+  return Object.keys(args).length > 0 ? args : undefined;
+}
 async function deleteLogsInRange(contractAddress, fromBlock, toBlock) {
   await ChainLog.deleteMany({
     contractName: CONTRACT_NAME,
