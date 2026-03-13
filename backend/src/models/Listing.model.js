@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import mongoosePaginate from "mongoose-paginate-v2";
 
 const listingSchema = new mongoose.Schema({
   ticketId: {
@@ -26,12 +27,14 @@ const listingSchema = new mongoose.Schema({
   },
 
   price: {
-    type: Number,
+    type: String,
     required: true,
+    default: "0",
   },
 
   maxPrice: {
-    type: Number, // Giới hạn giá tối đa (chống đầu cơ)
+    type: String, // Giới hạn giá tối đa (chống đầu cơ)
+    default: "0",
   },
 
   listedAt: {
@@ -77,6 +80,9 @@ listingSchema.index({ status: 1, price: 1 });
 listingSchema.index({ seller: 1 });
 listingSchema.index({ tokenId: 1 });
 listingSchema.index({ eventId: 1, status: 1 });
+
+// Apply pagination plugin
+listingSchema.plugin(mongoosePaginate);
 
 const Listing = mongoose.model("Listing", listingSchema);
 

@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
-    "test": "cross-env NODE_ENV=test NODE_OPTIONS=--experimental-vm-modules jest --runInBand"
+    "test": "cross-env NODE_ENV=test NODE_OPTIONS=--experimental-vm-modules jest --runInBand",
     "indexer:ticket": "node src/services/blockchain/indexers/ticket/run.js",
     "indexer:fund": "node src/services/blockchain/indexers/fund/run.js",
     "indexer:marketplace": "node src/services/blockchain/indexers/marketplace/run.js",
