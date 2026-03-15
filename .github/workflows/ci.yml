@@ -107,6 +107,11 @@ jobs:
       - name: Smoke test (/health)
         env:
           PORT: '4000'
+          NODE_ENV: ${{ secrets.NODE_ENV }}
+          MONGO_DEV_URI: ${{ secrets.MONGO_DEV_URI }}
+          CLOUDINARY_NAME: ${{ secrets.CLOUDINARY_NAME }}
+          CLOUDINARY_KEY: ${{ secrets.CLOUDINARY_KEY }}
+          CLOUDINARY_SECRET: ${{ secrets.CLOUDINARY_SECRET }}
         working-directory: backend
         run: |
           set -euo pipefail
