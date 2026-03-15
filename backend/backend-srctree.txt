@@ -1,0 +1,104 @@
+src/
+├─ app.js
+├─ server.js
+├─ config/
+│  ├─ env.js
+│  ├─ mongoDB.js
+│  ├─ cloudinary.js
+│  ├─ redis.js
+│  └─ logger.js
+├─ routes/
+│  ├─ index.js
+│  ├─ health.routes.js
+│  ├─ auth.routes.js
+│  ├─ users.routes.js
+│  ├─ events.routes.js
+│  ├─ tickets.routes.js
+│  ├─ marketplace.routes.js
+│  └─ admin.routes.js
+├─ controllers/
+│  ├─ auth.controller.js
+│  ├─ users.controller.js
+│  ├─ events.controller.js
+│  ├─ tickets.controller.js
+│  ├─ marketplace.controller.js
+│  └─ admin.controller.js
+├─ models/
+│  ├─ BlockchainSyncState.js
+│  ├─ ChainLog.js
+│  ├─ User.js
+│  ├─ Event.js
+│  ├─ Contribution.js
+│  ├─ Share.js
+│  ├─ Ticket.js
+│  ├─ Listing.js
+│  ├─ RevenueDistribution.js
+│  ├─ RewardClaim.js
+│  └─ Penalty.js
+├─ services/
+│  ├─ blockchain/
+│  │  ├─ core/
+│  │  │  ├─ provider.js
+│  │  │  ├─ blockTracker.js
+│  │  │  └─ contracts/
+│  │  │     └─ index.js
+│  │  ├─ indexers/
+│  │  │  ├─ fund/
+│  │  │  │  ├─ indexer.js
+│  │  │  │  └─ run.js
+│  │  │  ├─ ticket/
+│  │  │  │  ├─ indexer.js
+│  │  │  │  └─ run.js
+│  │  │  └─ marketplace/
+│  │  │     ├─ indexer.js
+│  │  │     └─ run.js
+│  │  ├─ processors/
+│  │  │  ├─ fund.processor.js
+│  │  │  ├─ ticket.processor.js
+│  │  │  └─ marketplace.processor.js
+│  │  └─ sync/
+│  │     ├─ syncCoordinator.js
+│  │     └─ reorgPolicy.js
+│  ├─ cache/
+│  │  ├─ redisClient.js
+│  │  ├─ cacheKeys.js
+│  │  └─ cacheInvalidation.js
+│  ├─ auth/
+│  │  ├─ siwe.service.js
+│  │  └─ nonce.service.js
+│  ├─ events/
+│  │  └─ events.service.js
+│  ├─ tickets/
+│  │  └─ tickets.service.js
+│  ├─ marketplace/
+│  │  └─ marketplace.service.js
+│  ├─ users/
+│  │  └─ users.service.js
+│  └─ analytics/
+│     └─ analytics.service.js
+├─ middlewares/
+│  ├─ auth.middleware.js
+│  ├─ roles.middleware.js
+│  ├─ validate.middleware.js
+│  ├─ rateLimit.middleware.js
+│  └─ error.middleware.js
+├─ validators/
+│  ├─ auth.schema.js
+│  ├─ events.schema.js
+│  ├─ tickets.schema.js
+│  └─ marketplace.schema.js
+├─ repositories/
+│  ├─ event.repo.js
+│  ├─ ticket.repo.js
+│  ├─ listing.repo.js
+│  └─ user.repo.js
+├─ jobs/
+│  ├─ refreshStats.job.js
+│  ├─ expireListings.job.js
+│  └─ resyncChain.job.js
+└─ utils/
+   ├─ address.js
+   ├─ bigInt.js
+   ├─ pagination.js
+   ├─ time.js
+   └─ httpErrors.js
