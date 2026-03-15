@@ -116,7 +116,6 @@ const ticketSchema = new mongoose.Schema({
 });
 
 // ===== Indexes =====
-ticketSchema.index({ tokenId: 1 });
 ticketSchema.index({ eventId: 1 });
 ticketSchema.index({ currentOwner: 1 });
 ticketSchema.index({ status: 1 });

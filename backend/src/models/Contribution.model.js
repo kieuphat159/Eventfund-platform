@@ -60,7 +60,6 @@ const contributionSchema = new mongoose.Schema({
 // ===== Indexes =====
 contributionSchema.index({ eventId: 1 });
 contributionSchema.index({ contributor: 1 });
-contributionSchema.index({ txHash: 1 }, { unique: true });
 contributionSchema.index({ type: 1, eventId: 1 });
 
 const Contribution = mongoose.model("Contribution", contributionSchema);
