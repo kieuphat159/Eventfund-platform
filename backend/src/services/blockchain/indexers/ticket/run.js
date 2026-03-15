@@ -4,11 +4,11 @@ import { runTicketIndexerLoop } from "./indexer.js";
 
 async function main() {
   await connectDB();
+  console.log("[ticket.indexer] starting...");
   await runTicketIndexerLoop();
 }
 
 main().catch((err) => {
-  // eslint-disable-next-line no-console
-  console.error(err);
+  console.error("[ticket.indexer] fatal error:", err);
   process.exitCode = 1;
 });

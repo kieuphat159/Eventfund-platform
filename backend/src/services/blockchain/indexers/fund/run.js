@@ -4,11 +4,11 @@ import { runFundIndexerLoop } from "./indexer.js";
 
 async function main() {
   await connectDB();
+  console.log("[fund.indexer] starting...");
   await runFundIndexerLoop();
 }
 
 main().catch((err) => {
-  // eslint-disable-next-line no-console
-  console.error(err);
+  console.error("[fund.indexer] fatal error:", err);
   process.exitCode = 1;
 });

@@ -24,32 +24,73 @@ function sanitizeForMongo(value) {
   if (Array.isArray(value)) return value.map(sanitizeForMongo);
   if (value && typeof value === "object") {
     const out = {};
-    for (const [k, v] of Object.entries(value)) out[k] = sanitizeForMongo(v);
+    for (const [k, v] of Object.entries(value)) {
+      out[k] = sanitizeForMongo(v);
+    }
     return out;
   }
   return value;
 }
 
-function resultToArgsObject(result) {
+function resultToArgsObject(eventName, result) {
   if (!result) return undefined;
 
   const out = {};
+
   for (const [k, v] of Object.entries(result)) {
     if (/^\d+$/.test(k)) continue;
     out[k] = sanitizeForMongo(v);
   }
 
-  if (Object.keys(out).length === 0) {
-    for (let i = 0; i < result.length; i += 1) {
-      out[String(i)] = sanitizeForMongo(result[i]);
-    }
+  if (Object.keys(out).length > 0) {
+    return out;
   }
 
-  return out;
+  const values = [];
+  for (let i = 0; i < result.length; i += 1) {
+    values.push(sanitizeForMongo(result[i]));
+  }
+
+  switch (eventName) {
+    case "ListingCreated":
+      return {
+        listingId: values[0],
+        tokenId: values[1],
+        seller: values[2],
+        price: values[3],
+        maxPrice: values[4],
+      };
+
+    case "ListingSold":
+      return {
+        listingId: values[0],
+        tokenId: values[1],
+        buyer: values[2],
+        seller: values[3],
+        price: values[4],
+        royaltyAmount: values[5],
+      };
+
+    case "ListingCancelled":
+      return {
+        listingId: values[0],
+        tokenId: values[1],
+        seller: values[2],
+      };
+
+    default: {
+      const indexed = {};
+      for (let i = 0; i < values.length; i += 1) {
+        indexed[String(i)] = values[i];
+      }
+      return indexed;
+    }
+  }
 }
 
 async function deleteLogsInRange(contractAddress, fromBlock, toBlock) {
   await ChainLog.deleteMany({
+    contractName: CONTRACT_NAME,
     contractAddress: contractAddress.toLowerCase(),
     blockNumber: { $gte: fromBlock, $lte: toBlock },
   });
@@ -63,7 +104,10 @@ async function storeLogs(contractAddress, logs) {
   const docs = logs.map((log) => {
     let parsed;
     try {
-      parsed = marketplace.interface.parseLog({ topics: log.topics, data: log.data });
+      parsed = marketplace.interface.parseLog({
+        topics: log.topics,
+        data: log.data,
+      });
     } catch {
       parsed = undefined;
     }
@@ -79,7 +123,9 @@ async function storeLogs(contractAddress, logs) {
       topics: log.topics,
       data: log.data,
       eventName: parsed?.name,
-      args: parsed?.args ? resultToArgsObject(parsed.args) : undefined,
+      args: parsed?.args
+        ? resultToArgsObject(parsed.name, parsed.args)
+        : undefined,
     };
   });
 
@@ -108,10 +154,15 @@ export async function syncMarketplaceLogsOnce() {
     lastProcessedBlock: syncState.lastProcessedBlock,
     reorgBuffer,
   });
+
   const target = plan.targetBlock;
 
   if (!plan.shouldSync) {
-    return { latest, target, processedTo: syncState.lastProcessedBlock };
+    return {
+      latest,
+      target,
+      processedTo: syncState.lastProcessedBlock,
+    };
   }
 
   const from = plan.fromBlock;
@@ -144,7 +195,11 @@ export async function syncMarketplaceLogsOnce() {
 
   await markSynced(CONTRACT_NAME);
 
-  return { latest, target, processedTo: target };
+  return {
+    latest,
+    target,
+    processedTo: target,
+  };
 }
 
 export async function runMarketplaceIndexerLoop() {
@@ -156,7 +211,6 @@ export async function runMarketplaceIndexerLoop() {
       await syncMarketplaceLogsOnce();
     } catch (err) {
       await markError(CONTRACT_NAME, err);
-      // eslint-disable-next-line no-console
       console.error("Marketplace indexer error:", err);
     }
 

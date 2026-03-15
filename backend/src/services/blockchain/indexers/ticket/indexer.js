@@ -24,7 +24,9 @@ function sanitizeForMongo(value) {
   if (Array.isArray(value)) return value.map(sanitizeForMongo);
   if (value && typeof value === "object") {
     const out = {};
-    for (const [k, v] of Object.entries(value)) out[k] = sanitizeForMongo(v);
+    for (const [k, v] of Object.entries(value)) {
+      out[k] = sanitizeForMongo(v);
+    }
     return out;
   }
   return value;
@@ -33,26 +35,19 @@ function sanitizeForMongo(value) {
 function resultToArgsObject(result) {
   if (!result) return undefined;
 
-  // ethers v6 Result is array-like + has named keys.
-  const out = {};
-  for (const [k, v] of Object.entries(result)) {
-    // Skip numeric keys; we prefer named args when present.
-    if (/^\d+$/.test(k)) continue;
-    out[k] = sanitizeForMongo(v);
-  }
+  const args = {};
 
-  // If there were no named keys, fall back to numeric indices.
-  if (Object.keys(out).length === 0) {
-    for (let i = 0; i < result.length; i += 1) {
-      out[String(i)] = sanitizeForMongo(result[i]);
+  for (const [key, value] of Object.entries(result)) {
+    if (Number.isNaN(Number(key))) {
+      args[key] = sanitizeForMongo(value);
     }
   }
 
-  return out;
+  return Object.keys(args).length > 0 ? args : undefined;
 }
-
 async function deleteLogsInRange(contractAddress, fromBlock, toBlock) {
   await ChainLog.deleteMany({
+    contractName: CONTRACT_NAME,
     contractAddress: contractAddress.toLowerCase(),
     blockNumber: { $gte: fromBlock, $lte: toBlock },
   });
@@ -66,7 +61,10 @@ async function storeLogs(contractAddress, logs) {
   const docs = logs.map((log) => {
     let parsed;
     try {
-      parsed = ticket.interface.parseLog({ topics: log.topics, data: log.data });
+      parsed = ticket.interface.parseLog({
+        topics: log.topics,
+        data: log.data,
+      });
     } catch {
       parsed = undefined;
     }
@@ -82,11 +80,12 @@ async function storeLogs(contractAddress, logs) {
       topics: log.topics,
       data: log.data,
       eventName: parsed?.name,
-      args: parsed?.args ? resultToArgsObject(parsed.args) : undefined,
+      args: parsed?.args
+        ? resultToArgsObject(parsed.name, parsed.args)
+        : undefined,
     };
   });
 
-  // Insert with ordered:false so duplicates (rare) don't abort the batch.
   await ChainLog.insertMany(docs, { ordered: false });
 }
 
@@ -112,10 +111,15 @@ export async function syncTicketLogsOnce() {
     lastProcessedBlock: syncState.lastProcessedBlock,
     reorgBuffer,
   });
+
   const target = plan.targetBlock;
 
   if (!plan.shouldSync) {
-    return { latest, target, processedTo: syncState.lastProcessedBlock };
+    return {
+      latest,
+      target,
+      processedTo: syncState.lastProcessedBlock,
+    };
   }
 
   const from = plan.fromBlock;
@@ -126,7 +130,6 @@ export async function syncTicketLogsOnce() {
   while (currentFrom <= target) {
     const currentTo = Math.min(target, currentFrom + chunkSize - 1);
 
-    // Reorg-handling strategy: for the rescan range, wipe then re-insert logs.
     await deleteLogsInRange(contractAddressLower, currentFrom, currentTo);
 
     const logs = await provider.getLogs({
@@ -149,7 +152,11 @@ export async function syncTicketLogsOnce() {
 
   await markSynced(CONTRACT_NAME);
 
-  return { latest, target, processedTo: target };
+  return {
+    latest,
+    target,
+    processedTo: target,
+  };
 }
 
 export async function runTicketIndexerLoop() {
@@ -161,9 +168,6 @@ export async function runTicketIndexerLoop() {
       await syncTicketLogsOnce();
     } catch (err) {
       await markError(CONTRACT_NAME, err);
-
-      // Keep process alive; next iteration may recover.
-      // eslint-disable-next-line no-console
       console.error("Ticket indexer error:", err);
     }
 

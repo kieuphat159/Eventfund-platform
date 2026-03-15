@@ -6,3 +6,14 @@ if (!process.env.RPC_URL) {
 }
 
 export const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
+
+/**
+ * Hàm test kết nối RPC
+ */
+export async function checkProviderConnection() {
+  const network = await provider.getNetwork();
+  console.log("[Provider] Connected network:", {
+    chainId: network.chainId.toString(),
+    name: network.name,
+  });
+}
