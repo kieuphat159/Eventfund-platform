@@ -1,10 +1,10 @@
 import mongoose from "mongoose";
+import mongoosePaginate from "mongoose-paginate-v2";
 
 const eventSchema = new mongoose.Schema(
   {
     contractEventId: {
       type: String,
-      required: true,
       trim: true,
     },
 
@@ -18,7 +18,6 @@ const eventSchema = new mongoose.Schema(
 
     category: {
       type: String,
-      required: true,
       trim: true,
     },
 
@@ -30,10 +29,10 @@ const eventSchema = new mongoose.Schema(
     },
 
     // ===== Funding Info =====
-    organizerStake: { type: Number, default: 0 },
-    minStakeRequired: { type: Number, default: 0 },
-    fundingGoal: { type: Number, default: 0 },
-    currentFunding: { type: Number, default: 0 },
+    organizerStake: { type: String, default: "0" },
+    minStakeRequired: { type: String, default: "0" },
+    fundingGoal: { type: String, default: "0" },
+    currentFunding: { type: String, default: "0" },
     fundingDeadline: Date,
 
     // ===== Event Info =====
@@ -52,16 +51,35 @@ const eventSchema = new mongoose.Schema(
       default: "draft",
     },
 
-    startDate: Date,
-    endDate: Date,
-    venue: String,
+    startDate: {
+      type: Date,
+      required: true,
+    },
+    endDate: {
+      type: Date,
+      required: true,
+      validate: {
+        validator: function (v) {
+          return !this.startDate || v > this.startDate;
+        },
+        message: 'End date must be after start date',
+      },
+    },
+    venue: {
+      name: String,
+      address: String,
+    },
 
     imageUrls: [String],
 
     metadataUri: String, // IPFS
 
     // ===== Ticket Info =====
-    totalTickets: { type: Number, default: 0 },
+    totalTickets: {
+      type: Number,
+      default: 0,
+      min: [1, 'Total tickets must be at least 1'],
+    },
     ticketsSold: { type: Number, default: 0 },
     totalTicketsUsed: { type: Number, default: 0 },
     ticketUsageThreshold: {
@@ -78,7 +96,7 @@ const eventSchema = new mongoose.Schema(
       default: "holding",
     },
 
-    totalRevenue: { type: Number, default: 0 },
+    totalRevenue: { type: String, default: "0" },
     revenueDistributedAt: Date,
   },
   {
@@ -87,10 +105,13 @@ const eventSchema = new mongoose.Schema(
 );
 
 // ===== Indexes =====
-eventSchema.index({ contractEventId: 1 }, { unique: true });
+eventSchema.index({ contractEventId: 1 }, { unique: true, sparse: true });
 eventSchema.index({ status: 1, category: 1 });
 eventSchema.index({ organizer: 1 });
 eventSchema.index({ fundingDeadline: 1 });
+
+// Apply pagination plugin
+eventSchema.plugin(mongoosePaginate);
 
 const Event = mongoose.model("Event", eventSchema);
 

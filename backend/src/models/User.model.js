@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import mongoosePaginate from "mongoose-paginate-v2";
 
 const userSchema = new mongoose.Schema(
   {
@@ -34,6 +35,16 @@ const userSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+
+    nonceExpiresAt: {
+      type: Date,
+      required: true,
+    },
+
+    isActive: {
+      type: Boolean,
+      default: true,
+    },
   },
   {
     timestamps: true, // Tự động thêm createdAt và updatedAt
@@ -42,6 +53,9 @@ const userSchema = new mongoose.Schema(
 
 // Index theo yêu cầu: { walletAddress: 1 }
 userSchema.index({ walletAddress: 1 }, { unique: true });
+
+// Apply pagination plugin
+userSchema.plugin(mongoosePaginate);
 
 const User = mongoose.model("User", userSchema);
 

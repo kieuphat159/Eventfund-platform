@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import mongoosePaginate from "mongoose-paginate-v2";
 
 const transferHistorySchema = new mongoose.Schema(
   {
@@ -25,7 +26,8 @@ const transferHistorySchema = new mongoose.Schema(
     },
 
     price: {
-      type: Number,
+      type: String,
+      default: "0",
     },
 
     type: {
@@ -57,8 +59,9 @@ const ticketSchema = new mongoose.Schema({
   },
 
   originalPrice: {
-    type: Number,
+    type: String,
     required: true,
+    default: "0",
   },
 
   ticketType: {
@@ -119,6 +122,9 @@ ticketSchema.index({ currentOwner: 1 });
 ticketSchema.index({ status: 1 });
 ticketSchema.index({ isListed: 1 });
 ticketSchema.index({ eventId: 1, status: 1 });
+
+// Apply pagination plugin
+ticketSchema.plugin(mongoosePaginate);
 
 const Ticket = mongoose.model("Ticket", ticketSchema);
 
