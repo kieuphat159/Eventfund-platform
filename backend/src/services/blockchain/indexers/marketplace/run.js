@@ -4,11 +4,11 @@ import { runMarketplaceIndexerLoop } from "./indexer.js";
 
 async function main() {
   await connectDB();
+  console.log("[marketplace.indexer] starting...");
   await runMarketplaceIndexerLoop();
 }
 
 main().catch((err) => {
-  // eslint-disable-next-line no-console
-  console.error(err);
+  console.error("[marketplace.indexer] fatal error:", err);
   process.exitCode = 1;
 });
