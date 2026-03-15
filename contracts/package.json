@@ -2,13 +2,8 @@
   "name": "contracts",
   "version": "1.0.0",
   "description": "",
-  "type": "module",
   "main": "index.js",
   "scripts": {
-    "node": "npx hardhat node",
-    "chain": "npx hardhat node",
-    "deploy:all": "npx hardhat run contracts/scripts/deployAll.js --network localhost",
-    "deploy:sepolia": "npx hardhat run contracts/scripts/deployAll.js --network sepolia",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
