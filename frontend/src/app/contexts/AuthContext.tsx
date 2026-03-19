@@ -8,7 +8,14 @@ interface AuthContextType {
   switchRole: (role: UserRole) => void;
 }
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+const defaultAuthContext: AuthContextType = {
+  user: { role: 'public' },
+  connectWallet: () => {},
+  disconnectWallet: () => {},
+  switchRole: () => {},
+};
+
+const AuthContext = createContext<AuthContextType>(defaultAuthContext);
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>({
@@ -16,8 +23,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   });
 
   const connectWallet = () => {
-    // Simulate wallet connection
-    const mockWallet = '0x' + Math.random().toString(16).substring(2, 42);
+    // Simulate wallet connection with a valid 40-hex Ethereum-style address
+    const randomHex = Array.from(crypto.getRandomValues(new Uint8Array(20)))
+      .map((byte) => byte.toString(16).padStart(2, '0'))
+      .join('');
+    const mockWallet = `0x${randomHex}`;
     setUser({
       walletAddress: mockWallet,
       role: 'user',
@@ -43,9 +53,5 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 };
 
 export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
+  return useContext(AuthContext);
 };
