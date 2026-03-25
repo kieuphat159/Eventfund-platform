@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { PublicLayout } from './layouts/PublicLayout';
 import { UserLayout } from './layouts/UserLayout';
@@ -19,6 +19,7 @@ import { LoginPage } from './pages/public/LoginPage';
 import { Dashboard } from './pages/user/Dashboard';
 import { MyEvents } from './pages/user/MyEvents';
 import { CreateEvent } from './pages/user/CreateEvent';
+import { EditEvent } from './pages/user/EditEvents';
 import { MyTickets } from './pages/user/MyTickets';
 import { MyInvestments } from './pages/user/MyInvestments';
 import { Wallet } from './pages/user/Wallet';
@@ -32,6 +33,8 @@ import { VerifierDashboard } from './pages/verifier/VerifierDashboard';
 import { AdminDashboard } from './pages/admin/AdminDashboard';
 import { UserManagement } from './pages/admin/UserManagement';
 import { EventManagement } from './pages/admin/EventManagement';
+import { EventDetail as AdminEventDetail } from './pages/admin/AdminEventDetail';
+import { EditEvent as AdminEditEvent } from './pages/admin/AdminEditEvent';
 import { MarketplaceManagement } from './pages/admin/MarketplaceManagement';
 import { FraudMonitoring } from './pages/admin/FraudMonitoring';
 import { FinanceDashboard } from './pages/admin/FinanceDashboard';
@@ -51,7 +54,11 @@ const ProtectedRoute: React.FC<{
     return <Navigate to="/" replace />;
   }
 
-  if (requiredRole === 'verifier' && user?.role !== 'verifier' && user?.role !== 'admin') {
+  if (
+    requiredRole === 'verifier' &&
+    user?.role !== 'verifier' &&
+    user?.role !== 'admin'
+  ) {
     return <Navigate to="/" replace />;
   }
 
@@ -67,13 +74,21 @@ const AppRoutes: React.FC = () => {
 
   return (
     <Routes>
-      {/* Admin Routes - Completely Separate Layout */}
       {user?.role === 'admin' && (
-        <Route path="/admin" element={<AdminLayout />}>
+        <Route
+          path="/admin"
+          element={
+            <ProtectedRoute requiredRole="admin">
+              <AdminLayout />
+            </ProtectedRoute>
+          }
+        >
           <Route index element={<Navigate to="/admin/dashboard" replace />} />
           <Route path="dashboard" element={<AdminDashboard />} />
           <Route path="users" element={<UserManagement />} />
           <Route path="events" element={<EventManagement />} />
+          <Route path="events/:id" element={<AdminEventDetail />} />
+          <Route path="events/edit/:id" element={<AdminEditEvent />} />
           <Route path="marketplace" element={<MarketplaceManagement />} />
           <Route path="fraud" element={<FraudMonitoring />} />
           <Route path="finance" element={<FinanceDashboard />} />
@@ -82,23 +97,28 @@ const AppRoutes: React.FC = () => {
         </Route>
       )}
 
-      {/* User/Verifier Routes - Shared Layout (Public Header + User Sidebar) */}
       {(user?.role === 'user' || user?.role === 'verifier') && (
-        <Route path="/" element={<UserLayout />}>
+        <Route
+          path="/"
+          element={
+            <ProtectedRoute requiredRole="user">
+              <UserLayout />
+            </ProtectedRoute>
+          }
+        >
           <Route path="dashboard" element={<Dashboard />} />
 
-          {/* Verifier-specific routes - Extends User */}
           {user?.role === 'verifier' && (
-            <>
-              <Route path="verifier">
-                <Route path="dashboard" element={<VerifierDashboard />} />
-              </Route>
-            </>
+            <Route path="verifier">
+              <Route path="dashboard" element={<VerifierDashboard />} />
+            </Route>
           )}
 
-          {/* User Routes */}
           <Route path="events/my-events" element={<MyEvents />} />
           <Route path="events/create" element={<CreateEvent />} />
+          <Route path="events/edit/:id" element={<EditEvent />} />
+          <Route path="events/:id/edit" element={<EditEvent />} />
+
           <Route path="tickets/my-tickets" element={<MyTickets />} />
           <Route path="investments" element={<MyInvestments />} />
           <Route path="wallet" element={<Wallet />} />
@@ -107,7 +127,6 @@ const AppRoutes: React.FC = () => {
         </Route>
       )}
 
-      {/* Public Routes - Public Layout (No Sidebar) */}
       <Route path="/" element={<PublicLayout />}>
         <Route index element={<Home />} />
         <Route path="explore" element={<Explore />} />
@@ -116,6 +135,7 @@ const AppRoutes: React.FC = () => {
         <Route path="tickets/:id" element={<TicketDetail />} />
         <Route path="about" element={<About />} />
         <Route path="login" element={<LoginPage />} />
+
         <Route
           path="faq"
           element={
@@ -127,6 +147,7 @@ const AppRoutes: React.FC = () => {
             </div>
           }
         />
+
         <Route
           path="terms"
           element={
@@ -138,6 +159,7 @@ const AppRoutes: React.FC = () => {
             </div>
           }
         />
+
         <Route
           path="privacy"
           element={
@@ -149,10 +171,10 @@ const AppRoutes: React.FC = () => {
             </div>
           }
         />
+
         <Route path="demo" element={<RoleDemo />} />
       </Route>
 
-      {/* Catch-all redirect */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
@@ -161,10 +183,8 @@ const AppRoutes: React.FC = () => {
 const App: React.FC = () => {
   return (
     <AuthProvider>
-      <Router>
-        <AppRoutes />
-        <RoleSwitcher />
-      </Router>
+      <AppRoutes />
+      <RoleSwitcher />
     </AuthProvider>
   );
 };

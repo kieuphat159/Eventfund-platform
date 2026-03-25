@@ -9,7 +9,8 @@ import {
 import { User, UserRole } from '../types/roles';
 import { createSmartAccount } from '../services/walletService';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000';
+const RAW_API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api';
+const API_BASE = RAW_API_BASE.replace(/\/+$/, '').replace(/\/api$/, '');
 
 interface AuthContextType {
   user: User | null;
@@ -33,7 +34,6 @@ const AuthContext = createContext<AuthContextType>({
 async function loginToBackend(idToken: string, walletAddress: string) {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    // Bypass ngrok's browser interstitial page in dev
     'ngrok-skip-browser-warning': 'true',
   };
 
@@ -43,25 +43,63 @@ async function loginToBackend(idToken: string, walletAddress: string) {
     body: JSON.stringify({ idToken, walletAddress }),
   });
 
-  const json = await res.json();
+  const contentType = res.headers.get('content-type') || '';
+  const isJson = contentType.includes('application/json');
+  const json = isJson ? await res.json() : await res.text();
 
-  if (!res.ok || !json.success) {
+  if (!res.ok) {
     const errMsg =
-      typeof json.error === 'string' ? json.error :
-      json.message ||
-      (json.error ? JSON.stringify(json.error) : null) ||
-      'Login failed';
+      typeof json === 'object' && json !== null
+        ? typeof (json as { error?: unknown }).error === 'string'
+          ? (json as { error: string }).error
+          : (json as { message?: string }).message ||
+            ((json as { error?: unknown }).error
+              ? JSON.stringify((json as { error?: unknown }).error)
+              : `Login failed (${res.status})`)
+        : `Login failed (${res.status})`;
+
     throw new Error(errMsg);
   }
 
-  const { token, walletAddress: returnedAddress, user: backendUser } = json.data;
+  if (
+    typeof json !== 'object' ||
+    json === null ||
+    !('success' in json) ||
+    !(json as { success?: boolean }).success
+  ) {
+    throw new Error('Login failed');
+  }
+
+  const data = (json as {
+    data?: {
+      token?: string;
+      walletAddress?: string;
+      user?: {
+        role?: UserRole;
+        email?: string;
+        username?: string;
+      };
+    };
+  }).data;
+
+  const token = data?.token;
+  const returnedAddress = data?.walletAddress || walletAddress;
+  const backendUser = data?.user;
+
+  if (!token) {
+    throw new Error('Backend did not return JWT token');
+  }
 
   localStorage.setItem('jwtToken', token);
-  localStorage.setItem('walletAddress', returnedAddress || walletAddress);
-  if (backendUser?.email) localStorage.setItem('userEmail', backendUser.email);
+  localStorage.setItem('walletAddress', returnedAddress);
+  if (backendUser?.email) {
+    localStorage.setItem('userEmail', backendUser.email);
+  } else {
+    localStorage.removeItem('userEmail');
+  }
   localStorage.setItem('userRole', backendUser?.role ?? 'user');
 
-  return { returnedAddress: returnedAddress || walletAddress, backendUser };
+  return { returnedAddress, backendUser };
 }
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -72,11 +110,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const { connect, isConnected } = useWeb3AuthConnect();
   const { disconnect } = useWeb3AuthDisconnect();
   const { getIdentityToken } = useIdentityToken();
-  // web3Auth.provider is set synchronously when connect() resolves —
-  // unlike the reactive `provider` hook which requires a re-render cycle.
   const { web3Auth } = useWeb3Auth();
 
-  // Restore session from localStorage on mount
   useEffect(() => {
     const token = localStorage.getItem('jwtToken');
     const walletAddress = localStorage.getItem('walletAddress');
@@ -91,28 +126,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const connectWallet = useCallback(async () => {
     setIsLoading(true);
     setError(null);
+
     try {
-      // 1. Open Web3Auth Login Modal (Social + MetaMask in one UI)
       await connect();
 
-      // 2. Read provider from the instance — available immediately after connect()
       const activeProvider = web3Auth?.provider;
       if (!activeProvider) {
         throw new Error('Web3Auth provider unavailable after connect. Please try again.');
       }
 
-      // 3. Get idToken issued by Web3Auth
       const idToken = await getIdentityToken();
-      if (!idToken) throw new Error('Failed to get idToken from Web3Auth');
+      if (!idToken) {
+        throw new Error('Failed to get idToken from Web3Auth');
+      }
 
-      // 4. Derive Smart Account address on frontend — private key never leaves the browser
-      // Cast: Web3Auth IProvider satisfies { request } shape permissionless needs at runtime
       const walletAddress = await createSmartAccount(activeProvider as any);
 
-      // 5. Send { idToken, walletAddress } to backend → get session JWT
       const { returnedAddress, backendUser } = await loginToBackend(idToken, walletAddress);
 
-      // 6. Update context state
       setUser({
         walletAddress: returnedAddress,
         role: backendUser?.role ?? 'user',
@@ -130,28 +161,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const disconnectWallet = useCallback(async () => {
     try {
-      if (isConnected) await disconnect();
+      if (isConnected) {
+        await disconnect();
+      }
     } catch (e) {
       console.warn('[AuthContext] Disconnect error:', e);
     }
-    // Only remove auth-related keys — don't nuke unrelated localStorage data
+
     localStorage.removeItem('jwtToken');
     localStorage.removeItem('walletAddress');
     localStorage.removeItem('userEmail');
     localStorage.removeItem('userRole');
+
     setUser({ role: 'public' });
     setError(null);
   }, [disconnect, isConnected]);
 
   const switchRole = useCallback(
     (role: UserRole) => {
-      if (user) setUser({ ...user, role });
+      if (user) {
+        setUser({ ...user, role });
+        localStorage.setItem('userRole', role);
+      }
     },
     [user],
   );
 
   return (
-    <AuthContext.Provider value={{ user, connectWallet, disconnectWallet, switchRole, isLoading, error }}>
+    <AuthContext.Provider
+      value={{ user, connectWallet, disconnectWallet, switchRole, isLoading, error }}
+    >
       {children}
     </AuthContext.Provider>
   );

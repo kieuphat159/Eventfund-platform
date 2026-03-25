@@ -1,5 +1,5 @@
 import React from 'react';
-import { Outlet } from 'react-router';
+import { Outlet } from 'react-router-dom';
 import { PublicUserHeader } from '../components/shared/PublicUserHeader';
 import { Footer } from '../components/shared/Footer';
 

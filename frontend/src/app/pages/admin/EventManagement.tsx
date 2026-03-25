@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Search, Calendar, MapPin, User, DollarSign } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
 import { Input } from '../../components/ui/input';
@@ -104,7 +105,9 @@ export const EventManagement: React.FC = () => {
         {stats.map((stat, index) => (
           <Card key={index} className="bg-slate-900 border-slate-800">
             <CardContent className="p-6">
-              <div className={`w-12 h-12 bg-gradient-to-br ${stat.color} rounded-xl flex items-center justify-center mb-4`}>
+              <div
+                className={`w-12 h-12 bg-gradient-to-br ${stat.color} rounded-xl flex items-center justify-center mb-4`}
+              >
                 <Calendar className="w-6 h-6 text-white" />
               </div>
               <p className="text-sm text-slate-400 mb-1">{stat.label}</p>
@@ -163,7 +166,9 @@ export const EventManagement: React.FC = () => {
       <Card className="bg-slate-900 border-slate-800">
         <CardHeader>
           <CardTitle className="text-white">All Events</CardTitle>
-          <CardDescription className="text-slate-400">Complete list of platform events</CardDescription>
+          <CardDescription className="text-slate-400">
+            Complete list of platform events
+          </CardDescription>
         </CardHeader>
 
         <CardContent>
@@ -171,89 +176,103 @@ export const EventManagement: React.FC = () => {
             {filteredEvents.length === 0 ? (
               <div className="text-slate-400">No events found.</div>
             ) : (
-              filteredEvents.map((event) => (
-                <div
-                  key={event._id || event.id}
-                  className="p-4 rounded-lg bg-slate-800/50 border border-slate-700 hover:border-slate-600 transition-all"
-                >
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="flex-1">
-                      <div className="flex items-center space-x-3 mb-2">
-                        <h3 className="text-lg font-semibold text-white">
-                          {event.title || 'Untitled event'}
-                        </h3>
-                        <StatusBadge
-                          status={
-                            (event.status as
-                              | 'pending'
-                              | 'approved'
-                              | 'rejected'
-                              | 'active'
-                              | 'completed') || 'pending'
-                          }
-                        />
+              filteredEvents.map((event) => {
+                const eventId = event._id || event.id;
+
+                return (
+                  <div
+                    key={eventId}
+                    className="p-4 rounded-lg bg-slate-800/50 border border-slate-700 hover:border-slate-600 transition-all"
+                  >
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="flex-1">
+                        <div className="flex items-center space-x-3 mb-2">
+                          <h3 className="text-lg font-semibold text-white">
+                            {event.title || 'Untitled event'}
+                          </h3>
+
+                          <StatusBadge status={(event.status as any) || 'draft'} />
+                        </div>
+
+                        <p className="text-sm text-slate-400 mb-3">
+                          {event.description || 'No description'}
+                        </p>
                       </div>
-                      <p className="text-sm text-slate-400 mb-3">
-                        {event.description || 'No description'}
-                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                      <div className="flex items-center space-x-2 text-slate-400">
+                        <Calendar className="w-4 h-4" />
+                        <span>
+                          {event.startDate
+                            ? new Date(event.startDate).toLocaleDateString()
+                            : 'No date'}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center space-x-2 text-slate-400">
+                        <MapPin className="w-4 h-4" />
+                        <span>{event.venue?.address || 'Unknown location'}</span>
+                      </div>
+
+                      <div className="flex items-center space-x-2 text-slate-400">
+                        <User className="w-4 h-4" />
+                        <span className="truncate">
+                          {event.organizer
+                            ? `${event.organizer.slice(0, 10)}...`
+                            : event.organizerWallet
+                              ? `${event.organizerWallet.slice(0, 10)}...`
+                              : 'Unknown organizer'}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center space-x-2 text-slate-400">
+                        <DollarSign className="w-4 h-4" />
+                        <span>
+                          {typeof event.totalTickets === 'number'
+                            ? `${event.totalTickets} tickets`
+                            : `From ${event.ticketTiers?.[0]?.price ?? 0} ETH`}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 pt-4 border-t border-slate-700 flex items-center justify-between">
+                      <div className="text-xs text-slate-500">
+                        Created:{' '}
+                        {event.createdAt
+                          ? new Date(event.createdAt).toLocaleDateString()
+                          : 'Unknown'}
+                      </div>
+
+                      <div className="flex space-x-2">
+                        {eventId && (
+                          <>
+                            <Link to={`/admin/events/${eventId}`}>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="border-slate-600 hover:bg-slate-700 text-white"
+                              >
+                                View Details
+                              </Button>
+                            </Link>
+
+                            <Link to={`/admin/events/edit/${eventId}`}>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="border-slate-600 hover:bg-slate-700 text-white"
+                              >
+                                Edit
+                              </Button>
+                            </Link>
+                          </>
+                        )}
+                      </div>
                     </div>
                   </div>
-
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                    <div className="flex items-center space-x-2 text-slate-400">
-                      <Calendar className="w-4 h-4" />
-                      <span>
-                        {event.startDate
-                          ? new Date(event.startDate).toLocaleDateString()
-                          : 'No date'}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center space-x-2 text-slate-400">
-                      <MapPin className="w-4 h-4" />
-                      <span>{event.venue?.address || 'Unknown location'}</span>
-                    </div>
-
-                    <div className="flex items-center space-x-2 text-slate-400">
-                      <User className="w-4 h-4" />
-                      <span className="truncate">
-                        {event.organizer
-                          ? `${event.organizer.slice(0, 10)}...`
-                          : event.organizerWallet
-                            ? `${event.organizerWallet.slice(0, 10)}...`
-                            : 'Unknown organizer'}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center space-x-2 text-slate-400">
-                      <DollarSign className="w-4 h-4" />
-                      <span>
-                        {typeof event.totalTickets === 'number'
-                          ? `${event.totalTickets} tickets`
-                          : `From ${event.ticketTiers?.[0]?.price ?? 0} ETH`}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 pt-4 border-t border-slate-700 flex items-center justify-between">
-                    <div className="text-xs text-slate-500">
-                      Created:{' '}
-                      {event.createdAt
-                        ? new Date(event.createdAt).toLocaleDateString()
-                        : 'Unknown'}
-                    </div>
-
-                    <div className="flex space-x-2">
-                      <Button variant="outline" size="sm" className="border-slate-600 hover:bg-slate-700 text-white">
-                        View Details
-                      </Button>
-                      <Button variant="outline" size="sm" className="border-slate-600 hover:bg-slate-700 text-white">
-                        Edit
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </CardContent>

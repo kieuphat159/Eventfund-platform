@@ -6,9 +6,9 @@ export interface EventVenue {
 }
 
 export interface EventTicketTier {
-  name?: string;
-  price?: string | number;
-  totalSupply?: number;
+  name: string;
+  price: number;
+  totalSupply: number;
   benefits?: string[];
 }
 
@@ -29,9 +29,11 @@ export interface EventItem {
   description?: string;
   category?: string;
   status?: EventStatus;
+
   startDate?: string;
   endDate?: string;
   createdAt?: string;
+  updatedAt?: string;
 
   organizer?: string;
   organizerWallet?: string;
@@ -39,8 +41,8 @@ export interface EventItem {
   venue?: EventVenue;
   imageUrls?: string[];
 
-  fundingGoal?: string;
-  minStakeRequired?: string;
+  fundingGoal?: string | number;
+  minStakeRequired?: string | number;
   fundingDeadline?: string;
 
   totalTickets?: number;
@@ -51,7 +53,7 @@ export interface EventItem {
   ticketTiers?: EventTicketTier[];
 }
 
-interface PaginatedEventsData {
+export interface PaginatedEventsData {
   docs?: EventItem[];
   events?: EventItem[];
   totalDocs?: number;
@@ -60,13 +62,13 @@ interface PaginatedEventsData {
   limit?: number;
 }
 
-interface EventsResponse {
+export interface EventsResponse {
   success: boolean;
   data?: PaginatedEventsData | EventItem[];
   message?: string;
 }
 
-interface EventDetailResponse {
+export interface EventDetailResponse {
   success: boolean;
   data?: EventItem;
   message?: string;
@@ -82,34 +84,67 @@ export interface CreateEventPayload {
     name?: string;
     address: string;
   };
-
-  // backend route/swagger đang yêu cầu các field này
   fundingGoal: string;
-  minStakeRequired?: string;
   fundingDeadline: string;
   totalTickets: number;
 
-  // field này chưa thấy backend service xử lý rõ, nhưng FE vẫn có thể gửi nếu validator cho phép
-  ticketTiers?: {
-    name: string;
-    price: number;
-    totalSupply: number;
-  }[];
-
+  minStakeRequired?: string;
+  ticketTiers?: EventTicketTier[];
   imageUrls?: string[];
 }
 
-interface CreateEventResponse {
+export interface UpdateEventPayload {
+  title?: string;
+  description?: string;
+  category?: string;
+  startDate?: string;
+  endDate?: string;
+  venue?: {
+    name?: string;
+    address?: string;
+  };
+  fundingGoal?: string;
+  fundingDeadline?: string;
+  totalTickets?: number;
+  minStakeRequired?: string;
+  ticketTiers?: EventTicketTier[];
+  imageUrls?: string[];
+  status?: EventStatus;
+}
+
+export interface CreateEventResponse {
   success: boolean;
   data?: EventItem;
   message?: string;
 }
 
-export async function getEvents(): Promise<EventItem[]> {
-  const payload = await api.get<EventsResponse>('/events');
+function normalizeEvents(data?: PaginatedEventsData | EventItem[]): EventItem[] {
+  if (!data) return [];
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data.docs)) return data.docs;
+  if (Array.isArray(data.events)) return data.events;
+  return [];
+}
 
-  if (Array.isArray(payload.data)) return payload.data;
-  return payload.data?.docs || payload.data?.events || [];
+export async function getEvents(params?: {
+  status?: EventStatus;
+  category?: string;
+  page?: number;
+  limit?: number;
+  search?: string;
+}): Promise<EventItem[]> {
+  const query = new URLSearchParams();
+
+  if (params?.status) query.set('status', params.status);
+  if (params?.category) query.set('category', params.category);
+  if (params?.page) query.set('page', String(params.page));
+  if (params?.limit) query.set('limit', String(params.limit));
+  if (params?.search) query.set('search', params.search);
+
+  const url = query.toString() ? `/events?${query.toString()}` : '/events';
+  const payload = await api.get<EventsResponse>(url);
+
+  return normalizeEvents(payload.data);
 }
 
 export async function getEventById(eventId: string): Promise<EventItem | null> {
@@ -117,20 +152,64 @@ export async function getEventById(eventId: string): Promise<EventItem | null> {
   return payload.data || null;
 }
 
-export async function getAdminEvents(): Promise<EventItem[]> {
-  // fallback nếu BE chưa có /admin/events
+export async function getAdminEvents(params?: {
+  status?: EventStatus;
+  page?: number;
+  limit?: number;
+  search?: string;
+}): Promise<EventItem[]> {
   try {
-    const payload = await api.get<EventsResponse>('/admin/events');
-    if (Array.isArray(payload.data)) return payload.data;
-    return payload.data?.docs || payload.data?.events || [];
+    const query = new URLSearchParams();
+
+    if (params?.status) query.set('status', params.status);
+    if (params?.page) query.set('page', String(params.page));
+    if (params?.limit) query.set('limit', String(params.limit));
+    if (params?.search) query.set('search', params.search);
+
+    const url = query.toString() ? `/admin/events?${query.toString()}` : '/admin/events';
+    const payload = await api.get<EventsResponse>(url);
+
+    return normalizeEvents(payload.data);
   } catch {
     const payload = await api.get<EventsResponse>('/events');
-    if (Array.isArray(payload.data)) return payload.data;
-    return payload.data?.docs || payload.data?.events || [];
+    return normalizeEvents(payload.data);
   }
 }
 
 export async function createEvent(payload: CreateEventPayload): Promise<EventItem | null> {
   const response = await api.post<CreateEventResponse>('/events', payload);
   return response.data || null;
+}
+
+export async function updateEvent(
+  eventId: string,
+  payload: UpdateEventPayload
+): Promise<EventItem | null> {
+  const response = await api.patch<CreateEventResponse>(`/events/${eventId}`, payload);
+  return response.data || null;
+}
+
+export async function updateAdminEventStatus(
+  eventId: string,
+  status: EventStatus
+): Promise<EventItem | null> {
+  const response = await api.patch<CreateEventResponse>(
+    `/admin/events/${eventId}/status`,
+    { status }
+  );
+  return response.data || null;
+}
+
+export async function deleteEvent(eventId: string): Promise<boolean> {
+  await api.delete(`/events/${eventId}`);
+  return true;
+}
+
+export async function getEventStats(eventId: string) {
+  return api.get(`/events/${eventId}/stats`);
+}
+
+export async function deleteEventImage(eventId: string, imageUrl: string): Promise<boolean> {
+  await api.delete(`/events/${eventId}/images/${encodeURIComponent(imageUrl)}`);
+  return true;
 }

@@ -1,11 +1,17 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { Calendar, MapPin, Upload, Plus, Trash2 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Textarea } from '../../components/ui/textarea';
 import { Label } from '../../components/ui/label';
-import { createEvent } from '../../services/events.service';
+import {
+  getEventById,
+  updateEvent,
+  type EventItem,
+  type EventStatus,
+} from '../../services/events.service';
 
 type TicketTierForm = {
   name: string;
@@ -13,38 +19,98 @@ type TicketTierForm = {
   supply: string;
 };
 
-export const CreateEvent: React.FC = () => {
+const toDateInputValue = (iso?: string) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+};
+
+const toTimeInputValue = (iso?: string) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `${hh}:${mm}`;
+};
+
+export const EditEvent: React.FC = () => {
+  const navigate = useNavigate();
+  const { id } = useParams<{ id: string }>();
+
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+
+  const [eventData, setEventData] = useState<EventItem | null>(null);
+
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [date, setDate] = useState('');
   const [time, setTime] = useState('');
   const [location, setLocation] = useState('');
   const [category, setCategory] = useState('');
-
   const [fundingGoal, setFundingGoal] = useState('');
   const [minStakeRequired, setMinStakeRequired] = useState('');
-  const [investmentEnabled, setInvestmentEnabled] = useState(false);
-
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
+  const [status, setStatus] = useState<EventStatus>('draft');
 
   const [ticketTiers, setTicketTiers] = useState<TicketTierForm[]>([
     { name: 'General', price: '', supply: '' },
   ]);
 
-  const resetForm = () => {
-    setTitle('');
-    setDescription('');
-    setDate('');
-    setTime('');
-    setLocation('');
-    setCategory('');
-    setFundingGoal('');
-    setMinStakeRequired('');
-    setInvestmentEnabled(false);
-    setTicketTiers([{ name: 'General', price: '', supply: '' }]);
-  };
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  useEffect(() => {
+    const fetchEvent = async () => {
+      try {
+        if (!id) {
+          setError('Không tìm thấy event id');
+          return;
+        }
+
+        setLoading(true);
+        setError('');
+
+        const data = await getEventById(id);
+
+        if (!data) {
+          setError('Không tìm thấy sự kiện');
+          return;
+        }
+
+        setEventData(data);
+        setTitle(data.title || '');
+        setDescription(data.description || '');
+        setDate(toDateInputValue(data.startDate));
+        setTime(toTimeInputValue(data.startDate));
+        setLocation(data.venue?.address || '');
+        setCategory(data.category || '');
+        setFundingGoal(data.fundingGoal != null ? String(data.fundingGoal) : '');
+        setMinStakeRequired(data.minStakeRequired != null ? String(data.minStakeRequired) : '');
+        setStatus((data.status as EventStatus) || 'draft');
+
+        if (data.ticketTiers?.length) {
+          setTicketTiers(
+            data.ticketTiers.map((tier) => ({
+              name: tier.name || '',
+              price: tier.price != null ? String(tier.price) : '',
+              supply: tier.totalSupply != null ? String(tier.totalSupply) : '',
+            }))
+          );
+        }
+      } catch (err: any) {
+        setError(err?.response?.data?.message || err?.message || 'Không tải được dữ liệu sự kiện');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchEvent();
+  }, [id]);
 
   const addTier = () => {
     setTicketTiers((prev) => [...prev, { name: '', price: '', supply: '' }]);
@@ -54,7 +120,7 @@ export const CreateEvent: React.FC = () => {
     setTicketTiers((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const updateTier = (
+  const updateTierField = (
     index: number,
     field: 'name' | 'price' | 'supply',
     value: string
@@ -71,13 +137,23 @@ export const CreateEvent: React.FC = () => {
     return new Date(`${date}T${time}`);
   };
 
-  const submitEvent = async (mode: 'draft' | 'review') => {
+  const handleSubmit = async () => {
     try {
       setError('');
       setSuccess('');
 
+      if (!id) {
+        setError('Thiếu event id');
+        return;
+      }
+
       if (!title.trim()) {
         setError('Vui lòng nhập tên sự kiện');
+        return;
+      }
+
+      if (!description.trim()) {
+        setError('Vui lòng nhập mô tả sự kiện');
         return;
       }
 
@@ -86,40 +162,14 @@ export const CreateEvent: React.FC = () => {
         return;
       }
 
-      const start = buildStartDate();
-      if (!start || Number.isNaN(start.getTime())) {
-        setError('Ngày giờ bắt đầu không hợp lệ');
+      if (!location.trim()) {
+        setError('Vui lòng nhập địa điểm');
         return;
       }
 
-      const end = new Date(start.getTime() + 2 * 60 * 60 * 1000);
-      const fundingDeadline = new Date(start.getTime() - 7 * 24 * 60 * 60 * 1000);
-
-      if (mode === 'review') {
-        if (!description.trim()) {
-          setError('Vui lòng nhập mô tả sự kiện');
-          return;
-        }
-
-        if (!location.trim()) {
-          setError('Vui lòng nhập địa điểm');
-          return;
-        }
-
-        if (!category) {
-          setError('Vui lòng chọn danh mục');
-          return;
-        }
-
-        if (investmentEnabled && !fundingGoal.trim()) {
-          setError('Vui lòng nhập funding goal');
-          return;
-        }
-
-        if (fundingDeadline <= new Date()) {
-          setError('Ngày sự kiện cần cách hiện tại ít nhất 7 ngày để tạo funding deadline hợp lệ');
-          return;
-        }
+      if (!category) {
+        setError('Vui lòng chọn danh mục');
+        return;
       }
 
       const normalizedTiers = ticketTiers
@@ -150,51 +200,78 @@ export const CreateEvent: React.FC = () => {
 
       const totalTickets = normalizedTiers.reduce((sum, tier) => sum + tier.totalSupply, 0);
 
-      setSubmitting(true);
-
-      const created = await createEvent({
-        title: title.trim(),
-        description: description.trim() || 'Draft event',
-        category: category || 'conference',
-        startDate: start.toISOString(),
-        endDate: end.toISOString(),
-        fundingGoal: investmentEnabled ? (fundingGoal.trim() || '0') : '0',
-        minStakeRequired: investmentEnabled ? (minStakeRequired.trim() || '0') : '0',
-        fundingDeadline: fundingDeadline.toISOString(),
-        totalTickets,
-        venue: {
-          address: location.trim() || 'TBA',
-        },
-        ticketTiers: normalizedTiers,
-      });
-
-      if (!created) {
-        setError(mode === 'draft' ? 'Lưu draft thất bại' : 'Tạo sự kiện thất bại');
+      const start = buildStartDate();
+      if (!start) {
+        setError('Ngày giờ bắt đầu không hợp lệ');
         return;
       }
 
-      setSuccess(mode === 'draft' ? 'Lưu draft thành công' : 'Tạo sự kiện thành công');
-      resetForm();
+      const end = eventData?.endDate
+        ? new Date(eventData.endDate)
+        : new Date(start.getTime() + 2 * 60 * 60 * 1000);
+
+      const fundingDeadline = eventData?.fundingDeadline
+        ? new Date(eventData.fundingDeadline)
+        : new Date(start.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+      if (!fundingGoal.trim()) {
+        setError('Vui lòng nhập funding goal');
+        return;
+      }
+
+      setSubmitting(true);
+
+      const updated = await updateEvent(id, {
+        title: title.trim(),
+        description: description.trim(),
+        category,
+        startDate: start.toISOString(),
+        endDate: end.toISOString(),
+        fundingGoal: fundingGoal.trim(),
+        minStakeRequired: minStakeRequired.trim() || '0',
+        fundingDeadline: fundingDeadline.toISOString(),
+        totalTickets,
+        venue: {
+          address: location.trim(),
+        },
+        ticketTiers: normalizedTiers,
+        status,
+      });
+
+      if (!updated) {
+        setError('Cập nhật sự kiện thất bại');
+        return;
+      }
+
+      setSuccess('Cập nhật sự kiện thành công');
+      setEventData(updated);
     } catch (err: any) {
-      setError(err?.response?.data?.message || err?.message || 'Có lỗi xảy ra khi tạo sự kiện');
+      setError(err?.response?.data?.message || err?.message || 'Có lỗi xảy ra khi cập nhật sự kiện');
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handleSubmit = async () => {
-    await submitEvent('review');
-  };
-
-  const handleSaveDraft = async () => {
-    await submitEvent('draft');
-  };
+  if (loading) {
+    return <div className="text-white">Loading event...</div>;
+  }
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-white mb-2">Create Event</h1>
-        <p className="text-slate-400">Set up a new event with NFT tickets</p>
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-white mb-2">Edit Event</h1>
+          <p className="text-slate-400">Update your event information</p>
+        </div>
+
+        <Button
+          type="button"
+          variant="outline"
+          className="border-slate-700 hover:bg-slate-800 text-white"
+          onClick={() => navigate('/events/my-events')}
+        >
+          Back
+        </Button>
       </div>
 
       {!!error && (
@@ -216,7 +293,6 @@ export const CreateEvent: React.FC = () => {
             Basic information about your event
           </CardDescription>
         </CardHeader>
-
         <CardContent className="space-y-4">
           <div>
             <Label htmlFor="title" className="text-white">Event Title *</Label>
@@ -281,22 +357,43 @@ export const CreateEvent: React.FC = () => {
             </div>
           </div>
 
-          <div>
-            <Label htmlFor="category" className="text-white">Category *</Label>
-            <select
-              id="category"
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              className="mt-1.5 w-full h-9 px-3 rounded-md bg-slate-800 border border-slate-700 text-white text-sm"
-            >
-              <option value="">Select a category</option>
-              <option value="music">Music</option>
-              <option value="tech">Technology</option>
-              <option value="sports">Sports</option>
-              <option value="art">Art &amp; Culture</option>
-              <option value="business">Business</option>
-              <option value="conference">Conference</option>
-            </select>
+          <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              <Label htmlFor="category" className="text-white">Category *</Label>
+              <select
+                id="category"
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                className="mt-1.5 w-full h-9 px-3 rounded-md bg-slate-800 border border-slate-700 text-white text-sm"
+              >
+                <option value="">Select a category</option>
+                <option value="music">Music</option>
+                <option value="tech">Technology</option>
+                <option value="sports">Sports</option>
+                <option value="art">Art &amp; Culture</option>
+                <option value="business">Business</option>
+                <option value="conference">Conference</option>
+              </select>
+            </div>
+
+            <div>
+              <Label htmlFor="status" className="text-white">Status</Label>
+              <select
+                id="status"
+                value={status}
+                onChange={(e) => setStatus(e.target.value as EventStatus)}
+                className="mt-1.5 w-full h-9 px-3 rounded-md bg-slate-800 border border-slate-700 text-white text-sm"
+              >
+                <option value="draft">Draft</option>
+                <option value="funding">Funding</option>
+                <option value="funded">Funded</option>
+                <option value="ticketing">Ticketing</option>
+                <option value="ongoing">Ongoing</option>
+                <option value="completed">Completed</option>
+                <option value="cancelled">Cancelled</option>
+                <option value="failed">Failed</option>
+              </select>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -313,7 +410,7 @@ export const CreateEvent: React.FC = () => {
             <Upload className="w-12 h-12 text-slate-600 mx-auto mb-4" />
             <p className="text-white mb-2">Image upload chưa nối vào API multipart</p>
             <p className="text-sm text-slate-500">
-              Backend có middleware upload ảnh, nhưng form này hiện chưa gửi FormData
+              Có thể nối thêm FormData sau nếu backend đã hỗ trợ endpoint upload.
             </p>
           </div>
         </CardContent>
@@ -328,7 +425,6 @@ export const CreateEvent: React.FC = () => {
                 Define different ticket types and pricing
               </CardDescription>
             </div>
-
             <Button
               type="button"
               onClick={addTier}
@@ -341,7 +437,6 @@ export const CreateEvent: React.FC = () => {
             </Button>
           </div>
         </CardHeader>
-
         <CardContent className="space-y-4">
           {ticketTiers.map((tier, index) => (
             <div
@@ -350,7 +445,6 @@ export const CreateEvent: React.FC = () => {
             >
               <div className="flex items-start justify-between mb-4">
                 <h4 className="text-white font-medium">Tier {index + 1}</h4>
-
                 {ticketTiers.length > 1 && (
                   <Button
                     type="button"
@@ -373,7 +467,7 @@ export const CreateEvent: React.FC = () => {
                     id={`tier-name-${index}`}
                     placeholder="e.g., VIP, General"
                     value={tier.name}
-                    onChange={(e) => updateTier(index, 'name', e.target.value)}
+                    onChange={(e) => updateTierField(index, 'name', e.target.value)}
                     className="mt-1.5 bg-slate-800 border-slate-700 text-white"
                   />
                 </div>
@@ -388,7 +482,7 @@ export const CreateEvent: React.FC = () => {
                     step="0.01"
                     placeholder="0.00"
                     value={tier.price}
-                    onChange={(e) => updateTier(index, 'price', e.target.value)}
+                    onChange={(e) => updateTierField(index, 'price', e.target.value)}
                     className="mt-1.5 bg-slate-800 border-slate-700 text-white"
                   />
                 </div>
@@ -402,7 +496,7 @@ export const CreateEvent: React.FC = () => {
                     type="number"
                     placeholder="100"
                     value={tier.supply}
-                    onChange={(e) => updateTier(index, 'supply', e.target.value)}
+                    onChange={(e) => updateTierField(index, 'supply', e.target.value)}
                     className="mt-1.5 bg-slate-800 border-slate-700 text-white"
                   />
                 </div>
@@ -416,24 +510,10 @@ export const CreateEvent: React.FC = () => {
         <CardHeader>
           <CardTitle className="text-white">Investment Options</CardTitle>
           <CardDescription className="text-slate-400">
-            Funding info required by current backend create API
+            Funding info required by current backend API
           </CardDescription>
         </CardHeader>
-
         <CardContent className="space-y-4">
-          <div className="flex items-center space-x-3">
-            <input
-              type="checkbox"
-              id="enable-investment"
-              checked={investmentEnabled}
-              onChange={(e) => setInvestmentEnabled(e.target.checked)}
-              className="w-4 h-4 rounded border-slate-700 bg-slate-800"
-            />
-            <Label htmlFor="enable-investment" className="text-white">
-              Enable event investment
-            </Label>
-          </div>
-
           <div className="grid md:grid-cols-2 gap-4">
             <div>
               <Label htmlFor="funding-goal" className="text-slate-300">
@@ -445,7 +525,6 @@ export const CreateEvent: React.FC = () => {
                 onChange={(e) => setFundingGoal(e.target.value)}
                 placeholder="5000000000000000000"
                 className="mt-1.5 bg-slate-800 border-slate-700 text-white"
-                disabled={!investmentEnabled}
               />
             </div>
 
@@ -459,7 +538,6 @@ export const CreateEvent: React.FC = () => {
                 onChange={(e) => setMinStakeRequired(e.target.value)}
                 placeholder="1000000000000000000"
                 className="mt-1.5 bg-slate-800 border-slate-700 text-white"
-                disabled={!investmentEnabled}
               />
             </div>
           </div>
@@ -475,10 +553,9 @@ export const CreateEvent: React.FC = () => {
           type="button"
           variant="outline"
           className="border-slate-700 hover:bg-slate-800 text-white"
-          onClick={handleSaveDraft}
-          disabled={submitting}
+          onClick={() => navigate('/events/my-events')}
         >
-          {submitting ? 'Saving...' : 'Save as Draft'}
+          Cancel
         </Button>
 
         <Button
@@ -487,7 +564,7 @@ export const CreateEvent: React.FC = () => {
           onClick={handleSubmit}
           className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white px-8 disabled:opacity-50"
         >
-          {submitting ? 'Submitting...' : 'Submit for Review'}
+          {submitting ? 'Saving...' : 'Save Changes'}
         </Button>
       </div>
     </div>

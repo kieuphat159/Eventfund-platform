@@ -1,6 +1,6 @@
 import React from 'react';
 import { ShoppingCart, Zap, Search, SlidersHorizontal, X, MapPin, Calendar, Ticket } from 'lucide-react';
-import { useNavigate } from 'react-router';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
