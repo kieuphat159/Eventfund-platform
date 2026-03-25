@@ -13,6 +13,7 @@ import { Marketplace } from './pages/public/Marketplace';
 import { EventDetail } from './pages/public/EventDetail';
 import { About } from './pages/public/About';
 import { TicketDetail } from './pages/public/TicketDetail';
+import { LoginPage } from './pages/public/LoginPage';
 
 // User Pages
 import { Dashboard } from './pages/user/Dashboard';
@@ -85,7 +86,7 @@ const AppRoutes: React.FC = () => {
       {(user?.role === 'user' || user?.role === 'verifier') && (
         <Route path="/" element={<UserLayout />}>
           <Route path="dashboard" element={<Dashboard />} />
-          
+
           {/* Verifier-specific routes - Extends User */}
           {user?.role === 'verifier' && (
             <>
@@ -114,6 +115,7 @@ const AppRoutes: React.FC = () => {
         <Route path="events/:id" element={<EventDetail />} />
         <Route path="tickets/:id" element={<TicketDetail />} />
         <Route path="about" element={<About />} />
+        <Route path="login" element={<LoginPage />} />
         <Route
           path="faq"
           element={
