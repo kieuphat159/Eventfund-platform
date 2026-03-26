@@ -1,4 +1,6 @@
 import { BadRequestError, UnauthorizedError } from '../../utils/customErrors.js';
+import User from '../../models/User.model.js';
+import jwt from 'jsonwebtoken';
 
 /**
  * AuthService - Handles authentication business logic
@@ -29,6 +31,42 @@ class AuthService {
    */
   createSIWEMessage(walletAddress, nonce, domain, uri, chainId) {
     return this.siweService.createSIWEMessage(walletAddress, nonce, domain, uri, chainId);
+  }
+
+  /**
+   * Login with Web3Auth ID token
+   */
+  async loginWithIdToken(idToken, walletAddress) {
+    const decoded = jwt.decode(idToken);
+    if (!decoded) {
+      throw new BadRequestError('Invalid ID Token format');
+    }
+
+    // find or create user with walletAddress
+    let user = await User.findOne({ walletAddress: walletAddress.toLowerCase() });
+    if (!user) {
+      user = await User.create({
+        walletAddress: walletAddress.toLowerCase(),
+        email: decoded.email,
+        username: decoded.name || 'User',
+        avatarUrl: decoded.profileImage,
+        role: 'user'
+      });
+    }
+
+    // Generate session JWT token
+    const token = this.jwtService.generateToken(user.walletAddress, user.role);
+
+    return {
+      token,
+      user: {
+        walletAddress: user.walletAddress,
+        email: user.email,
+        username: user.username,
+        avatarUrl: user.avatarUrl,
+        role: user.role
+      }
+    };
   }
 
   /**
