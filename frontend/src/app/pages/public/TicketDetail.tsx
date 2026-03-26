@@ -1,5 +1,5 @@
-import React from 'react';
-import { useParams, useNavigate, Link } from 'react-router';
+import React from "react";
+import { useParams, useNavigate, Link } from "react-router";
 import {
   ArrowLeft,
   Calendar,
@@ -17,14 +17,13 @@ import {
   Copy,
   TrendingUp,
   FileText,
-} from 'lucide-react';
-import { Button } from '../../components/ui/button';
-import { Card, CardContent } from '../../components/ui/card';
-import { Badge } from '../../components/ui/badge';
-import { ImageWithFallback } from '../../components/figma/ImageWithFallback';
-import { mockMarketplaceListings, mockEvents } from '../../data/mockData';
-import { useAuth } from '../../contexts/AuthContext';
-
+} from "lucide-react";
+import { Button } from "../../components/ui/button";
+import { Card, CardContent } from "../../components/ui/card";
+import { Badge } from "../../components/ui/badge";
+import { ImageWithFallback } from "../../components/figma/ImageWithFallback";
+import { useAuth } from "../../contexts/AuthContext";
+import { listingService } from "../../services/listings.service";
 export const TicketDetail: React.FC = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -32,20 +31,46 @@ export const TicketDetail: React.FC = () => {
   const [selectedImage, setSelectedImage] = React.useState(0);
   const [copiedAddress, setCopiedAddress] = React.useState(false);
 
-  // Find the listing
-  const listing = mockMarketplaceListings.find((l) => l.id === id);
-  
-  // Find the related event for additional details
-  const event = mockEvents.find((e) => e.title === listing?.eventName);
+  const [listing, setListing] = React.useState<any>(null);
+  const [loading, setLoading] = React.useState(true);
 
+  React.useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const res = await listingService.getById(id!);
+        setListing(res);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, [id]);
+  console.log("Fetched listing:", listing);
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-white">
+        Loading...
+      </div>
+    );
+  }
   if (!listing || !event) {
     return (
       <div className="min-h-screen bg-slate-950 py-12">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
           <AlertCircle className="w-16 h-16 text-slate-700 mx-auto mb-4" />
-          <h2 className="text-2xl font-bold text-white mb-2">Listing Not Found</h2>
-          <p className="text-slate-400 mb-6">The ticket listing you're looking for doesn't exist.</p>
-          <Button onClick={() => navigate('/marketplace')} className="bg-gradient-to-r from-purple-600 to-blue-600">
+          <h2 className="text-2xl font-bold text-white mb-2">
+            Listing Not Found
+          </h2>
+          <p className="text-slate-400 mb-6">
+            The ticket listing you're looking for doesn't exist.
+          </p>
+          <Button
+            onClick={() => navigate("/marketplace")}
+            className="bg-gradient-to-r from-purple-600 to-blue-600"
+          >
             <ArrowLeft className="w-4 h-4 mr-2" />
             Back to Marketplace
           </Button>
@@ -57,9 +82,9 @@ export const TicketDetail: React.FC = () => {
   // Gallery images (main image + additional placeholder images)
   const galleryImages = [
     listing.image,
-    'https://images.unsplash.com/photo-1540039155733-5bb30b53aa14?w=800',
-    'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=800',
-    'https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=800',
+    "https://images.unsplash.com/photo-1540039155733-5bb30b53aa14?w=800",
+    "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=800",
+    "https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=800",
   ];
 
   const handleCopyAddress = (address: string) => {
@@ -69,10 +94,12 @@ export const TicketDetail: React.FC = () => {
   };
 
   const handleBuyNow = () => {
-    if (user?.role === 'public') {
-      alert('Please connect your wallet to purchase tickets');
+    if (user?.role === "public") {
+      alert("Please connect your wallet to purchase tickets");
     } else {
-      alert('Purchase functionality would be integrated with smart contract here');
+      alert(
+        "Purchase functionality would be integrated with smart contract here",
+      );
     }
   };
 
@@ -82,7 +109,7 @@ export const TicketDetail: React.FC = () => {
         {/* Back Button */}
         <Button
           variant="ghost"
-          onClick={() => navigate('/marketplace')}
+          onClick={() => navigate("/marketplace")}
           className="text-slate-400 hover:text-white mb-6"
         >
           <ArrowLeft className="w-4 h-4 mr-2" />
@@ -110,8 +137,8 @@ export const TicketDetail: React.FC = () => {
                   onClick={() => setSelectedImage(idx)}
                   className={`aspect-video rounded-lg overflow-hidden border-2 transition-all ${
                     selectedImage === idx
-                      ? 'border-purple-500 ring-2 ring-purple-500/20'
-                      : 'border-slate-800 hover:border-slate-700'
+                      ? "border-purple-500 ring-2 ring-purple-500/20"
+                      : "border-slate-800 hover:border-slate-700"
                   }`}
                 >
                   <ImageWithFallback
@@ -129,14 +156,18 @@ export const TicketDetail: React.FC = () => {
                 <CardContent className="p-4 text-center">
                   <Calendar className="w-5 h-5 text-blue-400 mx-auto mb-2" />
                   <p className="text-xs text-slate-500 mb-1">Event Date</p>
-                  <p className="text-sm text-white font-medium">{new Date(event.date).toLocaleDateString()}</p>
+                  <p className="text-sm text-white font-medium">
+                    {new Date(listing.eventId?.date).toLocaleDateString()}
+                  </p>
                 </CardContent>
               </Card>
               <Card className="bg-slate-900/50 border-slate-800">
                 <CardContent className="p-4 text-center">
                   <MapPin className="w-5 h-5 text-orange-400 mx-auto mb-2" />
                   <p className="text-xs text-slate-500 mb-1">Location</p>
-                  <p className="text-sm text-white font-medium">{event.location}</p>
+                  <p className="text-sm text-white font-medium">
+                    {listing.eventId?.location}
+                  </p>
                 </CardContent>
               </Card>
             </div>
@@ -147,7 +178,7 @@ export const TicketDetail: React.FC = () => {
             {/* Title & Category */}
             <div>
               <Badge className="bg-purple-600/10 text-purple-400 border-purple-500/20 mb-3">
-                {event.category}
+                {listing.eventId?.category}
               </Badge>
               <h1 className="text-3xl md:text-4xl font-bold text-white mb-2">
                 {listing.eventName}
@@ -161,7 +192,9 @@ export const TicketDetail: React.FC = () => {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-xs text-slate-500 mb-1">Ticket Type</p>
-                    <p className="text-xl font-bold text-white">{listing.tier}</p>
+                    <p className="text-xl font-bold text-white">
+                      {listing.ticketId?.ticketType}
+                    </p>
                   </div>
                   <Ticket className="w-8 h-8 text-purple-400" />
                 </div>
@@ -173,7 +206,9 @@ export const TicketDetail: React.FC = () => {
               <CardContent className="p-5">
                 <p className="text-sm text-slate-500 mb-2">Current Price</p>
                 <div className="flex items-baseline gap-2 mb-3">
-                  <span className="text-4xl font-bold text-purple-400">{listing.price}</span>
+                  <span className="text-4xl font-bold text-purple-400">
+                    {listing.price}
+                  </span>
                   <span className="text-xl text-slate-400">ETH</span>
                   <span className="text-sm text-slate-500 ml-2">
                     (≈ ${(listing.price * 2400).toFixed(2)} USD)
@@ -195,11 +230,14 @@ export const TicketDetail: React.FC = () => {
                     <p className="text-xs text-slate-500">Date & Time</p>
                   </div>
                   <p className="text-sm text-white font-medium">
-                    {new Date(event.date).toLocaleDateString('en-US', {
-                      month: 'long',
-                      day: 'numeric',
-                      year: 'numeric',
-                    })}
+                    {new Date(listing.eventId?.date).toLocaleDateString(
+                      "en-US",
+                      {
+                        month: "long",
+                        day: "numeric",
+                        year: "numeric",
+                      },
+                    )}
                   </p>
                   <p className="text-xs text-slate-400 mt-1">8:00 PM EST</p>
                 </CardContent>
@@ -211,7 +249,9 @@ export const TicketDetail: React.FC = () => {
                     <MapPin className="w-5 h-5 text-orange-400" />
                     <p className="text-xs text-slate-500">Location</p>
                   </div>
-                  <p className="text-sm text-white font-medium">{event.location}</p>
+                  <p className="text-sm text-white font-medium">
+                    {listing.eventId?.location}
+                  </p>
                   <p className="text-xs text-slate-400 mt-1">View on Map</p>
                 </CardContent>
               </Card>
@@ -223,7 +263,9 @@ export const TicketDetail: React.FC = () => {
                     <p className="text-xs text-slate-500">Remaining</p>
                   </div>
                   <p className="text-sm text-white font-medium">1 of 1</p>
-                  <p className="text-xs text-slate-400 mt-1">Unique NFT Ticket</p>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Unique NFT Ticket
+                  </p>
                 </CardContent>
               </Card>
 
@@ -256,9 +298,12 @@ export const TicketDetail: React.FC = () => {
                     </div>
                     <div>
                       <p className="text-sm text-white font-mono">
-                        {listing.seller.slice(0, 12)}...{listing.seller.slice(-8)}
+                        {listing.seller.slice(0, 12)}...
+                        {listing.seller.slice(-8)}
                       </p>
-                      <p className="text-xs text-slate-500">18 sales • 100% positive</p>
+                      <p className="text-xs text-slate-500">
+                        18 sales • 100% positive
+                      </p>
                     </div>
                   </div>
                   <Button
@@ -279,7 +324,7 @@ export const TicketDetail: React.FC = () => {
 
             {/* Action Buttons */}
             <div className="space-y-3">
-              {user?.role === 'public' ? (
+              {user?.role === "public" ? (
                 <Button
                   className="w-full h-12 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white text-base font-semibold"
                   onClick={handleBuyNow}
@@ -310,10 +355,13 @@ export const TicketDetail: React.FC = () => {
                 <div className="flex gap-3">
                   <Shield className="w-5 h-5 text-blue-400 flex-shrink-0 mt-0.5" />
                   <div>
-                    <p className="text-sm text-white font-medium mb-1">Secure Transaction</p>
+                    <p className="text-sm text-white font-medium mb-1">
+                      Secure Transaction
+                    </p>
                     <p className="text-xs text-slate-400">
-                      All transactions are secured by smart contracts on the Ethereum blockchain.
-                      Your purchase is protected by EventChain's buyer guarantee.
+                      All transactions are secured by smart contracts on the
+                      Ethereum blockchain. Your purchase is protected by
+                      EventChain's buyer guarantee.
                     </p>
                   </div>
                 </div>
@@ -333,11 +381,15 @@ export const TicketDetail: React.FC = () => {
                   <FileText className="w-5 h-5 mr-2 text-purple-400" />
                   Event Description
                 </h2>
-                <p className="text-slate-300 leading-relaxed mb-4">{event.description}</p>
+                <p className="text-slate-300 leading-relaxed mb-4">
+                  {listing.eventId?.description}
+                </p>
                 <p className="text-slate-400 leading-relaxed mb-4">
-                  Experience an unforgettable event that combines cutting-edge technology with world-class
-                  entertainment. This exclusive ticket grants you access to all main stage performances,
-                  interactive exhibits, and networking opportunities with industry leaders.
+                  Experience an unforgettable event that combines cutting-edge
+                  technology with world-class entertainment. This exclusive
+                  ticket grants you access to all main stage performances,
+                  interactive exhibits, and networking opportunities with
+                  industry leaders.
                 </p>
                 <div className="flex flex-wrap gap-2 mt-4">
                   <Badge className="bg-purple-600/10 text-purple-400 border-purple-500/20">
@@ -364,21 +416,24 @@ export const TicketDetail: React.FC = () => {
                   Organizer Information
                 </h2>
                 <div className="flex items-start gap-4 mb-4">
-                  <div className="w-16 h-16 rounded-full bg-gradient-to-br from-purple-600 to-blue-600 flex items-center justify-center flex-shrink-0">
+                  {/* <div className="w-16 h-16 rounded-full bg-gradient-to-br from-purple-600 to-blue-600 flex items-center justify-center flex-shrink-0">
                     <span className="text-2xl font-bold text-white">
-                      {event.organizer.charAt(0)}
+                      {listing?.organizer.charAt(0)}
                     </span>
-                  </div>
+                  </div> */}
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-2">
-                      <h3 className="text-lg font-semibold text-white">{event.organizer}</h3>
+                      <h3 className="text-lg font-semibold text-white">
+                        {listing?.organizer}
+                      </h3>
                       <Badge className="bg-green-600/10 text-green-400 border-green-500/20">
                         <BadgeCheck className="w-3 h-3 mr-1" />
                         Verified
                       </Badge>
                     </div>
                     <p className="text-sm text-slate-400 mb-3">
-                      Professional event organizer with 50+ successful events on EventChain
+                      Professional event organizer with 50+ successful events on
+                      EventChain
                     </p>
                     <div className="flex items-center gap-4 text-sm">
                       <div>
@@ -391,15 +446,19 @@ export const TicketDetail: React.FC = () => {
                   </div>
                 </div>
                 <div className="pt-4 border-t border-slate-800">
-                  <p className="text-xs text-slate-500 mb-2">Organizer Wallet</p>
+                  <p className="text-xs text-slate-500 mb-2">
+                    Organizer Wallet
+                  </p>
                   <div className="flex items-center justify-between bg-slate-950 rounded-lg p-3">
                     <code className="text-sm text-slate-300 font-mono">
-                      {event.organizerWallet}
+                      {listing?.organizerWallet}
                     </code>
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => handleCopyAddress(event.organizerWallet)}
+                      onClick={() =>
+                        handleCopyAddress(listing?.organizerWallet)
+                      }
                       className="text-slate-400 hover:text-white"
                     >
                       <Copy className="w-4 h-4" />
@@ -419,7 +478,9 @@ export const TicketDetail: React.FC = () => {
                 <div className="space-y-4">
                   <div className="grid sm:grid-cols-2 gap-4">
                     <div>
-                      <p className="text-xs text-slate-500 mb-1">Contract Address</p>
+                      <p className="text-xs text-slate-500 mb-1">
+                        Contract Address
+                      </p>
                       <div className="flex items-center gap-2">
                         <code className="text-sm text-purple-400 font-mono">
                           0x7a250d...5392
@@ -433,7 +494,9 @@ export const TicketDetail: React.FC = () => {
                       </div>
                     </div>
                     <div>
-                      <p className="text-xs text-slate-500 mb-1">Token Standard</p>
+                      <p className="text-xs text-slate-500 mb-1">
+                        Token Standard
+                      </p>
                       <p className="text-sm text-white">ERC-721</p>
                     </div>
                     <div>
@@ -454,8 +517,9 @@ export const TicketDetail: React.FC = () => {
                           Verified Smart Contract
                         </p>
                         <p className="text-xs text-slate-400">
-                          This ticket is issued through EventChain's audited smart contracts,
-                          ensuring authenticity and secure ownership transfer.
+                          This ticket is issued through EventChain's audited
+                          smart contracts, ensuring authenticity and secure
+                          ownership transfer.
                         </p>
                       </div>
                     </div>
@@ -475,36 +539,48 @@ export const TicketDetail: React.FC = () => {
                   <div className="flex items-start gap-3">
                     <CheckCircle2 className="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" />
                     <div>
-                      <p className="text-sm text-white font-medium">Transferable</p>
+                      <p className="text-sm text-white font-medium">
+                        Transferable
+                      </p>
                       <p className="text-xs text-slate-400">
-                        This ticket can be resold or transferred to another wallet
+                        This ticket can be resold or transferred to another
+                        wallet
                       </p>
                     </div>
                   </div>
                   <div className="flex items-start gap-3">
                     <CheckCircle2 className="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" />
                     <div>
-                      <p className="text-sm text-white font-medium">5% Royalty Fee</p>
+                      <p className="text-sm text-white font-medium">
+                        5% Royalty Fee
+                      </p>
                       <p className="text-xs text-slate-400">
-                        Organizer receives 5% of resale price to support the event
+                        Organizer receives 5% of resale price to support the
+                        event
                       </p>
                     </div>
                   </div>
                   <div className="flex items-start gap-3">
                     <CheckCircle2 className="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" />
                     <div>
-                      <p className="text-sm text-white font-medium">No Price Cap</p>
+                      <p className="text-sm text-white font-medium">
+                        No Price Cap
+                      </p>
                       <p className="text-xs text-slate-400">
-                        Tickets can be resold at any price determined by market demand
+                        Tickets can be resold at any price determined by market
+                        demand
                       </p>
                     </div>
                   </div>
                   <div className="flex items-start gap-3">
                     <AlertCircle className="w-5 h-5 text-orange-400 flex-shrink-0 mt-0.5" />
                     <div>
-                      <p className="text-sm text-white font-medium">Event Entry Deadline</p>
+                      <p className="text-sm text-white font-medium">
+                        Event Entry Deadline
+                      </p>
                       <p className="text-xs text-slate-400">
-                        Ticket must be in your wallet 24 hours before event to guarantee entry
+                        Ticket must be in your wallet 24 hours before event to
+                        guarantee entry
                       </p>
                     </div>
                   </div>
@@ -518,24 +594,23 @@ export const TicketDetail: React.FC = () => {
             {/* Ticket Benefits */}
             <Card className="bg-slate-900 border-slate-800">
               <CardContent className="p-6">
-                <h3 className="text-lg font-bold text-white mb-4">Ticket Benefits</h3>
+                <h3 className="text-lg font-bold text-white mb-4">
+                  Ticket Benefits
+                </h3>
+
                 <ul className="space-y-3">
-                  {event.ticketTiers
-                    .find((t) => t.name === listing.tier)
-                    ?.benefits.map((benefit, idx) => (
-                      <li key={idx} className="flex items-start gap-3">
-                        <CheckCircle2 className="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" />
-                        <span className="text-sm text-slate-300">{benefit}</span>
-                      </li>
-                    ))}
-                  <li className="flex items-start gap-3">
-                    <CheckCircle2 className="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" />
-                    <span className="text-sm text-slate-300">Digital collectible NFT</span>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <CheckCircle2 className="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" />
-                    <span className="text-sm text-slate-300">Resale rights included</span>
-                  </li>
+                  {[
+                    "Workshop Access",
+                    "Networking Events",
+                    "Premium NFT",
+                    "Digital collectible NFT",
+                    "Resale rights included",
+                  ].map((benefit, idx) => (
+                    <li key={idx} className="flex items-start gap-3">
+                      <CheckCircle2 className="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" />
+                      <span className="text-sm text-slate-300">{benefit}</span>
+                    </li>
+                  ))}
                 </ul>
               </CardContent>
             </Card>
@@ -543,24 +618,38 @@ export const TicketDetail: React.FC = () => {
             {/* Price History */}
             <Card className="bg-slate-900 border-slate-800">
               <CardContent className="p-6">
-                <h3 className="text-lg font-bold text-white mb-4">Price History</h3>
+                <h3 className="text-lg font-bold text-white mb-4">
+                  Price History
+                </h3>
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
-                    <span className="text-sm text-slate-400">Original Price</span>
-                    <span className="text-sm text-white font-medium">0.5 ETH</span>
+                    <span className="text-sm text-slate-400">
+                      Original Price
+                    </span>
+                    <span className="text-sm text-white font-medium">
+                      0.5 ETH
+                    </span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-slate-400">Floor Price</span>
-                    <span className="text-sm text-white font-medium">0.68 ETH</span>
+                    <span className="text-sm text-white font-medium">
+                      0.68 ETH
+                    </span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-slate-400">Last Sale</span>
-                    <span className="text-sm text-white font-medium">0.55 ETH</span>
+                    <span className="text-sm text-white font-medium">
+                      0.55 ETH
+                    </span>
                   </div>
                   <div className="pt-3 border-t border-slate-800">
                     <div className="flex items-center justify-between">
-                      <span className="text-sm text-slate-400">Current Listing</span>
-                      <span className="text-sm text-purple-400 font-bold">{listing.price} ETH</span>
+                      <span className="text-sm text-slate-400">
+                        Current Listing
+                      </span>
+                      <span className="text-sm text-purple-400 font-bold">
+                        {listing.price} ETH
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -570,7 +659,9 @@ export const TicketDetail: React.FC = () => {
             {/* Trading Activity */}
             <Card className="bg-slate-900 border-slate-800">
               <CardContent className="p-6">
-                <h3 className="text-lg font-bold text-white mb-4">Trading Activity</h3>
+                <h3 className="text-lg font-bold text-white mb-4">
+                  Trading Activity
+                </h3>
                 <div className="space-y-3">
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-slate-400">24h Volume</span>
@@ -596,7 +687,9 @@ export const TicketDetail: React.FC = () => {
             <Card className="bg-slate-900 border-slate-800">
               <CardContent className="p-6">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-bold text-white">Similar Tickets</h3>
+                  <h3 className="text-lg font-bold text-white">
+                    Similar Tickets
+                  </h3>
                   <Link
                     to="/marketplace"
                     className="text-sm text-purple-400 hover:text-purple-300"
@@ -605,31 +698,35 @@ export const TicketDetail: React.FC = () => {
                   </Link>
                 </div>
                 <div className="space-y-3">
-                  {mockMarketplaceListings
-                    .filter((l) => l.id !== id)
-                    .slice(0, 2)
-                    .map((item) => (
-                      <Link
-                        key={item.id}
-                        to={`/tickets/${item.id}`}
-                        className="flex gap-3 p-3 rounded-lg bg-slate-950 hover:bg-slate-800 transition-colors border border-slate-800 hover:border-slate-700"
-                      >
-                        <div className="w-20 h-20 rounded-lg overflow-hidden flex-shrink-0">
-                          <ImageWithFallback
-                            src={item.image}
-                            alt={item.eventName}
-                            className="w-full h-full object-cover"
-                          />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm text-white font-medium truncate mb-1">
-                            {item.eventName}
-                          </p>
-                          <p className="text-xs text-slate-500 mb-2">{item.tier}</p>
-                          <p className="text-sm text-purple-400 font-bold">{item.price} ETH</p>
-                        </div>
-                      </Link>
-                    ))}
+                  {[listing].map((item) => (
+                    <Link
+                      key={item._id}
+                      to={`/tickets/${item._id}`}
+                      className="flex gap-3 p-3 rounded-lg bg-slate-950 hover:bg-slate-800 transition-colors border border-slate-800 hover:border-slate-700"
+                    >
+                      <div className="w-20 h-20 rounded-lg overflow-hidden flex-shrink-0">
+                        <ImageWithFallback
+                          src={item.eventId?.imageUrls?.[0]}
+                          alt={item.eventId?.title}
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-white font-medium truncate mb-1">
+                          {item.eventId?.title}
+                        </p>
+
+                        <p className="text-xs text-slate-500 mb-2">
+                          {item.ticketId?.ticketType}
+                        </p>
+
+                        <p className="text-sm text-purple-400 font-bold">
+                          {item.price} ETH
+                        </p>
+                      </div>
+                    </Link>
+                  ))}
                 </div>
               </CardContent>
             </Card>

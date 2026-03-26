@@ -1,60 +1,96 @@
-import React from 'react';
-import { ShoppingCart, Zap, Search, SlidersHorizontal, X, MapPin, Calendar, Ticket } from 'lucide-react';
-import { useNavigate } from 'react-router';
-import { Button } from '../../components/ui/button';
-import { Input } from '../../components/ui/input';
-import { Label } from '../../components/ui/label';
-import { Slider } from '../../components/ui/slider';
-import { Card, CardContent } from '../../components/ui/card';
+import React from "react";
+import {
+  ShoppingCart,
+  Zap,
+  Search,
+  SlidersHorizontal,
+  X,
+  MapPin,
+  Calendar,
+  Ticket,
+} from "lucide-react";
+import { useNavigate } from "react-router";
+import { Button } from "../../components/ui/button";
+import { Input } from "../../components/ui/input";
+import { Label } from "../../components/ui/label";
+import { Slider } from "../../components/ui/slider";
+import { Card, CardContent } from "../../components/ui/card";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '../../components/ui/select';
-import { Badge } from '../../components/ui/badge';
-import { mockMarketplaceListings } from '../../data/mockData';
-import { ImageWithFallback } from '../../components/figma/ImageWithFallback';
+} from "../../components/ui/select";
+import { Badge } from "../../components/ui/badge";
+import { listingService, ApiListing } from "../../services/listings.service";
+import { ImageWithFallback } from "../../components/figma/ImageWithFallback";
 
 export const Marketplace: React.FC = () => {
   const [showFilters, setShowFilters] = React.useState(true);
-  const [searchQuery, setSearchQuery] = React.useState('');
+  const [searchQuery, setSearchQuery] = React.useState("");
   const [priceRange, setPriceRange] = React.useState([0, 10]);
-  const [selectedTicketType, setSelectedTicketType] = React.useState('all');
-  const [selectedLocation, setSelectedLocation] = React.useState('all');
-  const [selectedAvailability, setSelectedAvailability] = React.useState('all');
-  const [selectedDate, setSelectedDate] = React.useState('all');
-  const [sortBy, setSortBy] = React.useState('newest');
+  const [selectedTicketType, setSelectedTicketType] = React.useState("all");
+  const [selectedLocation, setSelectedLocation] = React.useState("all");
+  const [selectedAvailability, setSelectedAvailability] = React.useState("all");
+  const [selectedDate, setSelectedDate] = React.useState("all");
+  const [sortBy, setSortBy] = React.useState("newest");
+
+  const [listings, setListings] = React.useState<ApiListing[]>([]);
+  console.log("Fetched listings:", listings);
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    const fetchListings = async () => {
+      try {
+        const res = await listingService.getAll();
+        setListings(res.docs);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchListings();
+  }, []);
 
   const clearFilters = () => {
-    setSearchQuery('');
+    setSearchQuery("");
     setPriceRange([0, 10]);
-    setSelectedTicketType('all');
-    setSelectedLocation('all');
-    setSelectedAvailability('all');
-    setSelectedDate('all');
-    setSortBy('newest');
+    setSelectedTicketType("all");
+    setSelectedLocation("all");
+    setSelectedAvailability("all");
+    setSelectedDate("all");
+    setSortBy("newest");
   };
 
   const activeFiltersCount = [
-    searchQuery !== '',
+    searchQuery !== "",
     priceRange[0] !== 0 || priceRange[1] !== 10,
-    selectedTicketType !== 'all',
-    selectedLocation !== 'all',
-    selectedAvailability !== 'all',
-    selectedDate !== 'all',
+    selectedTicketType !== "all",
+    selectedLocation !== "all",
+    selectedAvailability !== "all",
+    selectedDate !== "all",
   ].filter(Boolean).length;
-
   const navigate = useNavigate();
+  if (loading) {
+    return (
+      <div className="text-white p-10 text-center">Loading marketplace...</div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-4xl font-bold text-white mb-2">NFT Ticket Marketplace</h1>
-          <p className="text-slate-400">Buy and sell event tickets securely on the blockchain</p>
+          <h1 className="text-4xl font-bold text-white mb-2">
+            NFT Ticket Marketplace
+          </h1>
+          <p className="text-slate-400">
+            Buy and sell event tickets securely on the blockchain
+          </p>
         </div>
 
         {/* Search and Filter Section */}
@@ -129,7 +165,9 @@ export const Marketplace: React.FC = () => {
                 <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {/* Price Range Slider */}
                   <div className="space-y-3">
-                    <Label className="text-slate-300 font-medium">Price Range (ETH)</Label>
+                    <Label className="text-slate-300 font-medium">
+                      Price Range (ETH)
+                    </Label>
                     <div className="pt-2">
                       <Slider
                         min={0}
@@ -156,7 +194,10 @@ export const Marketplace: React.FC = () => {
                       <Calendar className="w-4 h-4 mr-2 text-blue-400" />
                       Event Date
                     </Label>
-                    <Select value={selectedDate} onValueChange={setSelectedDate}>
+                    <Select
+                      value={selectedDate}
+                      onValueChange={setSelectedDate}
+                    >
                       <SelectTrigger className="bg-slate-800 border-slate-700 text-white">
                         <SelectValue />
                       </SelectTrigger>
@@ -177,14 +218,19 @@ export const Marketplace: React.FC = () => {
                       <Ticket className="w-4 h-4 mr-2 text-green-400" />
                       Ticket Type
                     </Label>
-                    <Select value={selectedTicketType} onValueChange={setSelectedTicketType}>
+                    <Select
+                      value={selectedTicketType}
+                      onValueChange={setSelectedTicketType}
+                    >
                       <SelectTrigger className="bg-slate-800 border-slate-700 text-white">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent className="bg-slate-800 border-slate-700">
                         <SelectItem value="all">All Types</SelectItem>
                         <SelectItem value="vip">VIP</SelectItem>
-                        <SelectItem value="general">General Admission</SelectItem>
+                        <SelectItem value="general">
+                          General Admission
+                        </SelectItem>
                         <SelectItem value="premium">Premium</SelectItem>
                         <SelectItem value="early-bird">Early Bird</SelectItem>
                       </SelectContent>
@@ -197,15 +243,22 @@ export const Marketplace: React.FC = () => {
                       <MapPin className="w-4 h-4 mr-2 text-orange-400" />
                       Location
                     </Label>
-                    <Select value={selectedLocation} onValueChange={setSelectedLocation}>
+                    <Select
+                      value={selectedLocation}
+                      onValueChange={setSelectedLocation}
+                    >
                       <SelectTrigger className="bg-slate-800 border-slate-700 text-white">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent className="bg-slate-800 border-slate-700">
                         <SelectItem value="all">All Locations</SelectItem>
                         <SelectItem value="new-york">New York, NY</SelectItem>
-                        <SelectItem value="los-angeles">Los Angeles, CA</SelectItem>
-                        <SelectItem value="san-francisco">San Francisco, CA</SelectItem>
+                        <SelectItem value="los-angeles">
+                          Los Angeles, CA
+                        </SelectItem>
+                        <SelectItem value="san-francisco">
+                          San Francisco, CA
+                        </SelectItem>
                         <SelectItem value="miami">Miami, FL</SelectItem>
                         <SelectItem value="chicago">Chicago, IL</SelectItem>
                         <SelectItem value="austin">Austin, TX</SelectItem>
@@ -215,8 +268,13 @@ export const Marketplace: React.FC = () => {
 
                   {/* Availability */}
                   <div className="space-y-3">
-                    <Label className="text-slate-300 font-medium">Availability</Label>
-                    <Select value={selectedAvailability} onValueChange={setSelectedAvailability}>
+                    <Label className="text-slate-300 font-medium">
+                      Availability
+                    </Label>
+                    <Select
+                      value={selectedAvailability}
+                      onValueChange={setSelectedAvailability}
+                    >
                       <SelectTrigger className="bg-slate-800 border-slate-700 text-white">
                         <SelectValue />
                       </SelectTrigger>
@@ -232,7 +290,9 @@ export const Marketplace: React.FC = () => {
                   {/* Active Filters Display */}
                   {activeFiltersCount > 0 && (
                     <div className="space-y-3">
-                      <Label className="text-slate-300 font-medium">Active Filters</Label>
+                      <Label className="text-slate-300 font-medium">
+                        Active Filters
+                      </Label>
                       <div className="flex flex-wrap gap-2">
                         {searchQuery && (
                           <Badge className="bg-purple-600/10 text-purple-400 border-purple-500/20">
@@ -244,22 +304,22 @@ export const Marketplace: React.FC = () => {
                             {priceRange[0]}-{priceRange[1]} ETH
                           </Badge>
                         )}
-                        {selectedTicketType !== 'all' && (
+                        {selectedTicketType !== "all" && (
                           <Badge className="bg-blue-600/10 text-blue-400 border-blue-500/20">
                             {selectedTicketType}
                           </Badge>
                         )}
-                        {selectedLocation !== 'all' && (
+                        {selectedLocation !== "all" && (
                           <Badge className="bg-orange-600/10 text-orange-400 border-orange-500/20">
                             {selectedLocation}
                           </Badge>
                         )}
-                        {selectedDate !== 'all' && (
+                        {selectedDate !== "all" && (
                           <Badge className="bg-cyan-600/10 text-cyan-400 border-cyan-500/20">
                             {selectedDate}
                           </Badge>
                         )}
-                        {selectedAvailability !== 'all' && (
+                        {selectedAvailability !== "all" && (
                           <Badge className="bg-pink-600/10 text-pink-400 border-pink-500/20">
                             {selectedAvailability}
                           </Badge>
@@ -275,11 +335,16 @@ export const Marketplace: React.FC = () => {
           {/* Results Count */}
           <div className="flex items-center justify-between">
             <p className="text-slate-400">
-              Showing <span className="text-white font-semibold">{mockMarketplaceListings.length}</span> listings
+              Showing{" "}
+              <span className="text-white font-semibold">
+                {listings.length}
+              </span>{" "}
+              listings
             </p>
             {activeFiltersCount > 0 && (
               <p className="text-sm text-slate-500">
-                {activeFiltersCount} filter{activeFiltersCount !== 1 ? 's' : ''} applied
+                {activeFiltersCount} filter{activeFiltersCount !== 1 ? "s" : ""}{" "}
+                applied
               </p>
             )}
           </div>
@@ -287,7 +352,7 @@ export const Marketplace: React.FC = () => {
 
         {/* Marketplace Grid */}
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {mockMarketplaceListings.map((listing) => (
+          {listings.map((listing) => (
             <div
               key={listing.id}
               onClick={() => navigate(`/tickets/${listing.id}`)}
@@ -295,8 +360,8 @@ export const Marketplace: React.FC = () => {
             >
               <div className="aspect-video overflow-hidden relative">
                 <ImageWithFallback
-                  src={listing.image}
-                  alt={listing.eventName}
+                  src={listing.eventId.imageUrls[0] || "/placeholder.png"}
+                  alt={listing.eventId.title}
                   className="w-full h-full object-cover"
                 />
                 <div className="absolute top-3 right-3 bg-purple-600 text-white text-xs px-2 py-1 rounded-full flex items-center space-x-1">
@@ -305,9 +370,13 @@ export const Marketplace: React.FC = () => {
                 </div>
               </div>
               <div className="p-5">
-                <h3 className="text-lg font-semibold text-white mb-1">{listing.eventName}</h3>
-                <p className="text-sm text-slate-400 mb-4">{listing.tier}</p>
-                
+                <h3 className="text-lg font-semibold text-white mb-1">
+                  {listing.eventId.title}
+                </h3>
+                <p className="text-sm text-slate-400 mb-4">
+                  {listing.ticketId.ticketType}
+                </p>
+
                 <div className="flex items-center justify-between mb-4">
                   <div>
                     <p className="text-xs text-slate-500 mb-1">Seller</p>
@@ -317,7 +386,9 @@ export const Marketplace: React.FC = () => {
                   </div>
                   <div className="text-right">
                     <p className="text-xs text-slate-500 mb-1">Price</p>
-                    <p className="text-xl font-bold text-purple-400">{listing.price} ETH</p>
+                    <p className="text-xl font-bold text-purple-400">
+                      {listing.price} ETH
+                    </p>
                   </div>
                 </div>
 
@@ -337,11 +408,15 @@ export const Marketplace: React.FC = () => {
         </div>
 
         {/* Empty State Placeholder */}
-        {mockMarketplaceListings.length === 0 && (
+        {listings.length === 0 && (
           <div className="text-center py-20">
             <ShoppingCart className="w-16 h-16 text-slate-700 mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-white mb-2">No listings available</h3>
-            <p className="text-slate-400">Check back later for new ticket listings</p>
+            <h3 className="text-xl font-semibold text-white mb-2">
+              No listings available
+            </h3>
+            <p className="text-slate-400">
+              Check back later for new ticket listings
+            </p>
           </div>
         )}
       </div>
