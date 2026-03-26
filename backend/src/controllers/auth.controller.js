@@ -11,6 +11,30 @@ class AuthController {
     this.authService = authService;
   }
 
+  /**
+   * POST /api/auth/login
+   * Hybrid Web3Auth login — frontend creates Smart Account, sends { idToken, walletAddress }.
+   * Backend verifies idToken, saves walletAddress, issues session JWT.
+   */
+  login = asyncHandler(async (req, res) => {
+    const { idToken, walletAddress } = req.body;
+
+    if (!idToken) {
+      throw new BadRequestError('idToken is required', 'ID_TOKEN_REQUIRED');
+    }
+
+    if (!walletAddress) {
+      throw new BadRequestError('walletAddress is required', 'WALLET_ADDRESS_REQUIRED');
+    }
+
+    const result = await this.authService.loginWithIdToken(idToken, walletAddress);
+
+    res.status(200).json({
+      success: true,
+      data: result
+    });
+  });
+
   getNonce = asyncHandler(async (req, res) => {
     const { walletAddress } = req.validated?.body || req.body;
 
