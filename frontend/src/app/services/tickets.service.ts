@@ -33,3 +33,13 @@ export async function getUserTickets(walletAddress: string): Promise<ApiTicket[]
 
   return payload.data?.docs || [];
 }
+
+export async function getTicketByTokenId(tokenId: string): Promise<ApiTicket> {
+  const payload = await api.get<{ success: boolean; data?: ApiTicket; message?: string }>(
+    `/tickets/token/${tokenId}`,
+  );
+  if (!payload.data) {
+    throw new Error(payload.message || 'Failed to fetch ticket details');
+  }
+  return payload.data;
+}
