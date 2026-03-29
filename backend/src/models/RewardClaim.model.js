@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import mongoosePaginate from "mongoose-paginate-v2";
 
 const rewardClaimSchema = new mongoose.Schema({
   distributionId: {
@@ -51,6 +52,9 @@ const rewardClaimSchema = new mongoose.Schema({
 rewardClaimSchema.index({ eventId: 1 });
 rewardClaimSchema.index({ claimer: 1 });
 rewardClaimSchema.index({ distributionId: 1 });
+
+// Apply pagination plugin used by reward repository methods
+rewardClaimSchema.plugin(mongoosePaginate);
 
 const RewardClaim = mongoose.model("RewardClaim", rewardClaimSchema);
 
