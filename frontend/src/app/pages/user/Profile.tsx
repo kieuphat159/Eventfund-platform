@@ -34,28 +34,28 @@ export const Profile: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Load data real từ Backend
+  // Load real data from backend
   useEffect(() => {
     const loadInitialData = async () => {
       if (!authUser?.walletAddress) {
-        console.log("❌ Profile: Chưa có authUser.walletAddress");
+        console.log("Profile: Missing authUser.walletAddress");
         return;
       }
       try {
         setIsLoading(true);
-        console.log("📡 Đang gọi API Profile với ví:", authUser.walletAddress);
+        console.log("Fetching profile API with wallet:", authUser.walletAddress);
 
         const [profileData, statsData] = await Promise.all([
           userService.getProfile(),
           userService.getFullStats(authUser.walletAddress),
         ]);
 
-        console.log("✅ Data Real đã về:", profileData);
+        console.log("Profile data loaded:", profileData);
         setProfile(profileData);
         setStats(statsData);
       } catch (error: any) {
-        console.error("❌ Lỗi Fetch Data Real:", error.message, error.data);
-        // Nếu lỗi, ít nhất mình biết Backend trả về gì (401, 404 hay 500)
+        console.error("Failed to fetch profile data:", error.message, error.data);
+        // Keep logging backend response details (401, 404, 500) for debugging.
       } finally {
         setIsLoading(false);
       }
@@ -63,7 +63,7 @@ export const Profile: React.FC = () => {
     loadInitialData();
   }, [authUser]);
 
-  // Xử lý lưu thay đổi
+  // Save profile updates
   const handleSave = async () => {
     if (!profile) return;
     try {
@@ -74,9 +74,9 @@ export const Profile: React.FC = () => {
         location: profile.location,
       });
       setProfile(updated);
-      alert("Cập nhật hồ sơ thành công!");
+      alert("Profile updated successfully!");
     } catch (error) {
-      alert("Có lỗi xảy ra khi lưu thông tin.");
+      alert("An error occurred while saving changes.");
     } finally {
       setIsSaving(false);
     }
@@ -86,7 +86,7 @@ export const Profile: React.FC = () => {
     return (
       <div className="min-h-[400px] flex items-center justify-center text-white">
         <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
-        <span className="ml-3">Đang tải dữ liệu thực tế...</span>
+        <span className="ml-3">Loading live data...</span>
       </div>
     );
   }
@@ -94,9 +94,9 @@ export const Profile: React.FC = () => {
   return (
     <div className="max-w-5xl mx-auto space-y-6 pb-10">
       <div>
-        <h1 className="text-3xl font-bold text-white mb-2">Hồ sơ cá nhân</h1>
+        <h1 className="text-3xl font-bold text-white mb-2">My Profile</h1>
         <p className="text-slate-400">
-          Quản lý thông tin được đồng bộ từ hệ thống
+          Manage profile information synced from the platform
         </p>
       </div>
 
@@ -171,15 +171,15 @@ export const Profile: React.FC = () => {
       {/* Edit Form */}
       <Card className="bg-slate-900 border-slate-800">
         <CardHeader>
-          <CardTitle className="text-white">Thông tin cá nhân</CardTitle>
+          <CardTitle className="text-white">Personal Information</CardTitle>
           <CardDescription>
-            Cập nhật thông tin off-chain của bạn
+            Update your off-chain information
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="grid md:grid-cols-2 gap-6">
             <div className="space-y-2">
-              <Label className="text-slate-300">Tên hiển thị</Label>
+              <Label className="text-slate-300">Display Name</Label>
               <Input
                 value={profile?.name || ""}
                 onChange={(e) =>
@@ -202,7 +202,7 @@ export const Profile: React.FC = () => {
           </div>
 
           <div className="space-y-2">
-            <Label className="text-slate-300">Giới thiệu bản thân</Label>
+            <Label className="text-slate-300">Bio</Label>
             <Textarea
               value={profile?.bio || ""}
               onChange={(e) =>
@@ -214,7 +214,7 @@ export const Profile: React.FC = () => {
 
           <div className="grid md:grid-cols-2 gap-6">
             <div className="space-y-2">
-              <Label className="text-slate-300">Vị trí</Label>
+              <Label className="text-slate-300">Location</Label>
               <div className="relative">
                 <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                 <Input
@@ -229,7 +229,7 @@ export const Profile: React.FC = () => {
               </div>
             </div>
             <div className="space-y-2">
-              <Label className="text-slate-300">Ngày tham gia</Label>
+              <Label className="text-slate-300">Member Since</Label>
               <div className="relative">
                 <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                 <Input
@@ -246,7 +246,7 @@ export const Profile: React.FC = () => {
       {/* Action Buttons */}
       <div className="flex items-center justify-end space-x-4 pt-4">
         <Button variant="ghost" className="text-slate-400 hover:text-white">
-          Hủy bỏ
+          Cancel
         </Button>
         <Button
           onClick={handleSave}
@@ -254,7 +254,7 @@ export const Profile: React.FC = () => {
           className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white px-8"
         >
           {isSaving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-          Lưu thay đổi thực tế
+          Save Changes
         </Button>
       </div>
     </div>

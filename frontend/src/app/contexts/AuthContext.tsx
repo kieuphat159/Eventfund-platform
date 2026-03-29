@@ -44,7 +44,7 @@ async function loginToBackend(
     body: JSON.stringify({
       idToken,
       walletAddress: eoaAddress, // EOA (0xF21...)
-      smartAccountAddress: smartAccountAddress, // AA (0xdbb...)
+      smartAccountAddress: smartAccountAddress, // Smart Account (0xdbb...)
     }),
   });
 
@@ -57,9 +57,9 @@ async function loginToBackend(
     user: backendUser,
   } = json.data;
 
-  // LƯU CẨN THẬN VÀO LOCALSTORAGE
+  // Persist auth data in localStorage
   localStorage.setItem("jwtToken", token);
-  localStorage.setItem("walletAddress", returnedAddress); // Lưu ví gốc làm định danh
+  localStorage.setItem("walletAddress", returnedAddress); // Keep EOA as the identity key
   localStorage.setItem("userRole", backendUser?.role ?? "user");
   localStorage.setItem("userEmail", backendUser?.email ?? "");
 

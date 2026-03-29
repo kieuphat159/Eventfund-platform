@@ -7,7 +7,7 @@ const RPC_URL =
   import.meta.env.VITE_RPC_URL ?? "https://rpc.ankr.com/eth_sepolia";
 
 export async function createSmartAccount(provider: any): Promise<string> {
-  if (!provider) throw new Error("Web3Auth provider không tồn tại");
+  if (!provider) throw new Error("Web3Auth provider is unavailable");
 
   // Public client (read blockchain)
   const publicClient = createPublicClient({
@@ -21,16 +21,16 @@ export async function createSmartAccount(provider: any): Promise<string> {
     transport: custom(provider),
   });
 
-  // Lấy address từ provider
+  // Get address from provider
   const [address] = await walletClient.getAddresses();
 
   if (!address) {
-    throw new Error("Không lấy được ví từ Web3Auth.");
+    throw new Error("Failed to get wallet address from Web3Auth.");
   }
 
   console.log("EOA:", address);
 
-  // Tạo Smart Account
+  // Create smart account
   const smartAccount = await toSimpleSmartAccount({
     client: publicClient,
     owner: walletClient,

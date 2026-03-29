@@ -40,7 +40,7 @@ import { PlatformSettings } from "./pages/admin/PlatformSettings";
 type AppRole = "user" | "verifier" | "admin" | "public" | null;
 
 const FullScreenLoader: React.FC<{ text?: string }> = ({
-  text = "Đang xác thực quyền truy cập...",
+  text = "Verifying access...",
 }) => {
   return (
     <div className="min-h-screen bg-slate-950 flex items-center justify-center text-white font-mono">
@@ -53,7 +53,7 @@ const FullScreenLoader: React.FC<{ text?: string }> = ({
 };
 
 /**
- * Lấy session hiện tại từ cả context và localStorage
+ * Get current session from both context and localStorage
  */
 const useSession = () => {
   const { user, isLoading } = useAuth();
@@ -78,7 +78,7 @@ const useSession = () => {
 };
 
 /**
- * Trả về route mặc định theo role
+ * Return the default route by role
  */
 const getDefaultRouteByRole = (
   isAuthenticated: boolean,
@@ -94,7 +94,7 @@ const getDefaultRouteByRole = (
 };
 
 /**
- * Guard tổng quát
+ * Generic route guard
  */
 const ProtectedRoute: React.FC<{
   children: React.ReactNode;
@@ -107,12 +107,12 @@ const ProtectedRoute: React.FC<{
   }
 
   if (!isAuthenticated) {
-    console.log("[Guard] Chưa đăng nhập, chuyển về /login");
+    console.log("[Guard] Not logged in, redirecting to /login");
     return <Navigate to="/login" replace />;
   }
 
   if (!currentRole || currentRole === "public") {
-    console.log("[Guard] Có ví nhưng role không hợp lệ, chuyển về /login");
+    console.log("[Guard] Wallet exists but role is invalid, redirecting to /login");
     return <Navigate to="/login" replace />;
   }
 
@@ -120,7 +120,7 @@ const ProtectedRoute: React.FC<{
     allowRoles &&
     !allowRoles.includes(currentRole as "user" | "verifier" | "admin")
   ) {
-    console.log("[Guard] Không đủ quyền, chuyển về route phù hợp");
+    console.log("[Guard] Insufficient permissions, redirecting to allowed route");
     return (
       <Navigate
         to={getDefaultRouteByRole(isAuthenticated, currentRole)}
@@ -133,13 +133,13 @@ const ProtectedRoute: React.FC<{
 };
 
 /**
- * Nếu đã login thì không cho ở lại login page
+ * Prevent logged-in users from staying on the login page
  */
 const LoginRedirect: React.FC = () => {
   const { isLoading, isAuthenticated, currentRole } = useSession();
 
   if (isLoading) {
-    return <FullScreenLoader text="Đang kiểm tra phiên đăng nhập..." />;
+    return <FullScreenLoader text="Checking login session..." />;
   }
 
   if (isAuthenticated) {
@@ -190,7 +190,7 @@ const AppRoutes: React.FC = () => {
       >
         <Route index element={<Navigate to="/app/dashboard" replace />} />
 
-        {/* Dashboard chung cho user thường */}
+        {/* Shared dashboard for regular users */}
         <Route
           path="dashboard"
           element={
@@ -243,7 +243,7 @@ const AppRoutes: React.FC = () => {
         />
       </Route>
 
-      {/* 4. Catch-all: tự đẩy theo role */}
+      {/* 4. Catch-all: redirect by role */}
       <Route
         path="*"
         element={

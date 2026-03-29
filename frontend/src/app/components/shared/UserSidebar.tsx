@@ -27,14 +27,14 @@ export const UserSidebar: React.FC<SidebarProps> = ({
   const location = useLocation();
   const { user } = useAuth();
 
-  // QUAN TRỌNG: Tất cả path phải bắt đầu bằng /app
+  // IMPORTANT: All paths must start with /app
   const userNavItems = [
     { icon: LayoutDashboard, label: "Dashboard", path: "/app/dashboard" },
     { icon: Calendar, label: "My Events", path: "/app/events/my-events" },
     { icon: Ticket, label: "My Tickets", path: "/app/tickets/my-tickets" },
     { icon: TrendingUp, label: "Investments", path: "/app/investments" },
     { icon: Wallet, label: "Wallet", path: "/app/wallet" },
-    { icon: User, label: "Profile", path: "/app/account/profile" }, // Khớp với App.tsx
+    { icon: User, label: "Profile", path: "/app/account/profile" }, // Must match App.tsx
     { icon: Settings, label: "Settings", path: "/app/account/settings" },
   ];
 
@@ -62,7 +62,7 @@ export const UserSidebar: React.FC<SidebarProps> = ({
         <nav className="flex-1 px-2 py-4 space-y-1 overflow-y-auto">
           {allNavItems.map((item) => {
             const Icon = item.icon;
-            // So sánh chuẩn đường dẫn để active màu sáng
+            // Exact path check for active state
             const isActive = location.pathname === item.path;
 
             return (

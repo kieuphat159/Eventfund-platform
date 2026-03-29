@@ -19,7 +19,7 @@ export interface UserStats {
 }
 
 export const userService = {
-  // Gọi UsersController.getProfile
+  // Calls UsersController.getProfile
   getProfile: async () => {
     const response = await api.get<{ success: boolean; data: UserProfile }>(
       "/users/profile",
@@ -27,7 +27,7 @@ export const userService = {
     return response.data;
   },
 
-  // Gọi UsersController.updateProfile (Sử dụng PATCH)
+  // Calls UsersController.updateProfile (uses PATCH)
   updateProfile: async (data: Partial<UserProfile>) => {
     const response = await api.patch<{ success: boolean; data: UserProfile }>(
       "/users/profile",
@@ -36,7 +36,7 @@ export const userService = {
     return response.data;
   },
 
-  // Tổng hợp data từ UsersController.getUserPortfolio và TicketsController.getUserTickets
+  // Aggregates data from UsersController.getUserPortfolio and TicketsController.getUserTickets
   getFullStats: async (walletAddress: string): Promise<UserStats> => {
     try {
       const [portfolioRes, ticketsRes, profileRes] = await Promise.all([
@@ -52,7 +52,7 @@ export const userService = {
         ticketsOwned: ticketsRes.data?.total || 0,
         totalInvestments: `${portfolioRes.data?.totalValue || 0} ETH`,
         memberSince: profileRes.data?.createdAt
-          ? new Date(profileRes.data.createdAt).toLocaleDateString("vi-VN", {
+          ? new Date(profileRes.data.createdAt).toLocaleDateString("en-US", {
               month: "long",
               year: "numeric",
             })

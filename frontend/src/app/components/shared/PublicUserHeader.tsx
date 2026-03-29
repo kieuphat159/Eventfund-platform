@@ -79,7 +79,7 @@ export const PublicUserHeader: React.FC = () => {
                 disabled={isLoading}
               >
                 <Wallet className="w-4 h-4 mr-2" />
-                {isLoading ? 'Đang kết nối...' : 'Connect Wallet'}
+                {isLoading ? 'Connecting...' : 'Connect Wallet'}
               </Button>
             ) : (
               <DropdownMenu>
