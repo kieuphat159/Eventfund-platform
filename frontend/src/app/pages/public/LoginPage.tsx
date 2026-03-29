@@ -1,10 +1,27 @@
-import React from 'react';
-import { Wallet } from 'lucide-react';
-import { useAuth } from '../../contexts/AuthContext';
-import { Button } from '../../components/ui/button';
+import React, { useEffect } from "react";
+import { Wallet } from "lucide-react";
+import { useAuth } from "../../contexts/AuthContext";
+import { Button } from "../../components/ui/button";
+import { useNavigate } from "react-router";
 
 export const LoginPage: React.FC = () => {
-  const { connectWallet, isLoading, error } = useAuth();
+  const { connectWallet, isLoading, error, user } = useAuth();
+  const navigate = useNavigate();
+
+  // Redirect right away if user is already authenticated
+  useEffect(() => {
+    if (user && user.role !== "public") {
+      navigate("/app/dashboard");
+    }
+  }, [user, navigate]);
+
+  const handleLogin = async () => {
+    try {
+      await connectWallet();
+    } catch (err) {
+      console.error("Login failed:", err);
+    }
+  };
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-slate-950">
@@ -13,23 +30,26 @@ export const LoginPage: React.FC = () => {
           <Wallet className="w-7 h-7 text-white" />
         </div>
 
-        <h1 className="text-2xl font-bold text-white mb-2">Chào mừng đến EventChain</h1>
+        <h1 className="text-2xl font-bold text-white mb-2">
+          Welcome to EventChain
+        </h1>
         <p className="text-slate-400 mb-8 text-sm">
-          Đăng nhập bằng Google, Email hoặc MetaMask. Ví Smart Account sẽ được tạo tự động.
+          Sign in with Google, Email, or MetaMask. Your Smart Account wallet
+          will be created automatically.
         </p>
 
         <Button
-          onClick={connectWallet}
+          onClick={handleLogin}
           disabled={isLoading}
           className="w-full h-12 text-base bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700"
         >
           <Wallet className="w-5 h-5 mr-2" />
-          {isLoading ? 'Đang kết nối và tạo ví...' : 'Đăng nhập bằng Google hoặc MetaMask'}
+          {isLoading
+            ? "Connecting and creating wallet..."
+            : "Sign in with Google or MetaMask"}
         </Button>
 
-        {error && (
-          <p className="mt-4 text-sm text-red-400">{error}</p>
-        )}
+        {error && <p className="mt-4 text-sm text-red-400">{error}</p>}
       </div>
     </div>
   );

@@ -1,5 +1,9 @@
-import { BadRequestError, UnauthorizedError } from '../../utils/customErrors.js';
-
+import {
+  BadRequestError,
+  UnauthorizedError,
+} from "../../utils/customErrors.js";
+import User from "../../models/User.model.js";
+import { decodeJwt } from "jose";
 /**
  * AuthService - Handles authentication business logic
  */
@@ -28,7 +32,13 @@ class AuthService {
    * Create SIWE message
    */
   createSIWEMessage(walletAddress, nonce, domain, uri, chainId) {
-    return this.siweService.createSIWEMessage(walletAddress, nonce, domain, uri, chainId);
+    return this.siweService.createSIWEMessage(
+      walletAddress,
+      nonce,
+      domain,
+      uri,
+      chainId,
+    );
   }
 
   /**
@@ -39,7 +49,9 @@ class AuthService {
     // Parse SIWE message
     const parseResult = this.siweService.parseSIWEMessage(message);
     if (!parseResult.valid) {
-      throw new BadRequestError(parseResult.error || 'Invalid SIWE message format');
+      throw new BadRequestError(
+        parseResult.error || "Invalid SIWE message format",
+      );
     }
 
     const { address: walletAddress, nonce } = parseResult.parsed;
@@ -47,13 +59,16 @@ class AuthService {
     // Verify signature
     const verifyResult = await this.siweService.verifySIWE(message, signature);
     if (!verifyResult.valid) {
-      throw new UnauthorizedError(verifyResult.error || 'Invalid signature');
+      throw new UnauthorizedError(verifyResult.error || "Invalid signature");
     }
 
     // Validate nonce
-    const nonceResult = await this.nonceService.validateNonce(walletAddress, nonce);
+    const nonceResult = await this.nonceService.validateNonce(
+      walletAddress,
+      nonce,
+    );
     if (!nonceResult.valid) {
-      throw new UnauthorizedError(nonceResult.error || 'Invalid nonce');
+      throw new UnauthorizedError(nonceResult.error || "Invalid nonce");
     }
 
     // Invalidate used nonce
@@ -62,15 +77,66 @@ class AuthService {
     // Generate JWT token
     const token = this.jwtService.generateToken(
       nonceResult.user.walletAddress,
-      nonceResult.user.role
+      nonceResult.user.role,
     );
 
     return {
       token,
       user: {
         walletAddress: nonceResult.user.walletAddress,
-        role: nonceResult.user.role
-      }
+        role: nonceResult.user.role,
+      },
+    };
+  }
+  /**
+   * Đăng nhập bằng Gmail (Web3Auth)
+   * idToken: Token từ Gmail
+   * smartAccountAddress: Địa chỉ ví AA từ Frontend gửi lên
+   */
+  // Tìm hàm loginWithIdToken và thay bằng đoạn này:
+  async loginWithIdToken(idToken, smartAccountAddress, eoaAddress) {
+    let email;
+    try {
+      const decoded = decodeJwt(idToken);
+      email = decoded.email;
+    } catch (err) {
+      throw new BadRequestError("idToken không hợp lệ");
+    }
+
+    if (!email) throw new BadRequestError("idToken không chứa email");
+
+    // Tìm user theo email
+    let user = await User.findOne({ email: email.toLowerCase() });
+
+    if (!user) {
+      // TẠO MỚI: Lưu tách biệt Chìa khóa (EOA) và Két sắt (AA)
+      user = new User({
+        email: email.toLowerCase(),
+        walletAddress: eoaAddress.toLowerCase(), // 0xF21...
+        smartAccountAddress: smartAccountAddress.toLowerCase(), // 0xdbb...
+        role: "user",
+        username: email.split("@")[0],
+        nonce: "social_login",
+        nonceExpiresAt: new Date(Date.now() + 1000 * 60 * 60),
+      });
+    } else {
+      // CẬP NHẬT: Đảm bảo cả 2 địa chỉ đều được lưu đúng
+      user.walletAddress = eoaAddress.toLowerCase();
+      user.smartAccountAddress = smartAccountAddress.toLowerCase();
+    }
+    await user.save();
+
+    // QUAN TRỌNG: Tạo Token dựa trên walletAddress (EOA)
+    const token = this.jwtService.generateToken(user.walletAddress, user.role);
+
+    return {
+      token,
+      walletAddress: user.walletAddress,
+      user: {
+        email: user.email,
+        role: user.role,
+        username: user.username,
+      },
     };
   }
 
@@ -80,7 +146,7 @@ class AuthService {
   refreshToken(token) {
     const result = this.jwtService.refreshToken(token);
     if (!result.valid) {
-      throw new UnauthorizedError(result.error || 'Token refresh failed');
+      throw new UnauthorizedError(result.error || "Token refresh failed");
     }
     return result.token;
   }

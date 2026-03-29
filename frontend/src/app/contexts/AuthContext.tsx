@@ -1,31 +1,34 @@
 /// <reference types="vite/client" />
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+} from "react";
 import {
   useWeb3AuthConnect,
   useWeb3AuthDisconnect,
   useIdentityToken,
   useWeb3Auth,
-} from '@web3auth/modal/react';
-import { User, UserRole } from '../types/roles';
-import { createSmartAccount } from '../services/walletService';
+} from "@web3auth/modal/react";
+import { User, UserRole } from "../types/roles";
+import { createSmartAccount } from "../services/walletService";
 
-const RAW_API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000/api';
-const API_BASE = RAW_API_BASE.replace(/\/+$/, '').replace(/\/api$/, '');
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000';
 
 interface AuthContextType {
   user: User | null;
   connectWallet: () => Promise<void>;
   disconnectWallet: () => Promise<void>;
-  switchRole: (role: UserRole) => void;
   isLoading: boolean;
   error: string | null;
 }
 
 const AuthContext = createContext<AuthContextType>({
-  user: { role: 'public' },
+  user: { role: "public" },
   connectWallet: async () => {},
   disconnectWallet: async () => {},
-  switchRole: () => {},
   isLoading: false,
   error: null,
 });
@@ -34,6 +37,7 @@ const AuthContext = createContext<AuthContextType>({
 async function loginToBackend(idToken: string, walletAddress: string) {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
+    // Bypass ngrok's browser interstitial page in dev
     'ngrok-skip-browser-warning': 'true',
   };
 
@@ -43,67 +47,31 @@ async function loginToBackend(idToken: string, walletAddress: string) {
     body: JSON.stringify({ idToken, walletAddress }),
   });
 
-  const contentType = res.headers.get('content-type') || '';
-  const isJson = contentType.includes('application/json');
-  const json = isJson ? await res.json() : await res.text();
+  const json = await res.json();
 
-  if (!res.ok) {
+  if (!res.ok || !json.success) {
     const errMsg =
-      typeof json === 'object' && json !== null
-        ? typeof (json as { error?: unknown }).error === 'string'
-          ? (json as { error: string }).error
-          : (json as { message?: string }).message ||
-            ((json as { error?: unknown }).error
-              ? JSON.stringify((json as { error?: unknown }).error)
-              : `Login failed (${res.status})`)
-        : `Login failed (${res.status})`;
-
+      typeof json.error === 'string' ? json.error :
+      json.message ||
+      (json.error ? JSON.stringify(json.error) : null) ||
+      'Login failed';
     throw new Error(errMsg);
   }
 
-  if (
-    typeof json !== 'object' ||
-    json === null ||
-    !('success' in json) ||
-    !(json as { success?: boolean }).success
-  ) {
-    throw new Error('Login failed');
-  }
-
-  const data = (json as {
-    data?: {
-      token?: string;
-      walletAddress?: string;
-      user?: {
-        role?: UserRole;
-        email?: string;
-        username?: string;
-      };
-    };
-  }).data;
-
-  const token = data?.token;
-  const returnedAddress = data?.walletAddress || walletAddress;
-  const backendUser = data?.user;
-
-  if (!token) {
-    throw new Error('Backend did not return JWT token');
-  }
+  const { token, walletAddress: returnedAddress, user: backendUser } = json.data;
 
   localStorage.setItem('jwtToken', token);
-  localStorage.setItem('walletAddress', returnedAddress);
-  if (backendUser?.email) {
-    localStorage.setItem('userEmail', backendUser.email);
-  } else {
-    localStorage.removeItem('userEmail');
-  }
+  localStorage.setItem('walletAddress', returnedAddress || walletAddress);
+  if (backendUser?.email) localStorage.setItem('userEmail', backendUser.email);
   localStorage.setItem('userRole', backendUser?.role ?? 'user');
 
   return { returnedAddress, backendUser };
 }
 
-export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>({ role: 'public' });
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
+  children,
+}) => {
+  const [user, setUser] = useState<User | null>({ role: "public" });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -113,47 +81,49 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const { web3Auth } = useWeb3Auth();
 
   useEffect(() => {
-    const token = localStorage.getItem('jwtToken');
-    const walletAddress = localStorage.getItem('walletAddress');
-    const email = localStorage.getItem('userEmail');
-    const role = (localStorage.getItem('userRole') as UserRole) ?? 'user';
-
+    const token = localStorage.getItem("jwtToken");
+    const walletAddress = localStorage.getItem("walletAddress");
     if (token && walletAddress) {
-      setUser({ walletAddress, role, email: email ?? undefined });
+      setUser({
+        walletAddress,
+        role: (localStorage.getItem("userRole") as UserRole) ?? "user",
+        email: localStorage.getItem("userEmail") ?? undefined,
+      });
     }
   }, []);
 
   const connectWallet = useCallback(async () => {
     setIsLoading(true);
     setError(null);
-
     try {
       await connect();
 
+      // 2. Read provider from the instance — available immediately after connect()
       const activeProvider = web3Auth?.provider;
       if (!activeProvider) {
         throw new Error('Web3Auth provider unavailable after connect. Please try again.');
       }
 
+      // 3. Get idToken issued by Web3Auth
       const idToken = await getIdentityToken();
-      if (!idToken) {
-        throw new Error('Failed to get idToken from Web3Auth');
-      }
+      if (!idToken) throw new Error('Failed to get idToken from Web3Auth');
 
+      // 4. Derive Smart Account address on frontend — private key never leaves the browser
+      // Cast: Web3Auth IProvider satisfies { request } shape permissionless needs at runtime
       const walletAddress = await createSmartAccount(activeProvider as any);
 
+      // 5. Send { idToken, walletAddress } to backend → get session JWT
       const { returnedAddress, backendUser } = await loginToBackend(idToken, walletAddress);
 
+      // 6. Update context state
       setUser({
         walletAddress: returnedAddress,
-        role: backendUser?.role ?? 'user',
-        name: backendUser?.username ?? undefined,
+        role: backendUser?.role ?? "user",
         email: backendUser?.email ?? undefined,
       });
     } catch (err: any) {
-      console.error('[AuthContext] connectWallet failed:', err);
-      setError(err.message || 'Đăng nhập thất bại');
-      throw err;
+      setError(err.message);
+      localStorage.clear();
     } finally {
       setIsLoading(false);
     }
@@ -161,36 +131,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const disconnectWallet = useCallback(async () => {
     try {
-      if (isConnected) {
-        await disconnect();
-      }
+      if (isConnected) await disconnect();
     } catch (e) {
       console.warn('[AuthContext] Disconnect error:', e);
     }
-
+    // Only remove auth-related keys — don't nuke unrelated localStorage data
     localStorage.removeItem('jwtToken');
     localStorage.removeItem('walletAddress');
     localStorage.removeItem('userEmail');
     localStorage.removeItem('userRole');
-
     setUser({ role: 'public' });
     setError(null);
   }, [disconnect, isConnected]);
 
   const switchRole = useCallback(
     (role: UserRole) => {
-      if (user) {
-        setUser({ ...user, role });
-        localStorage.setItem('userRole', role);
-      }
+      if (user) setUser({ ...user, role });
     },
     [user],
   );
 
   return (
-    <AuthContext.Provider
-      value={{ user, connectWallet, disconnectWallet, switchRole, isLoading, error }}
-    >
+    <AuthContext.Provider value={{ user, connectWallet, disconnectWallet, switchRole, isLoading, error }}>
       {children}
     </AuthContext.Provider>
   );

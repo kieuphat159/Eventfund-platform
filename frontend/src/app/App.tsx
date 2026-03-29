@@ -1,5 +1,5 @@
 import React from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { PublicLayout } from './layouts/PublicLayout';
 import { UserLayout } from './layouts/UserLayout';
@@ -7,19 +7,18 @@ import { AdminLayout } from './layouts/AdminLayout';
 import { RoleSwitcher } from './components/RoleSwitcher';
 
 // Public Pages
-import { Home } from './pages/public/Home';
-import { Explore } from './pages/public/Explore';
-import { Marketplace } from './pages/public/Marketplace';
-import { EventDetail } from './pages/public/EventDetail';
-import { About } from './pages/public/About';
-import { TicketDetail } from './pages/public/TicketDetail';
-import { LoginPage } from './pages/public/LoginPage';
+import { Home } from "./pages/public/Home";
+import { Explore } from "./pages/public/Explore";
+import { Marketplace } from "./pages/public/Marketplace";
+import { EventDetail } from "./pages/public/EventDetail";
+import { About } from "./pages/public/About";
+import { TicketDetail } from "./pages/public/TicketDetail";
+import { LoginPage } from "./pages/public/LoginPage";
 
 // User Pages
 import { Dashboard } from './pages/user/Dashboard';
 import { MyEvents } from './pages/user/MyEvents';
 import { CreateEvent } from './pages/user/CreateEvent';
-import { EditEvent } from './pages/user/EditEvents';
 import { MyTickets } from './pages/user/MyTickets';
 import { MyInvestments } from './pages/user/MyInvestments';
 import { Wallet } from './pages/user/Wallet';
@@ -27,14 +26,12 @@ import { Profile } from './pages/user/Profile';
 import { Settings } from './pages/user/Settings';
 
 // Verifier Pages
-import { VerifierDashboard } from './pages/verifier/VerifierDashboard';
+import { VerifierDashboard } from "./pages/verifier/VerifierDashboard";
 
 // Admin Pages
 import { AdminDashboard } from './pages/admin/AdminDashboard';
 import { UserManagement } from './pages/admin/UserManagement';
 import { EventManagement } from './pages/admin/EventManagement';
-import { EventDetail as AdminEventDetail } from './pages/admin/AdminEventDetail';
-import { EditEvent as AdminEditEvent } from './pages/admin/AdminEditEvent';
 import { MarketplaceManagement } from './pages/admin/MarketplaceManagement';
 import { FraudMonitoring } from './pages/admin/FraudMonitoring';
 import { FinanceDashboard } from './pages/admin/FinanceDashboard';
@@ -46,49 +43,73 @@ import { RoleDemo } from './pages/RoleDemo';
 
 const ProtectedRoute: React.FC<{
   children: React.ReactNode;
-  requiredRole?: 'user' | 'verifier' | 'admin';
-}> = ({ children, requiredRole }) => {
-  const { user } = useAuth();
+  allowRoles?: Array<"user" | "verifier" | "admin">;
+}> = ({ children, allowRoles }) => {
+  const { isLoading, isAuthenticated, currentRole } = useSession();
 
-  if (requiredRole === 'admin' && user?.role !== 'admin') {
+  if (isLoading) {
+    return <FullScreenLoader />;
+  }
+
+  if (!isAuthenticated) {
+    console.log("[Guard] Not logged in, redirecting to /login");
+    return <Navigate to="/login" replace />;
+  }
+
+  if (requiredRole === 'verifier' && user?.role !== 'verifier' && user?.role !== 'admin') {
     return <Navigate to="/" replace />;
   }
 
   if (
-    requiredRole === 'verifier' &&
-    user?.role !== 'verifier' &&
-    user?.role !== 'admin'
+    allowRoles &&
+    !allowRoles.includes(currentRole as "user" | "verifier" | "admin")
   ) {
-    return <Navigate to="/" replace />;
-  }
-
-  if (requiredRole === 'user' && user?.role === 'public') {
-    return <Navigate to="/" replace />;
+    console.log("[Guard] Insufficient permissions, redirecting to allowed route");
+    return (
+      <Navigate
+        to={getDefaultRouteByRole(isAuthenticated, currentRole)}
+        replace
+      />
+    );
   }
 
   return <>{children}</>;
 };
 
+/**
+ * Prevent logged-in users from staying on the login page
+ */
+const LoginRedirect: React.FC = () => {
+  const { isLoading, isAuthenticated, currentRole } = useSession();
+
+  if (isLoading) {
+    return <FullScreenLoader text="Checking login session..." />;
+  }
+
+  if (isAuthenticated) {
+    return (
+      <Navigate
+        to={getDefaultRouteByRole(isAuthenticated, currentRole)}
+        replace
+      />
+    );
+  }
+
+  return <LoginPage />;
+};
+
 const AppRoutes: React.FC = () => {
-  const { user } = useAuth();
+  const { isAuthenticated, currentRole } = useSession();
 
   return (
     <Routes>
+      {/* Admin Routes - Completely Separate Layout */}
       {user?.role === 'admin' && (
-        <Route
-          path="/admin"
-          element={
-            <ProtectedRoute requiredRole="admin">
-              <AdminLayout />
-            </ProtectedRoute>
-          }
-        >
+        <Route path="/admin" element={<AdminLayout />}>
           <Route index element={<Navigate to="/admin/dashboard" replace />} />
           <Route path="dashboard" element={<AdminDashboard />} />
           <Route path="users" element={<UserManagement />} />
           <Route path="events" element={<EventManagement />} />
-          <Route path="events/:id" element={<AdminEventDetail />} />
-          <Route path="events/edit/:id" element={<AdminEditEvent />} />
           <Route path="marketplace" element={<MarketplaceManagement />} />
           <Route path="fraud" element={<FraudMonitoring />} />
           <Route path="finance" element={<FinanceDashboard />} />
@@ -97,28 +118,23 @@ const AppRoutes: React.FC = () => {
         </Route>
       )}
 
+      {/* User/Verifier Routes - Shared Layout (Public Header + User Sidebar) */}
       {(user?.role === 'user' || user?.role === 'verifier') && (
-        <Route
-          path="/"
-          element={
-            <ProtectedRoute requiredRole="user">
-              <UserLayout />
-            </ProtectedRoute>
-          }
-        >
+        <Route path="/" element={<UserLayout />}>
           <Route path="dashboard" element={<Dashboard />} />
 
+          {/* Verifier-specific routes - Extends User */}
           {user?.role === 'verifier' && (
-            <Route path="verifier">
-              <Route path="dashboard" element={<VerifierDashboard />} />
-            </Route>
+            <>
+              <Route path="verifier">
+                <Route path="dashboard" element={<VerifierDashboard />} />
+              </Route>
+            </>
           )}
 
+          {/* User Routes */}
           <Route path="events/my-events" element={<MyEvents />} />
           <Route path="events/create" element={<CreateEvent />} />
-          <Route path="events/edit/:id" element={<EditEvent />} />
-          <Route path="events/:id/edit" element={<EditEvent />} />
-
           <Route path="tickets/my-tickets" element={<MyTickets />} />
           <Route path="investments" element={<MyInvestments />} />
           <Route path="wallet" element={<Wallet />} />
@@ -127,6 +143,7 @@ const AppRoutes: React.FC = () => {
         </Route>
       )}
 
+      {/* Public Routes - Public Layout (No Sidebar) */}
       <Route path="/" element={<PublicLayout />}>
         <Route index element={<Home />} />
         <Route path="explore" element={<Explore />} />
@@ -135,46 +152,24 @@ const AppRoutes: React.FC = () => {
         <Route path="tickets/:id" element={<TicketDetail />} />
         <Route path="about" element={<About />} />
         <Route path="login" element={<LoginPage />} />
-
         <Route
           path="faq"
-          element={
-            <div className="min-h-screen bg-slate-950 py-8">
-              <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-white">
-                <h1 className="text-2xl font-bold mb-4">FAQ</h1>
-                <p className="text-slate-400">FAQ page (placeholder)</p>
-              </div>
-            </div>
-          }
+          element={<div className="p-20 text-white">FAQ Page</div>}
         />
 
         <Route
           path="terms"
-          element={
-            <div className="min-h-screen bg-slate-950 py-8">
-              <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-white">
-                <h1 className="text-2xl font-bold mb-4">Terms of Service</h1>
-                <p className="text-slate-400">Terms page (placeholder)</p>
-              </div>
-            </div>
-          }
+          element={<div className="p-20 text-white">Terms Page</div>}
         />
 
         <Route
           path="privacy"
-          element={
-            <div className="min-h-screen bg-slate-950 py-8">
-              <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-white">
-                <h1 className="text-2xl font-bold mb-4">Privacy Policy</h1>
-                <p className="text-slate-400">Privacy page (placeholder)</p>
-              </div>
-            </div>
-          }
+          element={<div className="p-20 text-white">Privacy Page</div>}
         />
-
         <Route path="demo" element={<RoleDemo />} />
       </Route>
 
+      {/* Catch-all redirect */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
@@ -183,8 +178,10 @@ const AppRoutes: React.FC = () => {
 const App: React.FC = () => {
   return (
     <AuthProvider>
-      <AppRoutes />
-      <RoleSwitcher />
+      <Router>
+        <AppRoutes />
+        <RoleSwitcher />
+      </Router>
     </AuthProvider>
   );
 };

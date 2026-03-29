@@ -78,6 +78,46 @@ export async function findClaims(query, options, models = {}) {
 }
 
 /**
+ * Find rewards with query filters (non-paginated)
+ * @param {Object} query - Query filters
+ * @param {Object} options - Query options (populate, sort, limit, lean)
+ * @param {Object} models - Injected models (optional)
+ * @returns {Promise<Array>} Rewards list
+ */
+export async function findRewards(query = {}, options = {}, models = {}) {
+  const RewardClaim = models.RewardClaim || DefaultRewardClaim;
+
+  let dbQuery = RewardClaim.find(query);
+
+  if (options.sort) {
+    dbQuery = dbQuery.sort(options.sort);
+  }
+
+  if (options.limit) {
+    dbQuery = dbQuery.limit(options.limit);
+  }
+
+  if (options.populate) {
+    if (Array.isArray(options.populate)) {
+      options.populate.forEach((field) => {
+        dbQuery = dbQuery.populate(field);
+      });
+    } else {
+      dbQuery = dbQuery.populate(options.populate);
+    }
+  }
+
+  if (options.lean !== false) {
+    dbQuery = dbQuery.lean();
+  }
+
+  const rewards = await dbQuery;
+  return rewards.map((reward) =>
+    typeof reward.toObject === 'function' ? reward.toObject() : reward,
+  );
+}
+
+/**
  * Find reward claims by claimer address
  * @param {string} claimerAddress - Claimer wallet address
  * @param {Object} options - Query options (page, limit, sort, populate)

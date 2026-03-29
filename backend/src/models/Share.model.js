@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import mongoosePaginate from "mongoose-paginate-v2";
 
 const shareSchema = new mongoose.Schema(
   {
@@ -51,6 +52,8 @@ shareSchema.index({ eventId: 1 });
 shareSchema.index({ holder: 1 });
 shareSchema.index({ eventId: 1, holder: 1 }, { unique: true });
 
-const Share = mongoose.model("Share", shareSchema);
+// Apply pagination plugin used by share repository methods
+shareSchema.plugin(mongoosePaginate);
 
+const Share = mongoose.model("Share", shareSchema);
 export default Share;

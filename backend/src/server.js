@@ -101,8 +101,9 @@ process.on('unhandledRejection', (reason, promise) => {
     reason: reason,
     promise: promise
   });
-  // Don't exit on unhandled rejection in production, just log it
-  if (config.isDev) {
+  // In development, keep server alive for easier debugging.
+  // In production, exit so the process manager can restart cleanly.
+  if (config.isProd) {
     process.exit(1);
   }
 });
