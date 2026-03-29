@@ -2,7 +2,7 @@ import { api } from "../lib/api";
 
 export interface UserProfile {
   walletAddress: string;
-  name?: string;
+  username?: string;
   email?: string;
   role: "user" | "verifier" | "admin";
   bio?: string;
@@ -18,11 +18,17 @@ export interface UserStats {
   memberSince: string;
 }
 
+function getAuthHeaders(): HeadersInit {
+  const jwtToken = localStorage.getItem("jwtToken");
+  return jwtToken ? { Authorization: `Bearer ${jwtToken}` } : {};
+}
+
 export const userService = {
   // Calls UsersController.getProfile
   getProfile: async () => {
     const response = await api.get<{ success: boolean; data: UserProfile }>(
       "/users/profile",
+      { headers: getAuthHeaders() },
     );
     return response.data;
   },
@@ -32,6 +38,7 @@ export const userService = {
     const response = await api.patch<{ success: boolean; data: UserProfile }>(
       "/users/profile",
       data,
+      { headers: getAuthHeaders() },
     );
     return response.data;
   },
@@ -39,12 +46,15 @@ export const userService = {
   // Aggregates data from UsersController.getUserPortfolio and TicketsController.getUserTickets
   getFullStats: async (walletAddress: string): Promise<UserStats> => {
     try {
+      const authOptions = { headers: getAuthHeaders() };
+
       const [portfolioRes, ticketsRes, profileRes] = await Promise.all([
-        api.get<{ success: boolean; data: any }>("/users/portfolio"),
+        api.get<{ success: boolean; data: any }>("/users/portfolio", authOptions),
         api.get<{ success: boolean; data: any }>(
           `/tickets/user/${walletAddress}`,
+          authOptions,
         ),
-        api.get<{ success: boolean; data: any }>("/users/profile"),
+        api.get<{ success: boolean; data: any }>("/users/profile", authOptions),
       ]);
 
       return {

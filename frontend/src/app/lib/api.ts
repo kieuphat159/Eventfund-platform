@@ -14,6 +14,13 @@ const API_BASE_URL =
   ((import.meta as { env?: { VITE_API_BASE_URL?: string } }).env
     ?.VITE_API_BASE_URL as string | undefined) || "http://localhost:4000/api";
 
+function normalizeApiBaseUrl(baseUrl: string): string {
+  const trimmed = baseUrl.trim().replace(/\/+$/, "");
+  return trimmed.endsWith("/api") ? trimmed : `${trimmed}/api`;
+}
+
+const RESOLVED_API_BASE_URL = normalizeApiBaseUrl(API_BASE_URL);
+
 type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 interface RequestOptions extends Omit<RequestInit, "method" | "body"> {
@@ -27,14 +34,18 @@ async function request<T>(
   options: RequestOptions = {},
 ): Promise<T> {
   const { body, headers, ...rest } = options;
+  const resolvedPath = path.startsWith("/") ? path : `/${path}`;
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const requestHeaders = new Headers(headers);
+
+  if (body !== undefined && !requestHeaders.has("Content-Type")) {
+    requestHeaders.set("Content-Type", "application/json");
+  }
+
+  const response = await fetch(`${RESOLVED_API_BASE_URL}${resolvedPath}`, {
     method,
     ...rest,
-    headers: {
-      ...(body ? { "Content-Type": "application/json" } : {}),
-      ...headers,
-    },
+    headers: requestHeaders,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
 

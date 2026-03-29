@@ -15,7 +15,8 @@ import {
 import { User, UserRole } from "../types/roles";
 import { createSmartAccount } from "../services/walletService";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000";
+const RAW_API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000";
+const API_ORIGIN = RAW_API_BASE.replace(/\/+$/, "").replace(/\/api$/, "");
 
 interface AuthContextType {
   user: User | null;
@@ -38,7 +39,7 @@ async function loginToBackend(
   smartAccountAddress: string,
   eoaAddress: string,
 ) {
-  const res = await fetch(`${API_BASE}/api/auth/login`, {
+  const res = await fetch(`${API_ORIGIN}/api/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({

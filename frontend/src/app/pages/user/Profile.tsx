@@ -69,7 +69,7 @@ export const Profile: React.FC = () => {
     try {
       setIsSaving(true);
       const updated = await userService.updateProfile({
-        name: profile.name,
+        username: profile.username,
         bio: profile.bio,
         location: profile.location,
       });
@@ -125,7 +125,7 @@ export const Profile: React.FC = () => {
               <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
                 <div>
                   <h2 className="text-2xl font-bold text-white mb-1">
-                    {profile?.name || "Anonymous User"}
+                    {profile?.username || "Anonymous User"}
                   </h2>
                   <div className="flex items-center gap-2">
                     <code className="text-sm text-blue-400 bg-blue-500/10 px-3 py-1 rounded border border-blue-500/20">
@@ -181,7 +181,7 @@ export const Profile: React.FC = () => {
             <div className="space-y-2">
               <Label className="text-slate-300">Display Name</Label>
               <Input
-                value={profile?.name || ""}
+                value={profile?.username || ""}
                 onChange={(e) =>
                   setProfile((p) => (p ? { ...p, name: e.target.value } : null))
                 }
