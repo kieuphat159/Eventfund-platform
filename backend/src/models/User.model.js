@@ -19,6 +19,8 @@ const userSchema = new mongoose.Schema(
       type: String,
       trim: true,
       lowercase: true,
+      unique: true,
+      sparse: true,
     },
 
     avatarUrl: {
@@ -33,7 +35,7 @@ const userSchema = new mongoose.Schema(
 
     nonce: {
       type: String,
-      required: true,
+      required: null,
     },
 
     nonceExpiresAt: {
