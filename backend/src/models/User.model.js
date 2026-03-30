@@ -35,7 +35,7 @@ const userSchema = new mongoose.Schema(
 
     nonce: {
       type: String,
-      required: null,
+      default: null,
     },
 
     nonceExpiresAt: {

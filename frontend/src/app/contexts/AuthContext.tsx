@@ -13,7 +13,7 @@ import {
   useWeb3Auth,
 } from "@web3auth/modal/react";
 import { User, UserRole } from "../types/roles";
-import { createSmartAccount } from "../services/walletService";
+import { getWalletAddresses } from "../services/walletService";
 
 const RAW_API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000";
 const API_ORIGIN = RAW_API_BASE.replace(/\/+$/, "").replace(/\/api$/, "");
@@ -60,7 +60,8 @@ async function loginToBackend(
 
   // Persist auth data in localStorage
   localStorage.setItem("jwtToken", token);
-  localStorage.setItem("walletAddress", returnedAddress); // Keep EOA as the identity key
+  localStorage.setItem("walletAddress", returnedAddress);
+  localStorage.setItem("smartAccountAddress", smartAccountAddress);
   localStorage.setItem("userRole", backendUser?.role ?? "user");
   localStorage.setItem("userEmail", backendUser?.email ?? "");
 
@@ -85,6 +86,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     if (token && walletAddress) {
       setUser({
         walletAddress,
+        smartAccountAddress: localStorage.getItem("smartAccountAddress") ?? undefined,
         role: (localStorage.getItem("userRole") as UserRole) ?? "user",
         email: localStorage.getItem("userEmail") ?? undefined,
       });
@@ -98,13 +100,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       const activeProvider = web3Auth?.provider;
       if (!activeProvider) throw new Error("Provider not ready");
 
-      const smartAccountAddress = await createSmartAccount(
-        activeProvider as any,
-      );
-      const accounts = await (activeProvider as any).request({
-        method: "eth_accounts",
-      });
-      const eoaAddress = accounts[0];
+      // Web3Auth native AA: addresses[0] = Smart Account, addresses[1] = EOA
+      const { smartAccountAddress, eoaAddress } = await getWalletAddresses(activeProvider as any);
 
       const idToken = await getIdentityToken();
       const { returnedAddress, backendUser } = await loginToBackend(
@@ -115,6 +112,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
       setUser({
         walletAddress: returnedAddress,
+        smartAccountAddress,
         role: backendUser?.role ?? "user",
         email: backendUser?.email ?? undefined,
       });

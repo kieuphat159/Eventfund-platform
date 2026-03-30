@@ -94,7 +94,7 @@ class AuthService {
    * smartAccountAddress: Địa chỉ ví AA từ Frontend gửi lên
    */
   // Tìm hàm loginWithIdToken và thay bằng đoạn này:
-  async loginWithIdToken(idToken, smartAccountAddress, eoaAddress) {
+  async loginWithIdToken(idToken, eoaAddress, smartAccountAddress) {
     let email;
     try {
       const decoded = decodeJwt(idToken);
