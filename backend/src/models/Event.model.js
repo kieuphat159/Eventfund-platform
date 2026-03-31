@@ -82,6 +82,26 @@ const eventSchema = new mongoose.Schema(
     },
     ticketsSold: { type: Number, default: 0 },
     totalTicketsUsed: { type: Number, default: 0 },
+    ticketTiers: [
+      {
+        name: {
+          type: String,
+          trim: true,
+          required: true,
+        },
+        price: {
+          type: Number,
+          min: 0,
+          required: true,
+        },
+        totalSupply: {
+          type: Number,
+          min: 1,
+          required: true,
+        },
+        benefits: [{ type: String, trim: true }],
+      },
+    ],
     ticketUsageThreshold: {
       type: Number,
       min: 0,

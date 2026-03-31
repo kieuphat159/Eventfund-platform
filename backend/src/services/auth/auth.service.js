@@ -150,30 +150,6 @@ class AuthService {
     }
     return result.token;
   }
-
-  /**
-   * Login with Web3Auth idToken
-   * For development, we trust the idToken and walletAddress from frontend
-   */
-  async loginWithIdToken(idToken, walletAddress) {
-    // TODO: Verify idToken with Web3Auth SDK
-    // For now, just create user and token
-
-    // Find or create user
-    const user = await this.nonceService.findOrCreateUser(walletAddress);
-
-    // Generate JWT token
-    const token = this.jwtService.generateToken(user.walletAddress, user.role);
-
-    return {
-      token,
-      walletAddress: user.walletAddress,
-      user: {
-        email: user.email,
-        role: user.role
-      }
-    };
-  }
 }
 
 export default AuthService;

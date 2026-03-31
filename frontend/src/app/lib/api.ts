@@ -37,6 +37,11 @@ async function request<T>(
   const resolvedPath = path.startsWith("/") ? path : `/${path}`;
 
   const requestHeaders = new Headers(headers);
+  const token = typeof window !== "undefined" ? localStorage.getItem("jwtToken") : null;
+
+  if (token && !requestHeaders.has("Authorization")) {
+    requestHeaders.set("Authorization", `Bearer ${token}`);
+  }
 
   if (body !== undefined && !requestHeaders.has("Content-Type")) {
     requestHeaders.set("Content-Type", "application/json");
@@ -54,13 +59,27 @@ async function request<T>(
   const payload = isJson ? await response.json() : await response.text();
 
   if (!response.ok) {
-    const message =
-      typeof payload === "object" && payload !== null && "message" in payload
-        ? String(
-            (payload as { message?: string }).message ||
-              `Request failed (${response.status})`,
-          )
-        : `Request failed (${response.status})`;
+    const fallbackMessage = `Request failed (${response.status})`;
+    let message = fallbackMessage;
+
+    if (typeof payload === "object" && payload !== null) {
+      const errorPayload = payload as {
+        message?: string;
+        error?: {
+          message?: string;
+          details?: Array<{ message?: string } | string>;
+        };
+      };
+
+      message =
+        errorPayload.message ||
+        errorPayload.error?.message ||
+        (Array.isArray(errorPayload.error?.details)
+          ? typeof errorPayload.error.details[0] === "string"
+            ? errorPayload.error.details[0]
+            : errorPayload.error.details[0]?.message || fallbackMessage
+          : fallbackMessage);
+    }
 
     throw new ApiError(message, response.status, payload);
   }

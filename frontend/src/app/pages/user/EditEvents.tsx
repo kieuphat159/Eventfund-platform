@@ -268,7 +268,7 @@ export const EditEvent: React.FC = () => {
           type="button"
           variant="outline"
           className="border-slate-700 hover:bg-slate-800 text-white"
-          onClick={() => navigate('/events/my-events')}
+          onClick={() => navigate('/app/events/my-events')}
         >
           Back
         </Button>
@@ -553,7 +553,7 @@ export const EditEvent: React.FC = () => {
           type="button"
           variant="outline"
           className="border-slate-700 hover:bg-slate-800 text-white"
-          onClick={() => navigate('/events/my-events')}
+          onClick={() => navigate('/app/events/my-events')}
         >
           Cancel
         </Button>

@@ -84,7 +84,7 @@ export const MyEvents: React.FC = () => {
           className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white"
           asChild
         >
-          <Link to="/events/create">
+          <Link to="/app/events/create">
             <Plus className="w-4 h-4 mr-2" />
             Create Event
           </Link>
@@ -135,7 +135,7 @@ export const MyEvents: React.FC = () => {
                         variant="outline"
                         size="icon"
                         className="border-slate-700 hover:bg-slate-800"
-                        onClick={() => navigate(`/events/edit/${eventId}`)}
+                        onClick={() => navigate(`/app/events/edit/${eventId}`)}
                         disabled={!eventId}
                       >
                         <Edit className="w-4 h-4" />
@@ -202,7 +202,7 @@ export const MyEvents: React.FC = () => {
                       <Button
                         variant="outline"
                         className="border-slate-700 hover:bg-slate-800 text-white"
-                        onClick={() => navigate(`/events/edit/${eventId}`)}
+                        onClick={() => navigate(`/app/events/edit/${eventId}`)}
                         disabled={!eventId}
                       >
                         Edit Event
@@ -231,7 +231,7 @@ export const MyEvents: React.FC = () => {
                 className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white"
                 asChild
               >
-                <Link to="/events/create">
+                <Link to="/app/events/create">
                   <Plus className="w-4 h-4 mr-2" />
                   Create Your First Event
                 </Link>

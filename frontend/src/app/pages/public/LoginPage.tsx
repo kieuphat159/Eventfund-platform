@@ -2,7 +2,7 @@ import React, { useEffect } from "react";
 import { Wallet } from "lucide-react";
 import { useAuth } from "../../contexts/AuthContext";
 import { Button } from "../../components/ui/button";
-import { useNavigate } from "react-router";
+import { useNavigate } from "react-router-dom";
 
 export const LoginPage: React.FC = () => {
   const { connectWallet, isLoading, error, user } = useAuth();

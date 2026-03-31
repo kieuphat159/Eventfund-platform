@@ -1,3 +1,4 @@
+import { isValidObjectId } from 'mongoose';
 import * as eventRepo from '../../repositories/event.repo.js';
 import { compareBigInt, toBigInt } from '../../utils/bigint.js';
 import { NotFoundError, ForbiddenError, BadRequestError } from '../../utils/customErrors.js';
@@ -73,6 +74,10 @@ export async function getEvents(query = {}, repos = {}) {
 export async function getEventById(eventId, repos = {}) {
   const repository = repos.eventRepo || eventRepo;
 
+  if (!isValidObjectId(eventId)) {
+    throw new BadRequestError('Invalid event id');
+  }
+
   const event = await repository.findById(eventId);
 
   if (!event) {
@@ -111,10 +116,15 @@ export async function updateEvent(eventId, updates, user, repos = {}) {
     'category',
     'startDate',
     'endDate',
+    'fundingGoal',
+    'minStakeRequired',
+    'fundingDeadline',
+    'status',
     'venue',
     'imageUrls',
     'metadataUri',
     'totalTickets',
+    'ticketTiers',
     'ticketUsageThreshold'
   ];
 

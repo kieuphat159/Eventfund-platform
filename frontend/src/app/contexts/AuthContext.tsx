@@ -15,7 +15,8 @@ import {
 import { User, UserRole } from "../types/roles";
 import { createSmartAccount } from "../services/walletService";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000';
+const RAW_API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000";
+const API_ORIGIN = RAW_API_BASE.replace(/\/+$/, "").replace(/\/api$/, "");
 
 interface AuthContextType {
   user: User | null;
@@ -33,37 +34,35 @@ const AuthContext = createContext<AuthContextType>({
   error: null,
 });
 
-/** Call backend login endpoint, persist session, return parsed data */
-async function loginToBackend(idToken: string, walletAddress: string) {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    // Bypass ngrok's browser interstitial page in dev
-    'ngrok-skip-browser-warning': 'true',
-  };
-
-  const res = await fetch(`${API_BASE}/api/auth/login`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ idToken, walletAddress }),
+async function loginToBackend(
+  idToken: string,
+  smartAccountAddress: string,
+  eoaAddress: string,
+) {
+  const res = await fetch(`${API_ORIGIN}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      idToken,
+      walletAddress: eoaAddress, // EOA (0xF21...)
+      smartAccountAddress: smartAccountAddress, // Smart Account (0xdbb...)
+    }),
   });
 
   const json = await res.json();
+  if (!res.ok || !json.success) throw new Error(json.message || "Login failed");
 
-  if (!res.ok || !json.success) {
-    const errMsg =
-      typeof json.error === 'string' ? json.error :
-      json.message ||
-      (json.error ? JSON.stringify(json.error) : null) ||
-      'Login failed';
-    throw new Error(errMsg);
-  }
+  const {
+    token,
+    walletAddress: returnedAddress,
+    user: backendUser,
+  } = json.data;
 
-  const { token, walletAddress: returnedAddress, user: backendUser } = json.data;
-
-  localStorage.setItem('jwtToken', token);
-  localStorage.setItem('walletAddress', returnedAddress || walletAddress);
-  if (backendUser?.email) localStorage.setItem('userEmail', backendUser.email);
-  localStorage.setItem('userRole', backendUser?.role ?? 'user');
+  // Persist auth data in localStorage
+  localStorage.setItem("jwtToken", token);
+  localStorage.setItem("walletAddress", returnedAddress); // Keep EOA as the identity key
+  localStorage.setItem("userRole", backendUser?.role ?? "user");
+  localStorage.setItem("userEmail", backendUser?.email ?? "");
 
   return { returnedAddress, backendUser };
 }
@@ -94,28 +93,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const connectWallet = useCallback(async () => {
     setIsLoading(true);
-    setError(null);
     try {
       await connect();
-
-      // 2. Read provider from the instance — available immediately after connect()
       const activeProvider = web3Auth?.provider;
-      if (!activeProvider) {
-        throw new Error('Web3Auth provider unavailable after connect. Please try again.');
-      }
+      if (!activeProvider) throw new Error("Provider not ready");
 
-      // 3. Get idToken issued by Web3Auth
+      const smartAccountAddress = await createSmartAccount(
+        activeProvider as any,
+      );
+      const accounts = await (activeProvider as any).request({
+        method: "eth_accounts",
+      });
+      const eoaAddress = accounts[0];
+
       const idToken = await getIdentityToken();
-      if (!idToken) throw new Error('Failed to get idToken from Web3Auth');
+      const { returnedAddress, backendUser } = await loginToBackend(
+        idToken!,
+        smartAccountAddress,
+        eoaAddress,
+      );
 
-      // 4. Derive Smart Account address on frontend — private key never leaves the browser
-      // Cast: Web3Auth IProvider satisfies { request } shape permissionless needs at runtime
-      const walletAddress = await createSmartAccount(activeProvider as any);
-
-      // 5. Send { idToken, walletAddress } to backend → get session JWT
-      const { returnedAddress, backendUser } = await loginToBackend(idToken, walletAddress);
-
-      // 6. Update context state
       setUser({
         walletAddress: returnedAddress,
         role: backendUser?.role ?? "user",
@@ -130,29 +127,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   }, [connect, getIdentityToken, web3Auth]);
 
   const disconnectWallet = useCallback(async () => {
-    try {
-      if (isConnected) await disconnect();
-    } catch (e) {
-      console.warn('[AuthContext] Disconnect error:', e);
-    }
-    // Only remove auth-related keys — don't nuke unrelated localStorage data
-    localStorage.removeItem('jwtToken');
-    localStorage.removeItem('walletAddress');
-    localStorage.removeItem('userEmail');
-    localStorage.removeItem('userRole');
-    setUser({ role: 'public' });
-    setError(null);
+    if (isConnected) await disconnect();
+    localStorage.clear();
+    setUser({ role: "public" });
   }, [disconnect, isConnected]);
 
-  const switchRole = useCallback(
-    (role: UserRole) => {
-      if (user) setUser({ ...user, role });
-    },
-    [user],
-  );
-
   return (
-    <AuthContext.Provider value={{ user, connectWallet, disconnectWallet, switchRole, isLoading, error }}>
+    <AuthContext.Provider
+      value={{ user, connectWallet, disconnectWallet, isLoading, error }}
+    >
       {children}
     </AuthContext.Provider>
   );
