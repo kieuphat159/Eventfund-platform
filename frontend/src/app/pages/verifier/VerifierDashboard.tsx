@@ -1,8 +1,7 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { QrCode, CheckCircle, XCircle, Clock, Ticket, Calendar, Users, AlertCircle } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
-import { mockEvents } from '../../data/mockData';
 import {
   Select,
   SelectContent,
@@ -18,6 +17,37 @@ import {
   DialogTitle,
 } from '../../components/ui/dialog';
 import { Input } from '../../components/ui/input';
+import { api } from '../../lib/api';
+import { getTicketByTokenId, getTickets, markTicketAsUsed, type ApiTicket } from '../../services/tickets.service';
+
+interface ApiEventItem {
+  _id: string;
+  title?: string;
+  startDate?: string;
+  venue?: {
+    name?: string;
+    address?: string;
+  };
+  totalTickets?: number;
+}
+
+interface ApiEventsResponse {
+  success: boolean;
+  data?: {
+    docs?: ApiEventItem[];
+  };
+}
+
+interface EventStatsResponse {
+  success: boolean;
+  data?: {
+    totalTickets?: number;
+    soldTickets?: number;
+    usedTickets?: number;
+    mintedTickets?: number;
+    availableTickets?: number;
+  };
+}
 
 interface CheckInRecord {
   id: string;
@@ -28,50 +58,160 @@ interface CheckInRecord {
   status: 'valid' | 'invalid' | 'duplicate';
 }
 
+interface EventStats {
+  totalTickets: number;
+  soldTickets: number;
+  usedTickets: number;
+}
+
+const EMPTY_STATS: EventStats = {
+  totalTickets: 0,
+  soldTickets: 0,
+  usedTickets: 0,
+};
+
+function shortenWallet(wallet?: string): string {
+  if (!wallet) return 'Unknown';
+  if (wallet.length <= 12) return wallet;
+  return `${wallet.slice(0, 8)}...${wallet.slice(-4)}`;
+}
+
+function resolveTicketEventId(ticket: ApiTicket | null | undefined): string | null {
+  if (!ticket) return null;
+  if (ticket.eventIdRaw) return ticket.eventIdRaw;
+  if (typeof ticket.eventId === 'string') return ticket.eventId;
+  if (typeof ticket.eventId === 'object' && ticket.eventId?._id) return ticket.eventId._id;
+  return null;
+}
+
 export const VerifierDashboard: React.FC = () => {
   const [selectedEvent, setSelectedEvent] = useState<string>('');
   const [showScanner, setShowScanner] = useState(false);
   const [manualTicketId, setManualTicketId] = useState('');
-  const [checkInRecords, setCheckInRecords] = useState<CheckInRecord[]>([
-    {
-      id: '1',
-      ticketId: 'TKT-001-NFT',
-      attendeeName: 'Alice Johnson',
-      attendeeWallet: '0x742d...bEb5',
-      timestamp: '2026-03-12T10:30:00',
-      status: 'valid',
-    },
-    {
-      id: '2',
-      ticketId: 'TKT-002-NFT',
-      attendeeName: 'Bob Smith',
-      attendeeWallet: '0x8ba1...DBA72',
-      timestamp: '2026-03-12T10:35:00',
-      status: 'valid',
-    },
-    {
-      id: '3',
-      ticketId: 'TKT-003-NFT',
-      attendeeName: 'Charlie Brown',
-      attendeeWallet: '0xDC25...695E',
-      timestamp: '2026-03-12T10:40:00',
-      status: 'duplicate',
-    },
-  ]);
+  const [events, setEvents] = useState<ApiEventItem[]>([]);
+  const [isLoadingEvents, setIsLoadingEvents] = useState(false);
+  const [isLoadingCheckIns, setIsLoadingCheckIns] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [pageError, setPageError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [eventStats, setEventStats] = useState<EventStats>(EMPTY_STATS);
+  const [usedCheckIns, setUsedCheckIns] = useState<CheckInRecord[]>([]);
+  const [manualRecords, setManualRecords] = useState<CheckInRecord[]>([]);
 
-  const events = mockEvents.filter(e => e.status === 'approved');
-  const selectedEventData = events.find(e => e.id === selectedEvent);
+  const selectedEventData = useMemo(
+    () => events.find((e) => e._id === selectedEvent),
+    [events, selectedEvent],
+  );
 
-  // Stats for the selected event
-  const totalCheckIns = checkInRecords.length;
-  const validCheckIns = checkInRecords.filter(r => r.status === 'valid').length;
-  const invalidCheckIns = checkInRecords.filter(r => r.status === 'invalid').length;
-  const duplicateCheckIns = checkInRecords.filter(r => r.status === 'duplicate').length;
+  const checkInRecords = useMemo(() => {
+    const byKey = new Map<string, CheckInRecord>();
+    [...manualRecords, ...usedCheckIns].forEach((record) => {
+      if (!byKey.has(record.id)) {
+        byKey.set(record.id, record);
+      }
+    });
+
+    return Array.from(byKey.values()).sort(
+      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+    );
+  }, [manualRecords, usedCheckIns]);
+
+  useEffect(() => {
+    const fetchEvents = async () => {
+      setIsLoadingEvents(true);
+      setPageError(null);
+
+      try {
+        const payload = await api.get<ApiEventsResponse>('/events?limit=100&sortBy=startDate&sortOrder=asc');
+        const docs = payload.data?.docs || [];
+        setEvents(docs);
+
+        if (!selectedEvent && docs.length > 0) {
+          setSelectedEvent(docs[0]._id);
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to load events';
+        setPageError(message);
+        setEvents([]);
+      } finally {
+        setIsLoadingEvents(false);
+      }
+    };
+
+    fetchEvents();
+  }, [selectedEvent]);
+
+  const loadSelectedEventData = useCallback(async (eventId: string) => {
+    if (!eventId) {
+      setEventStats(EMPTY_STATS);
+      setUsedCheckIns([]);
+      return;
+    }
+
+    setIsLoadingCheckIns(true);
+    setActionError(null);
+
+    try {
+      const [statsPayload, usedTicketsPayload] = await Promise.all([
+        api.get<EventStatsResponse>(`/tickets/event/${eventId}/stats`),
+        getTickets({ eventId, status: 'used', page: 1, limit: 100, sort: '-usedAt' }),
+      ]);
+
+      setEventStats({
+        totalTickets: statsPayload.data?.totalTickets || 0,
+        soldTickets: statsPayload.data?.soldTickets || 0,
+        usedTickets: statsPayload.data?.usedTickets || 0,
+      });
+
+      setUsedCheckIns(
+        usedTicketsPayload.docs.map((ticket) => ({
+          id: `used-${ticket.tokenId}-${ticket.usedAt || ticket.createdAt || ''}`,
+          ticketId: ticket.tokenId,
+          attendeeName: 'Wallet Holder',
+          attendeeWallet: shortenWallet(ticket.currentOwner),
+          timestamp: ticket.usedAt || ticket.createdAt || new Date().toISOString(),
+          status: 'valid',
+        })),
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to load event tickets';
+      setActionError(message);
+      setEventStats(EMPTY_STATS);
+      setUsedCheckIns([]);
+    } finally {
+      setIsLoadingCheckIns(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!selectedEvent) {
+      setManualRecords([]);
+      setUsedCheckIns([]);
+      setEventStats(EMPTY_STATS);
+      return;
+    }
+
+    setManualRecords([]);
+    loadSelectedEventData(selectedEvent);
+  }, [selectedEvent, loadSelectedEventData]);
+
+  const createManualRecord = (
+    ticketId: string,
+    status: CheckInRecord['status'],
+    wallet = 'Unknown',
+  ): CheckInRecord => ({
+    id: `manual-${Date.now()}-${ticketId}`,
+    ticketId,
+    attendeeName: status === 'valid' ? 'Verified Attendee' : 'Manual Entry',
+    attendeeWallet: shortenWallet(wallet),
+    timestamp: new Date().toISOString(),
+    status,
+  });
 
   const stats = [
     {
       title: 'Total Check-Ins',
-      value: totalCheckIns.toString(),
+      value: eventStats.usedTickets.toString(),
       icon: Users,
       color: 'from-blue-500 to-cyan-500',
       bgColor: 'bg-blue-500/10',
@@ -79,7 +219,7 @@ export const VerifierDashboard: React.FC = () => {
     },
     {
       title: 'Valid Tickets',
-      value: validCheckIns.toString(),
+      value: eventStats.usedTickets.toString(),
       icon: CheckCircle,
       color: 'from-green-500 to-emerald-500',
       bgColor: 'bg-green-500/10',
@@ -87,7 +227,7 @@ export const VerifierDashboard: React.FC = () => {
     },
     {
       title: 'Duplicates',
-      value: duplicateCheckIns.toString(),
+      value: manualRecords.filter((r) => r.status === 'duplicate').length.toString(),
       icon: AlertCircle,
       color: 'from-yellow-500 to-orange-500',
       bgColor: 'bg-yellow-500/10',
@@ -95,7 +235,7 @@ export const VerifierDashboard: React.FC = () => {
     },
     {
       title: 'Invalid Tickets',
-      value: invalidCheckIns.toString(),
+      value: manualRecords.filter((r) => r.status === 'invalid').length.toString(),
       icon: XCircle,
       color: 'from-red-500 to-pink-500',
       bgColor: 'bg-red-500/10',
@@ -107,43 +247,58 @@ export const VerifierDashboard: React.FC = () => {
     setShowScanner(true);
   };
 
-  const handleManualCheckIn = () => {
+  const checkInByTokenId = useCallback(
+    async (tokenId: string) => {
+      const normalized = tokenId.trim();
+
+      if (!normalized || !selectedEvent) {
+        return;
+      }
+
+      setIsSubmitting(true);
+      setActionError(null);
+
+      try {
+        const ticket = await getTicketByTokenId(normalized);
+
+        if (!ticket) {
+          setManualRecords((prev) => [createManualRecord(normalized, 'invalid'), ...prev]);
+          return;
+        }
+
+        const ticketEventId = resolveTicketEventId(ticket);
+        if (!ticketEventId || ticketEventId !== selectedEvent) {
+          setManualRecords((prev) => [createManualRecord(normalized, 'invalid', ticket.currentOwner), ...prev]);
+          return;
+        }
+
+        if (ticket.status === 'used') {
+          setManualRecords((prev) => [createManualRecord(normalized, 'duplicate', ticket.currentOwner), ...prev]);
+          return;
+        }
+
+        await markTicketAsUsed(normalized, selectedEvent);
+        await loadSelectedEventData(selectedEvent);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to verify ticket';
+        setActionError(message);
+        setManualRecords((prev) => [createManualRecord(normalized, 'invalid'), ...prev]);
+      } finally {
+        setIsSubmitting(false);
+      }
+    },
+    [loadSelectedEventData, selectedEvent],
+  );
+
+  const handleManualCheckIn = async () => {
     if (!manualTicketId.trim()) return;
-
-    // Simulate ticket validation
-    const isDuplicate = checkInRecords.some(r => r.ticketId === manualTicketId);
-    const isValid = manualTicketId.startsWith('TKT-');
-
-    const newRecord: CheckInRecord = {
-      id: `${checkInRecords.length + 1}`,
-      ticketId: manualTicketId,
-      attendeeName: 'Manual Entry',
-      attendeeWallet: '0x' + Math.random().toString(16).substring(2, 10) + '...' + Math.random().toString(16).substring(2, 6),
-      timestamp: new Date().toISOString(),
-      status: isDuplicate ? 'duplicate' : isValid ? 'valid' : 'invalid',
-    };
-
-    setCheckInRecords([newRecord, ...checkInRecords]);
+    await checkInByTokenId(manualTicketId);
     setManualTicketId('');
   };
 
-  const handleQRScan = (data: string | null) => {
+  const handleQRScan = async (data: string | null) => {
     if (!data) return;
-
-    // Simulate ticket validation from QR code
-    const isDuplicate = checkInRecords.some(r => r.ticketId === data);
-    const isValid = data.startsWith('TKT-');
-
-    const newRecord: CheckInRecord = {
-      id: `${checkInRecords.length + 1}`,
-      ticketId: data,
-      attendeeName: 'QR Scanned',
-      attendeeWallet: '0x' + Math.random().toString(16).substring(2, 10) + '...' + Math.random().toString(16).substring(2, 6),
-      timestamp: new Date().toISOString(),
-      status: isDuplicate ? 'duplicate' : isValid ? 'valid' : 'invalid',
-    };
-
-    setCheckInRecords([newRecord, ...checkInRecords]);
+    await checkInByTokenId(data);
     setShowScanner(false);
   };
 
@@ -155,6 +310,18 @@ export const VerifierDashboard: React.FC = () => {
           <p className="text-slate-400">Scan NFT tickets and manage event entry</p>
         </div>
       </div>
+
+      {pageError && (
+        <Card className="bg-slate-900 border-red-800">
+          <CardContent className="p-4 text-red-300">{pageError}</CardContent>
+        </Card>
+      )}
+
+      {actionError && (
+        <Card className="bg-slate-900 border-yellow-800">
+          <CardContent className="p-4 text-yellow-300">{actionError}</CardContent>
+        </Card>
+      )}
 
       {/* Event Selection */}
       <Card className="bg-slate-900 border-slate-800">
@@ -168,12 +335,13 @@ export const VerifierDashboard: React.FC = () => {
           <div className="flex flex-col md:flex-row gap-4">
             <Select value={selectedEvent} onValueChange={setSelectedEvent}>
               <SelectTrigger className="flex-1 bg-slate-800 border-slate-700 text-white">
-                <SelectValue placeholder="Select an event..." />
+                <SelectValue placeholder={isLoadingEvents ? 'Loading events...' : 'Select an event...'} />
               </SelectTrigger>
               <SelectContent className="bg-slate-800 border-slate-700">
                 {events.map((event) => (
-                  <SelectItem key={event.id} value={event.id} className="text-white hover:bg-slate-700">
-                    {event.title} - {new Date(event.date).toLocaleDateString()}
+                  <SelectItem key={event._id} value={event._id} className="text-white hover:bg-slate-700">
+                    {event.title || `Event ${event._id.slice(0, 8)}`}
+                    {event.startDate ? ` - ${new Date(event.startDate).toLocaleDateString()}` : ''}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -181,10 +349,14 @@ export const VerifierDashboard: React.FC = () => {
             {selectedEventData && (
               <div className="flex items-center gap-2 text-sm text-slate-400">
                 <Calendar className="w-4 h-4" />
-                <span>{new Date(selectedEventData.date).toLocaleDateString()}</span>
+                <span>
+                  {selectedEventData.startDate
+                    ? new Date(selectedEventData.startDate).toLocaleDateString()
+                    : 'TBA'}
+                </span>
                 <span className="mx-2">•</span>
                 <Ticket className="w-4 h-4" />
-                <span>{selectedEventData.price} ETH</span>
+                <span>{eventStats.soldTickets} sold</span>
               </div>
             )}
           </div>
@@ -225,9 +397,10 @@ export const VerifierDashboard: React.FC = () => {
                 <Button
                   onClick={handleScanTicket}
                   className="w-full h-32 text-lg"
+                  disabled={!selectedEvent || isSubmitting}
                 >
                   <QrCode className="w-8 h-8 mr-3" />
-                  Scan QR Code
+                  {isSubmitting ? 'Processing...' : 'Scan QR Code'}
                 </Button>
 
                 <div className="relative">
@@ -247,7 +420,7 @@ export const VerifierDashboard: React.FC = () => {
                     onKeyPress={(e) => e.key === 'Enter' && handleManualCheckIn()}
                     className="bg-slate-800 border-slate-700 text-white"
                   />
-                  <Button onClick={handleManualCheckIn} variant="outline">
+                  <Button onClick={handleManualCheckIn} variant="outline" disabled={!selectedEvent || isSubmitting}>
                     Check In
                   </Button>
                 </div>
@@ -266,27 +439,35 @@ export const VerifierDashboard: React.FC = () => {
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="text-slate-400">Event Name</span>
-                    <span className="text-white font-medium">{selectedEventData?.title}</span>
+                    <span className="text-white font-medium">{selectedEventData?.title || 'Unknown Event'}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-slate-400">Date</span>
                     <span className="text-white font-medium">
-                      {selectedEventData && new Date(selectedEventData.date).toLocaleDateString()}
+                      {selectedEventData?.startDate
+                        ? new Date(selectedEventData.startDate).toLocaleDateString()
+                        : 'TBA'}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-slate-400">Location</span>
-                    <span className="text-white font-medium">{selectedEventData?.location}</span>
+                    <span className="text-white font-medium">
+                      {[selectedEventData?.venue?.name, selectedEventData?.venue?.address]
+                        .filter(Boolean)
+                        .join(' - ') || 'TBA'}
+                    </span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-slate-400">Total Capacity</span>
-                    <span className="text-white font-medium">{selectedEventData?.ticketsAvailable || 'Unlimited'}</span>
+                    <span className="text-white font-medium">
+                      {selectedEventData?.totalTickets || eventStats.totalTickets || 'N/A'}
+                    </span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-slate-400">Check-In Rate</span>
                     <span className="text-green-400 font-medium">
-                      {selectedEventData?.ticketsAvailable
-                        ? `${Math.round((validCheckIns / Number(selectedEventData.ticketsAvailable)) * 100)}%`
+                      {(selectedEventData?.totalTickets || eventStats.totalTickets) > 0
+                        ? `${Math.round((eventStats.usedTickets / Number(selectedEventData?.totalTickets || eventStats.totalTickets)) * 100)}%`
                         : 'N/A'}
                     </span>
                   </div>
@@ -305,7 +486,9 @@ export const VerifierDashboard: React.FC = () => {
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
-                {checkInRecords.length > 0 ? (
+                {isLoadingCheckIns ? (
+                  <div className="text-center py-8 text-slate-400">Loading check-in data...</div>
+                ) : checkInRecords.length > 0 ? (
                   checkInRecords.slice(0, 10).map((record) => (
                     <div
                       key={record.id}
@@ -411,6 +594,7 @@ export const VerifierDashboard: React.FC = () => {
               onClick={() => handleQRScan('TKT-' + Math.random().toString(36).substring(2, 9).toUpperCase() + '-NFT')}
               variant="outline"
               className="w-full"
+              disabled={isSubmitting || !selectedEvent}
             >
               Simulate Scan
             </Button>
