@@ -1,5 +1,5 @@
 import React from "react";
-import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router";
+import { Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { PublicLayout } from "./layouts/PublicLayout";
 import { UserLayout } from "./layouts/UserLayout";
@@ -18,6 +18,7 @@ import { LoginPage } from "./pages/public/LoginPage";
 import { Dashboard } from "./pages/user/Dashboard";
 import { MyEvents } from "./pages/user/MyEvents";
 import { CreateEvent } from "./pages/user/CreateEvent";
+import { EditEvent } from "./pages/user/EditEvents";
 import { MyTickets } from "./pages/user/MyTickets";
 import { MyInvestments } from "./pages/user/MyInvestments";
 import { Wallet } from "./pages/user/Wallet";
@@ -212,6 +213,7 @@ const AppRoutes: React.FC = () => {
 
         <Route path="events/my-events" element={<MyEvents />} />
         <Route path="events/create" element={<CreateEvent />} />
+        <Route path="events/edit/:id" element={<EditEvent />} />
         <Route path="tickets/my-tickets" element={<MyTickets />} />
         <Route path="investments" element={<MyInvestments />} />
         <Route path="wallet" element={<Wallet />} />
@@ -224,6 +226,7 @@ const AppRoutes: React.FC = () => {
         <Route index element={<Home />} />
         <Route path="explore" element={<Explore />} />
         <Route path="marketplace" element={<Marketplace />} />
+        <Route path="events/create" element={<Navigate to="/app/events/create" replace />} />
         <Route path="events/:id" element={<EventDetail />} />
         <Route path="tickets/:id" element={<TicketDetail />} />
         <Route path="about" element={<About />} />
@@ -260,9 +263,7 @@ const AppRoutes: React.FC = () => {
 const App: React.FC = () => {
   return (
     <AuthProvider>
-      <Router>
-        <AppRoutes />
-      </Router>
+      <AppRoutes />
     </AuthProvider>
   );
 };

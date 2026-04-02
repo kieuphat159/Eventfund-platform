@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Outlet } from 'react-router';
+import { Outlet } from 'react-router-dom';
 import { PublicUserHeader } from '../components/shared/PublicUserHeader';
 import { AdminSidebar } from '../components/shared/AdminSidebar';
 import { cn } from '../lib/utils';

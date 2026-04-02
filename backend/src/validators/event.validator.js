@@ -12,8 +12,30 @@ const bigIntString = Joi.string()
 
 // Venue schema
 const venueSchema = Joi.object({
-  name: Joi.string().required(),
-  address: Joi.string().required()
+  name: Joi.string().trim().optional(),
+  address: Joi.string().trim().required()
+});
+
+const ticketTierSchema = Joi.object({
+  name: Joi.string().trim().min(1).required()
+    .messages({
+      'string.empty': 'Ticket tier name is required',
+      'any.required': 'Ticket tier name is required'
+    }),
+  price: Joi.number().min(0).required()
+    .messages({
+      'number.base': 'Ticket tier price must be a number',
+      'number.min': 'Ticket tier price must be at least 0',
+      'any.required': 'Ticket tier price is required'
+    }),
+  totalSupply: Joi.number().integer().min(1).required()
+    .messages({
+      'number.base': 'Ticket tier supply must be a number',
+      'number.integer': 'Ticket tier supply must be an integer',
+      'number.min': 'Ticket tier supply must be at least 1',
+      'any.required': 'Ticket tier supply is required'
+    }),
+  benefits: Joi.array().items(Joi.string().trim()).optional()
 });
 
 // Event status enum
@@ -79,6 +101,11 @@ const createEventSchema = Joi.object({
       'number.min': 'Total tickets must be greater than 0',
       'any.required': 'Total tickets is required'
     }),
+  ticketTiers: Joi.array().items(ticketTierSchema).min(1).optional()
+    .messages({
+      'array.base': 'Ticket tiers must be an array',
+      'array.min': 'At least one ticket tier is required'
+    }),
   ticketUsageThreshold: Joi.number().integer().min(0).max(100).optional()
     .messages({
       'number.min': 'Ticket usage threshold must be at least 0',
@@ -99,9 +126,26 @@ const updateEventSchema = Joi.object({
     .messages({
       'date.base': 'Start date must be a valid date'
     }),
-  endDate: Joi.date().iso().optional()
+  endDate: Joi.date().iso().greater(Joi.ref('startDate')).optional()
     .messages({
-      'date.base': 'End date must be a valid date'
+      'date.base': 'End date must be a valid date',
+      'date.greater': 'End date must be after start date'
+    }),
+  fundingGoal: bigIntString.optional()
+    .messages({
+      'string.empty': 'Funding goal must be a valid positive integer string'
+    }),
+  minStakeRequired: bigIntString.optional()
+    .messages({
+      'string.empty': 'Minimum stake must be a valid positive integer string'
+    }),
+  fundingDeadline: Joi.date().iso().optional()
+    .messages({
+      'date.base': 'Funding deadline must be a valid date'
+    }),
+  status: Joi.string().valid(...eventStatusEnum).optional()
+    .messages({
+      'any.only': `Status must be one of: ${eventStatusEnum.join(', ')}`
     }),
   venue: venueSchema.optional(),
   imageUrls: Joi.array().items(Joi.string().uri()).optional(),
@@ -112,14 +156,15 @@ const updateEventSchema = Joi.object({
       'number.integer': 'Total tickets must be an integer',
       'number.min': 'Total tickets must be greater than 0'
     }),
+  ticketTiers: Joi.array().items(ticketTierSchema).min(1).optional()
+    .messages({
+      'array.base': 'Ticket tiers must be an array',
+      'array.min': 'At least one ticket tier is required'
+    }),
   ticketUsageThreshold: Joi.number().integer().min(0).max(100).optional()
     .messages({
       'number.min': 'Ticket usage threshold must be at least 0',
       'number.max': 'Ticket usage threshold must not exceed 100'
-    }),
-  fundingGoal: Joi.forbidden()
-    .messages({
-      'any.unknown': 'Cannot change funding goal after event creation'
     })
 }).min(1)
   .messages({

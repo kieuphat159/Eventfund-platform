@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router';
+import { Link } from 'react-router-dom';
 import { Calendar, Ticket, TrendingUp, Wallet, ArrowRight } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
@@ -133,28 +133,28 @@ export const Dashboard: React.FC = () => {
       value: '3',
       icon: Calendar,
       color: 'from-purple-500 to-blue-500',
-      link: '/events/my-events',
+      link: '/app/events/my-events',
     },
     {
       title: 'My Tickets',
       value: tickets.length.toString(),
       icon: Ticket,
       color: 'from-blue-500 to-cyan-500',
-      link: '/tickets/my-tickets',
+      link: '/app/tickets/my-tickets',
     },
     {
       title: 'Active Investments',
       value: mockInvestments.filter(i => i.status === 'active').length.toString(),
       icon: TrendingUp,
       color: 'from-green-500 to-emerald-500',
-      link: '/investments',
+      link: '/app/investments',
     },
     {
       title: 'Total Returns',
       value: `${mockInvestments.reduce((sum, inv) => sum + inv.returns, 0).toFixed(2)} ETH`,
       icon: Wallet,
       color: 'from-orange-500 to-red-500',
-      link: '/wallet',
+      link: '/app/wallet',
     },
   ];
 
@@ -221,7 +221,7 @@ export const Dashboard: React.FC = () => {
                 <p className="text-sm text-slate-500">No upcoming events from your current tickets.</p>
               )}
             </div>
-            <Link to="/tickets/my-tickets" className="block mt-4">
+            <Link to="/app/tickets/my-tickets" className="block mt-4">
               <Button variant="ghost" className="w-full text-purple-400 hover:text-purple-300 hover:bg-slate-800">
                 View All Tickets
                 <ArrowRight className="w-4 h-4 ml-2" />
@@ -275,7 +275,7 @@ export const Dashboard: React.FC = () => {
               <h3 className="text-xl font-bold text-white mb-2">Become an Event Organizer</h3>
               <p className="text-slate-300">Create and manage your own events with NFT tickets</p>
             </div>
-            <Link to="/events/create">
+            <Link to="/app/events/create">
               <Button className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white">
                 Create Event
                 <ArrowRight className="w-4 h-4 ml-2" />

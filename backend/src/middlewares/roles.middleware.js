@@ -40,6 +40,12 @@ export function requireRole(...roles) {
 export const requireOrganizer = requireRole('organizer', 'admin');
 
 /**
+ * Require app user, organizer, or admin role
+ * Used for self-service event CRUD; ownership is validated separately.
+ */
+export const requireEventCreator = requireRole('user', 'organizer', 'admin');
+
+/**
  * Require verifier or admin role
  * Convenience helper for verifier-only endpoints
  */
