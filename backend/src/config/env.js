@@ -109,7 +109,10 @@ export const config = {
             (process.env.NODE_ENV?.toUpperCase() === 'PROD'
               ? process.env.CLOUDINARY_PROD_SECRET
               : process.env.CLOUDINARY_DEV_SECRET)
-  }
+  },
+
+  // CORS
+  allowedOrigins: process.env.ALLOWED_ORIGINS || 'http://localhost:5173',
 };
 
 // Validate environment on module load

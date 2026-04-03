@@ -138,3 +138,15 @@ export async function deleteByWalletAddress(walletAddress, models = {}) {
   // Dùng .lean() thay cho .toObject()
   return await User.findOneAndDelete({ walletAddress: normalizedAddress }).lean();
 }
+
+/**
+ * Update user by ID
+ * @param {string} userId - User ID
+ * @param {Object} updates - Update data
+ * @param {Object} models - Injected models (optional)
+ * @returns {Promise<Object|null>} Updated user as plain object or null
+ */
+export async function updateById(userId, updates, models = {}) {
+  const User = models.User || DefaultUser;
+  return await User.findByIdAndUpdate(userId, updates, { new: true, runValidators: true, lean: true });
+}

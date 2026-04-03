@@ -45,6 +45,24 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+
+    // Smart Account address (ERC-4337) — set by frontend, verified by backend
+    smartAccountAddress: {
+      type: String,
+      trim: true,
+      lowercase: true,
+      default: null,
+    },
+
+    chainId: {
+      type: String,
+      default: null,
+    },
+
+    walletCreatedAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true, // Tự động thêm createdAt và updatedAt

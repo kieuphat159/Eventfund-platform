@@ -12,7 +12,7 @@ import {
 } from '../ui/dropdown-menu';
 
 export const PublicUserHeader: React.FC = () => {
-  const { user, connectWallet, disconnectWallet } = useAuth();
+  const { user, connectWallet, disconnectWallet, isLoading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
@@ -57,8 +57,8 @@ export const PublicUserHeader: React.FC = () => {
                   key={link.path}
                   to={link.path}
                   className={`relative pb-1 transition-colors ${
-                    isActive 
-                      ? 'text-white' 
+                    isActive
+                      ? 'text-white'
                       : 'text-slate-300 hover:text-white'
                   }`}
                 >
@@ -76,9 +76,10 @@ export const PublicUserHeader: React.FC = () => {
             {isPublic ? (
               <Button
                 onClick={connectWallet}
+                disabled={isLoading}
               >
                 <Wallet className="w-4 h-4 mr-2" />
-                Connect Wallet
+                {isLoading ? 'Đang kết nối...' : 'Connect Wallet'}
               </Button>
             ) : (
               <DropdownMenu>

@@ -67,6 +67,9 @@ const controller = new AuthController(authService);
  *       400:
  *         description: Invalid wallet address
  */
+// POST /api/auth/login — Web3Auth social login (idToken from Web3Auth Modal)
+router.post('/login', controller.login);
+
 router.post('/nonce', validate({ body: authSchemas.nonce }), controller.getNonce);
 
 /**
