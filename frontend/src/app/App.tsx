@@ -21,6 +21,7 @@ import { CreateEvent } from "./pages/user/CreateEvent";
 import { EditEvent } from "./pages/user/EditEvents";
 import { MyTickets } from "./pages/user/MyTickets";
 import { MyInvestments } from "./pages/user/MyInvestments";
+import { InvestmentDetail } from "./pages/user/InvestmentDetail";
 import { Wallet } from "./pages/user/Wallet";
 import { Profile } from "./pages/user/Profile";
 import { Settings } from "./pages/user/Settings";
@@ -113,7 +114,9 @@ const ProtectedRoute: React.FC<{
   }
 
   if (!currentRole || currentRole === "public") {
-    console.log("[Guard] Wallet exists but role is invalid, redirecting to /login");
+    console.log(
+      "[Guard] Wallet exists but role is invalid, redirecting to /login",
+    );
     return <Navigate to="/login" replace />;
   }
 
@@ -121,7 +124,9 @@ const ProtectedRoute: React.FC<{
     allowRoles &&
     !allowRoles.includes(currentRole as "user" | "verifier" | "admin")
   ) {
-    console.log("[Guard] Insufficient permissions, redirecting to allowed route");
+    console.log(
+      "[Guard] Insufficient permissions, redirecting to allowed route",
+    );
     return (
       <Navigate
         to={getDefaultRouteByRole(isAuthenticated, currentRole)}
@@ -216,6 +221,7 @@ const AppRoutes: React.FC = () => {
         <Route path="events/edit/:id" element={<EditEvent />} />
         <Route path="tickets/my-tickets" element={<MyTickets />} />
         <Route path="investments" element={<MyInvestments />} />
+        <Route path="investments/:id" element={<InvestmentDetail />} />
         <Route path="wallet" element={<Wallet />} />
         <Route path="account/profile" element={<Profile />} />
         <Route path="account/settings" element={<Settings />} />
@@ -226,7 +232,10 @@ const AppRoutes: React.FC = () => {
         <Route index element={<Home />} />
         <Route path="explore" element={<Explore />} />
         <Route path="marketplace" element={<Marketplace />} />
-        <Route path="events/create" element={<Navigate to="/app/events/create" replace />} />
+        <Route
+          path="events/create"
+          element={<Navigate to="/app/events/create" replace />}
+        />
         <Route path="events/:id" element={<EventDetail />} />
         <Route path="tickets/:id" element={<TicketDetail />} />
         <Route path="about" element={<About />} />

@@ -1,10 +1,13 @@
-import express from 'express';
-import EventsController from '../controllers/events.controller.js';
-import { authenticate } from '../middlewares/auth.middleware.js';
-import { requireEventCreator } from '../middlewares/roles.middleware.js';
-import { validate } from '../middlewares/validate.middleware.js';
-import { eventSchemas } from '../validators/event.validator.js';
-import { uploadEventImages, validateMultipleImages } from '../middlewares/image.middleware.js';
+import express from "express";
+import EventsController from "../controllers/events.controller.js";
+import { authenticate } from "../middlewares/auth.middleware.js";
+import { requireEventCreator } from "../middlewares/roles.middleware.js";
+import { validate } from "../middlewares/validate.middleware.js";
+import { eventSchemas } from "../validators/event.validator.js";
+import {
+  uploadEventImages,
+  validateMultipleImages,
+} from "../middlewares/image.middleware.js";
 
 const router = express.Router();
 const controller = new EventsController();
@@ -71,7 +74,11 @@ const controller = new EventsController();
  *       500:
  *         description: Server error
  */
-router.get('/', validate({ query: eventSchemas.queryEvents }), controller.getEvents);
+router.get(
+  "/",
+  validate({ query: eventSchemas.queryEvents }),
+  controller.getEvents,
+);
 
 /**
  * @swagger
@@ -165,7 +172,15 @@ router.get('/', validate({ query: eventSchemas.queryEvents }), controller.getEve
  *       500:
  *         description: Server error
  */
-router.post('/', authenticate, requireEventCreator, uploadEventImages, validateMultipleImages, validate({ body: eventSchemas.createEvent }), controller.createEvent);
+router.post(
+  "/",
+  authenticate,
+  requireEventCreator,
+  uploadEventImages,
+  validateMultipleImages,
+  validate({ body: eventSchemas.createEvent }),
+  controller.createEvent,
+);
 
 /**
  * @swagger
@@ -189,7 +204,7 @@ router.post('/', authenticate, requireEventCreator, uploadEventImages, validateM
  *       500:
  *         description: Server error
  */
-router.get('/:id', controller.getEventById);
+router.get("/:id", controller.getEventById);
 
 /**
  * @swagger
@@ -254,7 +269,15 @@ router.get('/:id', controller.getEventById);
  *       500:
  *         description: Server error
  */
-router.patch('/:id', authenticate, requireEventCreator, uploadEventImages, validateMultipleImages, validate({ body: eventSchemas.updateEvent }), controller.updateEvent);
+router.patch(
+  "/:id",
+  authenticate,
+  requireEventCreator,
+  uploadEventImages,
+  validateMultipleImages,
+  validate({ body: eventSchemas.updateEvent }),
+  controller.updateEvent,
+);
 
 /**
  * @swagger
@@ -286,7 +309,60 @@ router.patch('/:id', authenticate, requireEventCreator, uploadEventImages, valid
  *       500:
  *         description: Server error
  */
-router.delete('/:id', authenticate, requireEventCreator, controller.deleteEvent);
+router.delete(
+  "/:id",
+  authenticate,
+  requireEventCreator,
+  controller.deleteEvent,
+);
+
+/**
+ * @swagger
+ * /events/{id}/invest:
+ *   post:
+ *     summary: Invest in an event
+ *     tags: [Events]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Event ID
+ *         example: "507f1f77bcf86cd799439011"
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - amount
+ *             properties:
+ *               amount:
+ *                 type: string
+ *                 description: Investment amount as a positive integer string
+ *                 example: "10"
+ *     responses:
+ *       200:
+ *         description: Investment created successfully
+ *       400:
+ *         description: Validation error or event not open for investment
+ *       401:
+ *         description: Not authenticated
+ *       404:
+ *         description: Event not found
+ *       500:
+ *         description: Server error
+ */
+router.post(
+  "/:id/invest",
+  authenticate,
+  validate({ body: eventSchemas.investEvent }),
+  controller.investInEvent,
+);
 
 /**
  * @swagger
@@ -323,7 +399,12 @@ router.delete('/:id', authenticate, requireEventCreator, controller.deleteEvent)
  *       500:
  *         description: Server error
  */
-router.delete('/:id/images/:imageUrl', authenticate, requireEventCreator, controller.deleteEventImage);
+router.delete(
+  "/:id/images/:imageUrl",
+  authenticate,
+  requireEventCreator,
+  controller.deleteEventImage,
+);
 
 /**
  * @swagger
@@ -347,6 +428,6 @@ router.delete('/:id/images/:imageUrl', authenticate, requireEventCreator, contro
  *       500:
  *         description: Server error
  */
-router.get('/:id/stats', controller.getEventStats);
+router.get("/:id/stats", controller.getEventStats);
 
 export default router;

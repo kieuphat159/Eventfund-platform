@@ -1,8 +1,15 @@
-import { isValidObjectId } from 'mongoose';
-import * as eventRepo from '../../repositories/event.repo.js';
-import { compareBigInt, toBigInt } from '../../utils/bigint.js';
-import { NotFoundError, ForbiddenError, BadRequestError } from '../../utils/customErrors.js';
-import UploadService from '../upload/upload.service.js';
+import { isValidObjectId } from "mongoose";
+import * as eventRepo from "../../repositories/event.repo.js";
+import * as shareRepo from "../../repositories/share.repo.js";
+import { compareBigInt, toBigInt } from "../../utils/bigint.js";
+import {
+  NotFoundError,
+  ForbiddenError,
+  BadRequestError,
+} from "../../utils/customErrors.js";
+import UploadService from "../upload/upload.service.js";
+import Contribution from "../../models/Contribution.model.js";
+import Share from "../../models/Share.model.js";
 
 // Default upload service instance (lazy initialization for future use)
 let defaultUploadService = null;
@@ -27,10 +34,10 @@ export async function createEvent(eventData, user, repos = {}) {
   const event = await repository.createEvent({
     ...eventData,
     organizer: user.walletAddress.toLowerCase(),
-    status: 'draft',
+    status: "draft",
     currentFunding: "0",
     ticketsSold: 0,
-    totalTicketsUsed: 0
+    totalTicketsUsed: 0,
   });
 
   return event;
@@ -51,15 +58,15 @@ export async function getEvents(query = {}, repos = {}) {
   const dbQuery = {
     ...(status && { status }),
     ...(category && { category }),
-    ...(organizer && { organizer: organizer.toLowerCase() })
+    ...(organizer && { organizer: organizer.toLowerCase() }),
   };
 
   // Pagination options with defaults
   const options = {
     page: page ? parseInt(page, 10) : 1,
     limit: Math.min(limit ? parseInt(limit, 10) : 20, 100),
-    sort: sort || '-createdAt',
-    lean: true
+    sort: sort || "-createdAt",
+    lean: true,
   };
 
   return await repository.findEvents(dbQuery, options);
@@ -75,13 +82,13 @@ export async function getEventById(eventId, repos = {}) {
   const repository = repos.eventRepo || eventRepo;
 
   if (!isValidObjectId(eventId)) {
-    throw new BadRequestError('Invalid event id');
+    throw new BadRequestError("Invalid event id");
   }
 
   const event = await repository.findById(eventId);
 
   if (!event) {
-    throw new NotFoundError('Event not found');
+    throw new NotFoundError("Event not found");
   }
 
   return event;
@@ -101,43 +108,45 @@ export async function updateEvent(eventId, updates, user, repos = {}) {
   const event = await repository.findById(eventId);
 
   if (!event) {
-    throw new NotFoundError('Event not found');
+    throw new NotFoundError("Event not found");
   }
 
   // Check authorization
   if (event.organizer.toLowerCase() !== user.walletAddress.toLowerCase()) {
-    throw new ForbiddenError('Not authorized to update this event');
+    throw new ForbiddenError("Not authorized to update this event");
   }
 
   // Allowlist: only allow specific fields to be updated
   const allowedFields = [
-    'title',
-    'description',
-    'category',
-    'startDate',
-    'endDate',
-    'fundingGoal',
-    'minStakeRequired',
-    'fundingDeadline',
-    'status',
-    'venue',
-    'imageUrls',
-    'metadataUri',
-    'totalTickets',
-    'ticketTiers',
-    'ticketUsageThreshold'
+    "title",
+    "description",
+    "category",
+    "startDate",
+    "endDate",
+    "fundingGoal",
+    "minStakeRequired",
+    "fundingDeadline",
+    "status",
+    "venue",
+    "imageUrls",
+    "metadataUri",
+    "totalTickets",
+    "ticketTiers",
+    "ticketUsageThreshold",
   ];
 
   const sanitizedUpdates = {};
-  allowedFields.forEach(field => {
+  allowedFields.forEach((field) => {
     if (updates[field] !== undefined) {
       sanitizedUpdates[field] = updates[field];
     }
   });
 
   // Prevent changing funding goal after funding starts
-  if (updates.fundingGoal && event.status !== 'draft') {
-    throw new BadRequestError('Cannot change funding goal after funding starts');
+  if (updates.fundingGoal && event.status !== "draft") {
+    throw new BadRequestError(
+      "Cannot change funding goal after funding starts",
+    );
   }
 
   // Apply updates
@@ -160,17 +169,17 @@ export async function deleteEvent(eventId, user, repos = {}, uploadSvc = null) {
   const event = await repository.findById(eventId);
 
   if (!event) {
-    throw new NotFoundError('Event not found');
+    throw new NotFoundError("Event not found");
   }
 
   // Check authorization
   if (event.organizer.toLowerCase() !== user.walletAddress.toLowerCase()) {
-    throw new ForbiddenError('Not authorized to delete this event');
+    throw new ForbiddenError("Not authorized to delete this event");
   }
 
   // Only allow deleting draft events
-  if (event.status !== 'draft') {
-    throw new BadRequestError('Only draft events can be deleted');
+  if (event.status !== "draft") {
+    throw new BadRequestError("Only draft events can be deleted");
   }
 
   // Delete all event images from Cloudinary before deleting the event
@@ -179,7 +188,7 @@ export async function deleteEvent(eventId, user, repos = {}, uploadSvc = null) {
       await uploader.deleteMultipleImages(event.imageUrls);
     } catch (error) {
       // Log error but don't fail event deletion
-      console.error('Failed to delete event images from Cloudinary:', error);
+      console.error("Failed to delete event images from Cloudinary:", error);
     }
   }
 
@@ -197,21 +206,26 @@ export async function getEventStats(eventId, repos = {}) {
   const event = await repository.findById(eventId);
 
   if (!event) {
-    throw new NotFoundError('Event not found');
+    throw new NotFoundError("Event not found");
   }
 
   // Calculate funding progress
-  const fundingProgress = toBigInt(event.fundingGoal) > toBigInt("0")
-    ? Number((toBigInt(event.currentFunding) * toBigInt("100")) / toBigInt(event.fundingGoal))
-    : 0;
+  const fundingProgress =
+    toBigInt(event.fundingGoal) > toBigInt("0")
+      ? Number(
+          (toBigInt(event.currentFunding) * toBigInt("100")) /
+            toBigInt(event.fundingGoal),
+        )
+      : 0;
 
   // Calculate ticket availability
   const ticketsAvailable = event.totalTickets - event.ticketsSold;
 
   // Calculate ticket usage rate
-  const ticketUsageRate = event.ticketsSold > 0
-    ? (event.totalTicketsUsed / event.ticketsSold) * 100
-    : 0;
+  const ticketUsageRate =
+    event.ticketsSold > 0
+      ? (event.totalTicketsUsed / event.ticketsSold) * 100
+      : 0;
 
   return {
     eventId: event._id,
@@ -222,7 +236,7 @@ export async function getEventStats(eventId, repos = {}) {
     ticketsAvailable,
     totalTickets: event.totalTickets,
     totalTicketsUsed: event.totalTicketsUsed,
-    ticketUsageRate: Math.round(ticketUsageRate * 100) / 100
+    ticketUsageRate: Math.round(ticketUsageRate * 100) / 100,
   };
 }
 
@@ -238,7 +252,7 @@ export async function updateFundingStatus(eventId, fundingData, repos = {}) {
   const event = await repository.findById(eventId);
 
   if (!event) {
-    throw new Error('Event not found');
+    throw new Error("Event not found");
   }
 
   // Prepare updates
@@ -250,15 +264,164 @@ export async function updateFundingStatus(eventId, fundingData, repos = {}) {
   }
 
   // Check if funding goal reached
-  const newFunding = fundingData.currentFunding !== undefined
-    ? fundingData.currentFunding
-    : event.currentFunding;
+  const newFunding =
+    fundingData.currentFunding !== undefined
+      ? fundingData.currentFunding
+      : event.currentFunding;
 
-  if (compareBigInt(newFunding, event.fundingGoal) >= 0 && event.status === 'funding') {
-    updates.status = 'funded';
+  if (
+    compareBigInt(newFunding, event.fundingGoal) >= 0 &&
+    event.status === "funding"
+  ) {
+    updates.status = "funded";
   }
 
   return await repository.updateFundingStatus(eventId, updates);
+}
+
+async function rebuildSharePercentagesAndFunding(eventId) {
+  const event = await eventRepo.findById(eventId);
+  if (!event) {
+    throw new NotFoundError("Event not found");
+  }
+
+  const contributions = await Contribution.find({
+    eventId: event._id,
+    status: "confirmed",
+  }).lean();
+
+  const totalFunding = contributions.reduce((sum, contribution) => {
+    const amount = Number(contribution.amount) || 0;
+    return sum + amount;
+  }, 0);
+
+  const holders = contributions.reduce((map, contribution) => {
+    const holder = contribution.contributor?.toLowerCase();
+    if (!holder) return map;
+    map[holder] = (map[holder] || 0) + (Number(contribution.amount) || 0);
+    return map;
+  }, {});
+
+  const bulkOperations = Object.entries(holders).map(
+    ([holder, contributionAmount]) => ({
+      updateOne: {
+        filter: { eventId: event._id, holder },
+        update: {
+          $set: {
+            contributionAmount,
+            sharePercentage:
+              totalFunding > 0 ? (contributionAmount / totalFunding) * 100 : 0,
+          },
+          $setOnInsert: {
+            claimedReward: 0,
+            pendingReward: 0,
+          },
+        },
+        upsert: true,
+      },
+    }),
+  );
+
+  if (bulkOperations.length > 0) {
+    await Share.bulkWrite(bulkOperations);
+  }
+
+  return {
+    currentFunding: totalFunding.toString(),
+    status:
+      compareBigInt(totalFunding, event.fundingGoal) >= 0 &&
+      event.status === "funding"
+        ? "funded"
+        : event.status,
+  };
+}
+
+export async function investInEvent(eventId, amount, user, repos = {}) {
+  const repository = repos.eventRepo || eventRepo;
+  const shareRepository = repos.shareRepo || shareRepo;
+
+  if (!user || !user.walletAddress) {
+    throw new BadRequestError("Authenticated user is required to invest");
+  }
+
+  if (!isValidObjectId(eventId)) {
+    throw new BadRequestError("Invalid event id");
+  }
+
+  const event = await repository.findById(eventId);
+  if (!event) {
+    throw new NotFoundError("Event not found");
+  }
+
+  if (event.status !== "funding") {
+    throw new BadRequestError("Event is not open for investment");
+  }
+
+  const amountNumber = Number(amount);
+  if (
+    !Number.isFinite(amountNumber) ||
+    amountNumber <= 0 ||
+    !Number.isInteger(amountNumber)
+  ) {
+    throw new BadRequestError("Investment amount must be a positive integer");
+  }
+
+  const minStake = Number(event.minStakeRequired || "0");
+  if (minStake > 0 && amountNumber < minStake) {
+    throw new BadRequestError(`Investment amount must be at least ${minStake}`);
+  }
+
+  const existingShare = await shareRepository.findByEventAndHolder(
+    eventId,
+    user.walletAddress,
+  );
+
+  const sharePayload = {
+    eventId,
+    holder: user.walletAddress.toLowerCase(),
+    contributionAmount: amountNumber,
+    sharePercentage: 0,
+    claimedReward: existingShare?.claimedReward ?? 0,
+    pendingReward: existingShare?.pendingReward ?? 0,
+  };
+
+  if (existingShare) {
+    await Share.findOneAndUpdate(
+      { eventId, holder: user.walletAddress.toLowerCase() },
+      { $inc: { contributionAmount: amountNumber } },
+      { new: true, runValidators: true, lean: true },
+    );
+  } else {
+    await shareRepository.createShare(sharePayload);
+  }
+
+  const txHash =
+    `invest_${eventId}_${user.walletAddress.toLowerCase()}_${Date.now()}_${Math.random()
+      .toString(36)
+      .slice(2)}`.toLowerCase();
+
+  await Contribution.create({
+    eventId,
+    contributor: user.walletAddress.toLowerCase(),
+    type: "donator_contribution",
+    amount: amountNumber,
+    sharePercentage: 0,
+    txHash,
+    status: "confirmed",
+    timestamp: new Date(),
+  });
+
+  const fundingUpdates = await rebuildSharePercentagesAndFunding(eventId);
+  await repository.updateFundingStatus(eventId, fundingUpdates);
+
+  const updatedShare = await Share.findOne({
+    eventId,
+    holder: user.walletAddress.toLowerCase(),
+  })
+    .populate("eventId")
+    .lean();
+
+  return updatedShare;
 }
 
 /**
@@ -270,37 +433,45 @@ export async function updateFundingStatus(eventId, fundingData, repos = {}) {
  * @param {Object} uploadSvc - Upload service for deleting images (for testing)
  * @returns {Promise<Object>} Updated event
  */
-export async function deleteEventImage(eventId, imageUrl, user, repos = {}, uploadSvc = null) {
+export async function deleteEventImage(
+  eventId,
+  imageUrl,
+  user,
+  repos = {},
+  uploadSvc = null,
+) {
   const repository = repos.eventRepo || eventRepo;
   const uploader = uploadSvc || getDefaultUploadService();
 
   const event = await repository.findById(eventId);
 
   if (!event) {
-    throw new NotFoundError('Event not found');
+    throw new NotFoundError("Event not found");
   }
 
   // Check authorization
   if (event.organizer.toLowerCase() !== user.walletAddress.toLowerCase()) {
-    throw new ForbiddenError('Not authorized to modify this event');
+    throw new ForbiddenError("Not authorized to modify this event");
   }
 
   // Check if image exists in event
   if (!event.imageUrls || !event.imageUrls.includes(imageUrl)) {
-    throw new NotFoundError('Image not found in event');
+    throw new NotFoundError("Image not found in event");
   }
 
   // Delete image from Cloudinary
   try {
     await uploader.deleteImage(imageUrl);
   } catch (error) {
-    console.error('Failed to delete image from Cloudinary:', error);
+    console.error("Failed to delete image from Cloudinary:", error);
     // Continue with database update even if Cloudinary deletion fails
   }
 
   // Remove image URL from event
-  const updatedImageUrls = event.imageUrls.filter(url => url !== imageUrl);
-  const updatedEvent = await repository.updateById(eventId, { imageUrls: updatedImageUrls });
+  const updatedImageUrls = event.imageUrls.filter((url) => url !== imageUrl);
+  const updatedEvent = await repository.updateById(eventId, {
+    imageUrls: updatedImageUrls,
+  });
 
   return updatedEvent;
 }
