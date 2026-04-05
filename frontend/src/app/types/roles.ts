@@ -1,7 +1,8 @@
-export type UserRole = 'public' | 'user' | 'verifier' | 'admin';
+export type UserRole = 'public' | 'user' | 'organizer' | 'verifier' | 'admin';
 
 export interface User {
   walletAddress?: string;
+  smartAccountAddress?: string;
   role: UserRole;
   name?: string;
   email?: string;

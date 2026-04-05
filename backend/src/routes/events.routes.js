@@ -1,7 +1,7 @@
 import express from 'express';
 import EventsController from '../controllers/events.controller.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
-import { requireOrganizer } from '../middlewares/roles.middleware.js';
+import { requireEventCreator } from '../middlewares/roles.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
 import { eventSchemas } from '../validators/event.validator.js';
 import { uploadEventImages, validateMultipleImages } from '../middlewares/image.middleware.js';
@@ -77,7 +77,7 @@ router.get('/', validate({ query: eventSchemas.queryEvents }), controller.getEve
  * @swagger
  * /events:
  *   post:
- *     summary: Create new event (organizer only)
+ *     summary: Create new event (authenticated creator or admin)
  *     tags: [Events]
  *     security:
  *       - bearerAuth: []
@@ -165,7 +165,7 @@ router.get('/', validate({ query: eventSchemas.queryEvents }), controller.getEve
  *       500:
  *         description: Server error
  */
-router.post('/', authenticate, requireOrganizer, uploadEventImages, validateMultipleImages, validate({ body: eventSchemas.createEvent }), controller.createEvent);
+router.post('/', authenticate, requireEventCreator, uploadEventImages, validateMultipleImages, validate({ body: eventSchemas.createEvent }), controller.createEvent);
 
 /**
  * @swagger
@@ -195,7 +195,7 @@ router.get('/:id', controller.getEventById);
  * @swagger
  * /events/{id}:
  *   patch:
- *     summary: Update event (organizer only, must own event)
+ *     summary: Update event (creator/admin, must own event unless admin)
  *     tags: [Events]
  *     security:
  *       - bearerAuth: []
@@ -254,13 +254,13 @@ router.get('/:id', controller.getEventById);
  *       500:
  *         description: Server error
  */
-router.patch('/:id', authenticate, requireOrganizer, uploadEventImages, validateMultipleImages, validate({ body: eventSchemas.updateEvent }), controller.updateEvent);
+router.patch('/:id', authenticate, requireEventCreator, uploadEventImages, validateMultipleImages, validate({ body: eventSchemas.updateEvent }), controller.updateEvent);
 
 /**
  * @swagger
  * /events/{id}:
  *   delete:
- *     summary: Delete event (organizer only, must own event, draft only)
+ *     summary: Delete event (creator/admin, must own event, draft only)
  *     tags: [Events]
  *     security:
  *       - bearerAuth: []
@@ -286,7 +286,7 @@ router.patch('/:id', authenticate, requireOrganizer, uploadEventImages, validate
  *       500:
  *         description: Server error
  */
-router.delete('/:id', authenticate, requireOrganizer, controller.deleteEvent);
+router.delete('/:id', authenticate, requireEventCreator, controller.deleteEvent);
 
 /**
  * @swagger
@@ -323,7 +323,7 @@ router.delete('/:id', authenticate, requireOrganizer, controller.deleteEvent);
  *       500:
  *         description: Server error
  */
-router.delete('/:id/images/:imageUrl', authenticate, requireOrganizer, controller.deleteEventImage);
+router.delete('/:id/images/:imageUrl', authenticate, requireEventCreator, controller.deleteEventImage);
 
 /**
  * @swagger

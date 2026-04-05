@@ -1,5 +1,5 @@
 import React from 'react';
-import { Link } from 'react-router';
+import { Link } from 'react-router-dom';
 import { Wallet, Ticket, TrendingUp, Shield, ArrowRight, Zap } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { useAuth } from '../../contexts/AuthContext';
@@ -90,7 +90,7 @@ export const Home: React.FC = () => {
                 className="px-8 text-lg h-12"
               >
                 <Wallet className="w-5 h-5 mr-2" />
-                {isLoading ? 'Đang kết nối...' : 'Connect Wallet'}
+                {isLoading ? 'Connecting...' : 'Connect Wallet'}
               </Button>
               <Link to="/explore">
                 <Button
@@ -257,7 +257,7 @@ export const Home: React.FC = () => {
             className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white px-12 text-lg h-14"
           >
             <Wallet className="w-5 h-5 mr-2" />
-            {isLoading ? 'Đang kết nối...' : 'Connect Your Wallet'}
+            {isLoading ? 'Connecting...' : 'Connect Your Wallet'}
           </Button>
         </div>
       </section>
