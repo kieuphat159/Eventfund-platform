@@ -81,7 +81,7 @@ async function storeLogs(contractAddress, logs) {
       data: log.data,
       eventName: parsed?.name,
       args: parsed?.args
-        ? resultToArgsObject(parsed.name, parsed.args)
+        ? resultToArgsObject(parsed.args)
         : undefined,
     };
   });
