@@ -65,6 +65,20 @@ const ticketsController = new TicketsController();
  */
 router.get('/', validate({ query: ticketSchemas.queryTickets }), (req, res, next) => ticketsController.getTickets(req, res, next));
 
+router.post(
+	'/purchase-intent',
+	authenticate,
+	validate({ body: ticketSchemas.purchaseIntent }),
+	(req, res, next) => ticketsController.createPurchaseIntent(req, res, next)
+);
+
+router.post(
+	'/purchase/confirm',
+	authenticate,
+	validate({ body: ticketSchemas.confirmPurchase }),
+	(req, res, next) => ticketsController.confirmPurchaseTransaction(req, res, next)
+);
+
 /**
  * @swagger
  * /tickets/{tokenId}:
@@ -190,6 +204,22 @@ router.post('/verify', authenticate, requireRole('verifier', 'admin'), validate(
  *         description: Server error
  */
 router.post('/:tokenId/use', authenticate, requireRole('verifier', 'admin'), validate({ params: ticketSchemas.tokenIdParams, body: ticketSchemas.useTicket }), (req, res, next) => ticketsController.markTicketAsUsed(req, res, next));
+
+router.post(
+	'/:tokenId/use-intent',
+	authenticate,
+	requireRole('verifier', 'admin'),
+	validate({ params: ticketSchemas.tokenIdParams }),
+	(req, res, next) => ticketsController.createUseTicketIntent(req, res, next)
+);
+
+router.post(
+	'/use/confirm',
+	authenticate,
+	requireRole('verifier', 'admin'),
+	validate({ body: ticketSchemas.confirmUseTicket }),
+	(req, res, next) => ticketsController.confirmUseTicketTransaction(req, res, next)
+);
 
 /**
  * @swagger

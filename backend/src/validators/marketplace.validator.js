@@ -26,6 +26,21 @@ const createListingSchema = Joi.object({
   expiresAt: Joi.date().iso().required()
 });
 
+const createListingIntentSchema = Joi.object({
+  ticketId: objectId.required(),
+  price: positiveBigIntString.required()
+});
+
+const txHashSchema = Joi.string()
+  .pattern(/^0x([A-Fa-f0-9]{64})$/)
+  .message('must be a valid transaction hash');
+
+const confirmSoldTransactionSchema = Joi.object({
+  txHash: txHashSchema.required(),
+  listingId: objectId.optional(),
+  buyerWallet: ethereumAddress.optional()
+});
+
 // Schema for GET /marketplace/listings query parameters
 const queryListingsSchema = Joi.object({
   eventId: objectId.optional(),
@@ -41,5 +56,7 @@ const queryListingsSchema = Joi.object({
 
 export const marketplaceSchemas = {
   createListing: createListingSchema,
+  createListingIntent: createListingIntentSchema,
+  confirmSoldTransaction: confirmSoldTransactionSchema,
   queryListings: queryListingsSchema
 };
