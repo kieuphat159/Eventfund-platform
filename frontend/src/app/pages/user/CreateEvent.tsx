@@ -1,6 +1,13 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Calendar, MapPin, Upload, Plus, Trash2 } from 'lucide-react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Textarea } from '../../components/ui/textarea';
@@ -13,7 +20,17 @@ type TicketTierForm = {
   supply: string;
 };
 
+type FieldErrors = Record<string, string>;
+
+const createEmptyTier = (): TicketTierForm => ({
+  name: '',
+  price: '',
+  supply: '',
+});
+
 export const CreateEvent: React.FC = () => {
+  const navigate = useNavigate();
+
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [date, setDate] = useState('');
@@ -28,6 +45,7 @@ export const CreateEvent: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
   const [ticketTiers, setTicketTiers] = useState<TicketTierForm[]>([
     { name: 'General', price: '', supply: '' },
@@ -44,14 +62,24 @@ export const CreateEvent: React.FC = () => {
     setMinStakeRequired('');
     setInvestmentEnabled(false);
     setTicketTiers([{ name: 'General', price: '', supply: '' }]);
+    setFieldErrors({});
+    setError('');
+    setSuccess('');
   };
 
   const addTier = () => {
-    setTicketTiers((prev) => [...prev, { name: '', price: '', supply: '' }]);
+    setTicketTiers((prev) => [...prev, createEmptyTier()]);
   };
 
   const removeTier = (index: number) => {
     setTicketTiers((prev) => prev.filter((_, i) => i !== index));
+    setFieldErrors((prev) => {
+      const next = { ...prev };
+      delete next[`tier-${index}-name`];
+      delete next[`tier-${index}-price`];
+      delete next[`tier-${index}-supply`];
+      return next;
+    });
   };
 
   const updateTier = (
@@ -64,6 +92,13 @@ export const CreateEvent: React.FC = () => {
       updated[index] = { ...updated[index], [field]: value };
       return updated;
     });
+
+    setFieldErrors((prev) => {
+      const next = { ...prev };
+      delete next[`tier-${index}-${field}`];
+      delete next.ticketTiers;
+      return next;
+    });
   };
 
   const buildStartDate = () => {
@@ -71,84 +106,147 @@ export const CreateEvent: React.FC = () => {
     return new Date(`${date}T${time}`);
   };
 
+  const getInputClass = (hasError?: boolean) =>
+    `mt-1.5 bg-slate-800 text-white ${
+      hasError
+        ? 'border-red-500 focus-visible:ring-red-500'
+        : 'border-slate-700'
+    }`;
+
+  const validateForm = (mode: 'draft' | 'review') => {
+    const errors: FieldErrors = {};
+
+    if (!title.trim()) {
+      errors.title = 'Event title is required.';
+    }
+
+    if (!date) {
+      errors.date = 'Event date is required.';
+    }
+
+    if (!time) {
+      errors.time = 'Event time is required.';
+    }
+
+    const start = buildStartDate();
+    if (date && time && (!start || Number.isNaN(start.getTime()))) {
+      errors.dateTime = 'Event date and time are invalid.';
+    }
+
+    if (mode === 'review') {
+      if (!description.trim()) {
+        errors.description = 'Event description is required.';
+      }
+
+      if (!location.trim()) {
+        errors.location = 'Location is required.';
+      }
+
+      if (!category) {
+        errors.category = 'Category is required.';
+      }
+
+      if (investmentEnabled && !fundingGoal.trim()) {
+        errors.fundingGoal =
+          'Funding goal is required when investment is enabled.';
+      }
+
+      if (start) {
+        const fundingDeadline = new Date(
+          start.getTime() - 7 * 24 * 60 * 60 * 1000
+        );
+
+        if (fundingDeadline <= new Date()) {
+          errors.fundingDeadline =
+            'The event must be scheduled at least 7 days from now to create a valid funding deadline.';
+        }
+      }
+    }
+
+    const filledTiers = ticketTiers.filter(
+      (tier) => tier.name.trim() || tier.price.trim() || tier.supply.trim()
+    );
+
+    if (!filledTiers.length) {
+      errors.ticketTiers = 'At least one ticket tier is required.';
+    }
+
+    ticketTiers.forEach((tier, index) => {
+      const tierNumber = index + 1;
+      const hasAnyValue =
+        tier.name.trim() || tier.price.trim() || tier.supply.trim();
+
+      if (!hasAnyValue) {
+        if (index === 0) {
+          errors[`tier-${index}-name`] = 'Tier name is required.';
+          errors[`tier-${index}-price`] = 'Tier price is required.';
+          errors[`tier-${index}-supply`] = 'Tier supply is required.';
+        }
+        return;
+      }
+
+      if (!tier.name.trim()) {
+        errors[`tier-${index}-name`] = `Tier ${tierNumber} name is required.`;
+      }
+
+      if (tier.price.trim() === '') {
+        errors[`tier-${index}-price`] = `Tier ${tierNumber} price is required.`;
+      } else if (Number.isNaN(Number(tier.price)) || Number(tier.price) < 0) {
+        errors[`tier-${index}-price`] = `Tier ${tierNumber} price must be greater than or equal to 0.`;
+      }
+
+      if (tier.supply.trim() === '') {
+        errors[`tier-${index}-supply`] = `Tier ${tierNumber} total supply is required.`;
+      } else if (
+        Number.isNaN(Number(tier.supply)) ||
+        Number(tier.supply) <= 0
+      ) {
+        errors[`tier-${index}-supply`] = `Tier ${tierNumber} total supply must be greater than 0.`;
+      }
+    });
+
+    return errors;
+  };
+
   const submitEvent = async (mode: 'draft' | 'review') => {
     try {
       setError('');
       setSuccess('');
+      setFieldErrors({});
 
-      if (!title.trim()) {
-        setError('Vui lòng nhập tên sự kiện');
-        return;
-      }
+      const errors = validateForm(mode);
 
-      if (!date || !time) {
-        setError('Vui lòng chọn ngày và giờ sự kiện');
+      if (Object.keys(errors).length > 0) {
+        setFieldErrors(errors);
+        setError(Object.values(errors)[0]);
         return;
       }
 
       const start = buildStartDate();
       if (!start || Number.isNaN(start.getTime())) {
-        setError('Ngày giờ bắt đầu không hợp lệ');
+        setError('Event date and time are invalid.');
         return;
       }
 
       const end = new Date(start.getTime() + 2 * 60 * 60 * 1000);
-      const fundingDeadline = new Date(start.getTime() - 7 * 24 * 60 * 60 * 1000);
-
-      if (mode === 'review') {
-        if (!description.trim()) {
-          setError('Vui lòng nhập mô tả sự kiện');
-          return;
-        }
-
-        if (!location.trim()) {
-          setError('Vui lòng nhập địa điểm');
-          return;
-        }
-
-        if (!category) {
-          setError('Vui lòng chọn danh mục');
-          return;
-        }
-
-        if (investmentEnabled && !fundingGoal.trim()) {
-          setError('Vui lòng nhập funding goal');
-          return;
-        }
-
-        if (fundingDeadline <= new Date()) {
-          setError('Ngày sự kiện cần cách hiện tại ít nhất 7 ngày để tạo funding deadline hợp lệ');
-          return;
-        }
-      }
+      const fundingDeadline = new Date(
+        start.getTime() - 7 * 24 * 60 * 60 * 1000
+      );
 
       const normalizedTiers = ticketTiers
-        .filter((tier) => tier.name.trim() && tier.price !== '' && tier.supply !== '')
+        .filter(
+          (tier) => tier.name.trim() || tier.price.trim() || tier.supply.trim()
+        )
         .map((tier) => ({
           name: tier.name.trim(),
           price: Number(tier.price),
           totalSupply: Number(tier.supply),
         }));
 
-      if (!normalizedTiers.length) {
-        setError('Vui lòng tạo ít nhất 1 hạng vé hợp lệ');
-        return;
-      }
-
-      const hasInvalidTier = normalizedTiers.some(
-        (tier) =>
-          Number.isNaN(tier.price) ||
-          Number.isNaN(tier.totalSupply) ||
-          tier.price < 0 ||
-          tier.totalSupply <= 0
+      const totalTickets = normalizedTiers.reduce(
+        (sum, tier) => sum + tier.totalSupply,
+        0
       );
-
-      if (hasInvalidTier) {
-        setError('Giá vé hoặc số lượng vé không hợp lệ');
-        return;
-      }
-
-      const totalTickets = normalizedTiers.reduce((sum, tier) => sum + tier.totalSupply, 0);
 
       setSubmitting(true);
 
@@ -158,8 +256,10 @@ export const CreateEvent: React.FC = () => {
         category: category || 'conference',
         startDate: start.toISOString(),
         endDate: end.toISOString(),
-        fundingGoal: investmentEnabled ? (fundingGoal.trim() || '0') : '0',
-        minStakeRequired: investmentEnabled ? (minStakeRequired.trim() || '0') : '0',
+        fundingGoal: investmentEnabled ? fundingGoal.trim() || '0' : '0',
+        minStakeRequired: investmentEnabled
+          ? minStakeRequired.trim() || '0'
+          : '0',
         fundingDeadline: fundingDeadline.toISOString(),
         totalTickets,
         venue: {
@@ -169,14 +269,27 @@ export const CreateEvent: React.FC = () => {
       });
 
       if (!created) {
-        setError(mode === 'draft' ? 'Lưu draft thất bại' : 'Tạo sự kiện thất bại');
+        setError(
+          mode === 'draft'
+            ? 'Failed to save draft.'
+            : 'Failed to create event.'
+        );
         return;
       }
 
-      setSuccess(mode === 'draft' ? 'Lưu draft thành công' : 'Tạo sự kiện thành công');
-      resetForm();
+      if (mode === 'draft') {
+        setSuccess('Draft saved successfully.');
+        resetForm();
+        return;
+      }
+
+      navigate('/app/events/my-events');
     } catch (err: any) {
-      setError(err?.response?.data?.message || err?.message || 'Có lỗi xảy ra khi tạo sự kiện');
+      setError(
+        err?.response?.data?.message ||
+          err?.message ||
+          'An unexpected error occurred while creating the event.'
+      );
     } finally {
       setSubmitting(false);
     }
@@ -219,75 +332,196 @@ export const CreateEvent: React.FC = () => {
 
         <CardContent className="space-y-4">
           <div>
-            <Label htmlFor="title" className="text-white">Event Title *</Label>
+            <Label htmlFor="title" className="text-white">
+              Event Title *
+            </Label>
             <Input
               id="title"
               value={title}
-              onChange={(e) => setTitle(e.target.value)}
+              onChange={(e) => {
+                setTitle(e.target.value);
+                if (fieldErrors.title) {
+                  setFieldErrors((prev) => {
+                    const next = { ...prev };
+                    delete next.title;
+                    return next;
+                  });
+                }
+              }}
               placeholder="Enter event name"
-              className="mt-1.5 bg-slate-800 border-slate-700 text-white"
+              className={getInputClass(!!fieldErrors.title)}
             />
+            {fieldErrors.title && (
+              <p className="mt-1 text-sm text-red-400">{fieldErrors.title}</p>
+            )}
           </div>
 
           <div>
-            <Label htmlFor="description" className="text-white">Description *</Label>
+            <Label htmlFor="description" className="text-white">
+              Description *
+            </Label>
             <Textarea
               id="description"
               value={description}
-              onChange={(e) => setDescription(e.target.value)}
+              onChange={(e) => {
+                setDescription(e.target.value);
+                if (fieldErrors.description) {
+                  setFieldErrors((prev) => {
+                    const next = { ...prev };
+                    delete next.description;
+                    return next;
+                  });
+                }
+              }}
               placeholder="Describe your event..."
-              className="mt-1.5 bg-slate-800 border-slate-700 text-white min-h-[120px]"
+              className={`mt-1.5 bg-slate-800 text-white min-h-[120px] ${
+                fieldErrors.description
+                  ? 'border-red-500 focus-visible:ring-red-500'
+                  : 'border-slate-700'
+              }`}
             />
+            {fieldErrors.description && (
+              <p className="mt-1 text-sm text-red-400">
+                {fieldErrors.description}
+              </p>
+            )}
           </div>
 
           <div className="grid md:grid-cols-2 gap-4">
             <div>
-              <Label htmlFor="date" className="text-white">Event Date *</Label>
+              <Label htmlFor="date" className="text-white">
+                Event Date *
+              </Label>
               <div className="relative mt-1.5">
-                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-cyan-300" />
                 <Input
                   id="date"
                   type="date"
                   value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  className="pl-10 bg-slate-800 border-slate-700 text-white"
+                  onChange={(e) => {
+                    setDate(e.target.value);
+                    setFieldErrors((prev) => {
+                      const next = { ...prev };
+                      delete next.date;
+                      delete next.dateTime;
+                      delete next.fundingDeadline;
+                      return next;
+                    });
+                  }}
+                  className={`pl-10 bg-slate-800 text-white ${
+                    fieldErrors.date ||
+                    fieldErrors.dateTime ||
+                    fieldErrors.fundingDeadline
+                      ? 'border-red-500 focus-visible:ring-red-500'
+                      : 'border-slate-700'
+                  }`}
                 />
               </div>
+              {fieldErrors.date && (
+                <p className="mt-1 text-sm text-red-400">{fieldErrors.date}</p>
+              )}
+              {!fieldErrors.date && fieldErrors.dateTime && (
+                <p className="mt-1 text-sm text-red-400">
+                  {fieldErrors.dateTime}
+                </p>
+              )}
+              {!fieldErrors.date &&
+                !fieldErrors.dateTime &&
+                fieldErrors.fundingDeadline && (
+                  <p className="mt-1 text-sm text-red-400">
+                    {fieldErrors.fundingDeadline}
+                  </p>
+                )}
             </div>
 
             <div>
-              <Label htmlFor="time" className="text-white">Event Time *</Label>
+              <Label htmlFor="time" className="text-white">
+                Event Time *
+              </Label>
               <Input
                 id="time"
                 type="time"
                 value={time}
-                onChange={(e) => setTime(e.target.value)}
-                className="mt-1.5 bg-slate-800 border-slate-700 text-white"
+                onChange={(e) => {
+                  setTime(e.target.value);
+                  setFieldErrors((prev) => {
+                    const next = { ...prev };
+                    delete next.time;
+                    delete next.dateTime;
+                    delete next.fundingDeadline;
+                    return next;
+                  });
+                }}
+                className={`mt-1.5 bg-slate-800 text-white ${
+                  fieldErrors.time ||
+                  fieldErrors.dateTime ||
+                  fieldErrors.fundingDeadline
+                    ? 'border-red-500 focus-visible:ring-red-500'
+                    : 'border-slate-700'
+                }`}
               />
+              {fieldErrors.time && (
+                <p className="mt-1 text-sm text-red-400">{fieldErrors.time}</p>
+              )}
             </div>
           </div>
 
           <div>
-            <Label htmlFor="location" className="text-white">Location *</Label>
+            <Label htmlFor="location" className="text-white">
+              Location *
+            </Label>
             <div className="relative mt-1.5">
-              <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+              <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-300" />
               <Input
                 id="location"
                 value={location}
-                onChange={(e) => setLocation(e.target.value)}
+                onChange={(e) => {
+                  setLocation(e.target.value);
+                  if (fieldErrors.location) {
+                    setFieldErrors((prev) => {
+                      const next = { ...prev };
+                      delete next.location;
+                      return next;
+                    });
+                  }
+                }}
                 placeholder="Enter venue or address"
-                className="pl-10 bg-slate-800 border-slate-700 text-white"
+                className={`pl-10 bg-slate-800 text-white ${
+                  fieldErrors.location
+                    ? 'border-red-500 focus-visible:ring-red-500'
+                    : 'border-slate-700'
+                }`}
               />
             </div>
+            {fieldErrors.location && (
+              <p className="mt-1 text-sm text-red-400">
+                {fieldErrors.location}
+              </p>
+            )}
           </div>
 
           <div>
-            <Label htmlFor="category" className="text-white">Category *</Label>
+            <Label htmlFor="category" className="text-white">
+              Category *
+            </Label>
             <select
               id="category"
               value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              className="mt-1.5 w-full h-9 px-3 rounded-md bg-slate-800 border border-slate-700 text-white text-sm"
+              onChange={(e) => {
+                setCategory(e.target.value);
+                if (fieldErrors.category) {
+                  setFieldErrors((prev) => {
+                    const next = { ...prev };
+                    delete next.category;
+                    return next;
+                  });
+                }
+              }}
+              className={`mt-1.5 w-full h-9 px-3 rounded-md bg-slate-800 text-white text-sm ${
+                fieldErrors.category
+                  ? 'border border-red-500'
+                  : 'border border-slate-700'
+              }`}
             >
               <option value="">Select a category</option>
               <option value="music">Music</option>
@@ -297,6 +531,11 @@ export const CreateEvent: React.FC = () => {
               <option value="business">Business</option>
               <option value="conference">Conference</option>
             </select>
+            {fieldErrors.category && (
+              <p className="mt-1 text-sm text-red-400">
+                {fieldErrors.category}
+              </p>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -309,11 +548,12 @@ export const CreateEvent: React.FC = () => {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="border-2 border-dashed border-slate-700 rounded-lg p-12 text-center opacity-70">
-            <Upload className="w-12 h-12 text-slate-600 mx-auto mb-4" />
-            <p className="text-white mb-2">Image upload chưa nối vào API multipart</p>
-            <p className="text-sm text-slate-500">
-              Backend có middleware upload ảnh, nhưng form này hiện chưa gửi FormData
+          <div className="border-2 border-dashed border-slate-700 rounded-lg p-12 text-center opacity-90">
+            <Upload className="w-12 h-12 text-fuchsia-300 mx-auto mb-4" />
+            <p className="text-white mb-2">Image upload is not connected yet.</p>
+            <p className="text-sm text-slate-400">
+              The backend already supports image upload, but this form is not
+              sending FormData yet.
             </p>
           </div>
         </CardContent>
@@ -321,11 +561,12 @@ export const CreateEvent: React.FC = () => {
 
       <Card className="bg-slate-900 border-slate-800">
         <CardHeader>
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-4">
             <div>
               <CardTitle className="text-white">Ticket Tiers</CardTitle>
               <CardDescription className="text-slate-400">
-                Define different ticket types and pricing
+                Create at least one ticket tier. Add more tiers only if your
+                event has multiple ticket types.
               </CardDescription>
             </div>
 
@@ -334,22 +575,35 @@ export const CreateEvent: React.FC = () => {
               onClick={addTier}
               variant="outline"
               size="sm"
-              className="border-slate-700 hover:bg-slate-800 text-white"
+              className="border-slate-700 hover:bg-slate-800 text-white whitespace-nowrap"
             >
-              <Plus className="w-4 h-4 mr-2" />
-              Add Tier
+              <Plus className="w-4 h-4 mr-2 text-cyan-300" />
+              Add Another Tier
             </Button>
           </div>
         </CardHeader>
 
         <CardContent className="space-y-4">
+          {fieldErrors.ticketTiers && (
+            <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+              {fieldErrors.ticketTiers}
+            </div>
+          )}
+
           {ticketTiers.map((tier, index) => (
             <div
               key={index}
               className="p-4 rounded-lg bg-slate-800/50 border border-slate-700"
             >
               <div className="flex items-start justify-between mb-4">
-                <h4 className="text-white font-medium">Tier {index + 1}</h4>
+                <div>
+                  <h4 className="text-white font-medium">Tier {index + 1}</h4>
+                  {index === 0 && (
+                    <p className="text-xs text-slate-400 mt-1">
+                      This is your default ticket tier.
+                    </p>
+                  )}
+                </div>
 
                 {ticketTiers.length > 1 && (
                   <Button
@@ -357,29 +611,46 @@ export const CreateEvent: React.FC = () => {
                     onClick={() => removeTier(index)}
                     variant="ghost"
                     size="sm"
-                    className="text-red-400 hover:bg-red-900/20"
+                    className="text-red-300 hover:bg-red-900/20"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    <Trash2 className="w-4 h-4 text-red-300" />
                   </Button>
                 )}
               </div>
 
               <div className="grid md:grid-cols-3 gap-4">
                 <div>
-                  <Label htmlFor={`tier-name-${index}`} className="text-slate-300">
+                  <Label
+                    htmlFor={`tier-name-${index}`}
+                    className="text-slate-300"
+                  >
                     Tier Name
                   </Label>
                   <Input
                     id={`tier-name-${index}`}
-                    placeholder="e.g., VIP, General"
+                    placeholder="e.g. VIP, General"
                     value={tier.name}
-                    onChange={(e) => updateTier(index, 'name', e.target.value)}
-                    className="mt-1.5 bg-slate-800 border-slate-700 text-white"
+                    onChange={(e) =>
+                      updateTier(index, 'name', e.target.value)
+                    }
+                    className={`mt-1.5 bg-slate-800 text-white ${
+                      fieldErrors[`tier-${index}-name`]
+                        ? 'border-red-500 focus-visible:ring-red-500'
+                        : 'border-slate-700'
+                    }`}
                   />
+                  {fieldErrors[`tier-${index}-name`] && (
+                    <p className="mt-1 text-sm text-red-400">
+                      {fieldErrors[`tier-${index}-name`]}
+                    </p>
+                  )}
                 </div>
 
                 <div>
-                  <Label htmlFor={`tier-price-${index}`} className="text-slate-300">
+                  <Label
+                    htmlFor={`tier-price-${index}`}
+                    className="text-slate-300"
+                  >
                     Price (ETH)
                   </Label>
                   <Input
@@ -388,13 +659,27 @@ export const CreateEvent: React.FC = () => {
                     step="0.01"
                     placeholder="0.00"
                     value={tier.price}
-                    onChange={(e) => updateTier(index, 'price', e.target.value)}
-                    className="mt-1.5 bg-slate-800 border-slate-700 text-white"
+                    onChange={(e) =>
+                      updateTier(index, 'price', e.target.value)
+                    }
+                    className={`mt-1.5 bg-slate-800 text-white ${
+                      fieldErrors[`tier-${index}-price`]
+                        ? 'border-red-500 focus-visible:ring-red-500'
+                        : 'border-slate-700'
+                    }`}
                   />
+                  {fieldErrors[`tier-${index}-price`] && (
+                    <p className="mt-1 text-sm text-red-400">
+                      {fieldErrors[`tier-${index}-price`]}
+                    </p>
+                  )}
                 </div>
 
                 <div>
-                  <Label htmlFor={`tier-supply-${index}`} className="text-slate-300">
+                  <Label
+                    htmlFor={`tier-supply-${index}`}
+                    className="text-slate-300"
+                  >
                     Total Supply
                   </Label>
                   <Input
@@ -402,9 +687,20 @@ export const CreateEvent: React.FC = () => {
                     type="number"
                     placeholder="100"
                     value={tier.supply}
-                    onChange={(e) => updateTier(index, 'supply', e.target.value)}
-                    className="mt-1.5 bg-slate-800 border-slate-700 text-white"
+                    onChange={(e) =>
+                      updateTier(index, 'supply', e.target.value)
+                    }
+                    className={`mt-1.5 bg-slate-800 text-white ${
+                      fieldErrors[`tier-${index}-supply`]
+                        ? 'border-red-500 focus-visible:ring-red-500'
+                        : 'border-slate-700'
+                    }`}
                   />
+                  {fieldErrors[`tier-${index}-supply`] && (
+                    <p className="mt-1 text-sm text-red-400">
+                      {fieldErrors[`tier-${index}-supply`]}
+                    </p>
+                  )}
                 </div>
               </div>
             </div>
@@ -416,7 +712,7 @@ export const CreateEvent: React.FC = () => {
         <CardHeader>
           <CardTitle className="text-white">Investment Options</CardTitle>
           <CardDescription className="text-slate-400">
-            Funding info required by current backend create API
+            Optional funding configuration for the current event creation flow
           </CardDescription>
         </CardHeader>
 
@@ -426,8 +722,18 @@ export const CreateEvent: React.FC = () => {
               type="checkbox"
               id="enable-investment"
               checked={investmentEnabled}
-              onChange={(e) => setInvestmentEnabled(e.target.checked)}
-              className="w-4 h-4 rounded border-slate-700 bg-slate-800"
+              onChange={(e) => {
+                setInvestmentEnabled(e.target.checked);
+                if (!e.target.checked) {
+                  setFieldErrors((prev) => {
+                    const next = { ...prev };
+                    delete next.fundingGoal;
+                    delete next.fundingDeadline;
+                    return next;
+                  });
+                }
+              }}
+              className="w-4 h-4 rounded border-slate-700 bg-slate-800 accent-cyan-400"
             />
             <Label htmlFor="enable-investment" className="text-white">
               Enable event investment
@@ -442,11 +748,29 @@ export const CreateEvent: React.FC = () => {
               <Input
                 id="funding-goal"
                 value={fundingGoal}
-                onChange={(e) => setFundingGoal(e.target.value)}
+                onChange={(e) => {
+                  setFundingGoal(e.target.value);
+                  if (fieldErrors.fundingGoal) {
+                    setFieldErrors((prev) => {
+                      const next = { ...prev };
+                      delete next.fundingGoal;
+                      return next;
+                    });
+                  }
+                }}
                 placeholder="5000000000000000000"
-                className="mt-1.5 bg-slate-800 border-slate-700 text-white"
+                className={`mt-1.5 bg-slate-800 text-white ${
+                  fieldErrors.fundingGoal
+                    ? 'border-red-500 focus-visible:ring-red-500'
+                    : 'border-slate-700'
+                }`}
                 disabled={!investmentEnabled}
               />
+              {fieldErrors.fundingGoal && (
+                <p className="mt-1 text-sm text-red-400">
+                  {fieldErrors.fundingGoal}
+                </p>
+              )}
             </div>
 
             <div>
@@ -465,7 +789,8 @@ export const CreateEvent: React.FC = () => {
           </div>
 
           <p className="text-xs text-slate-500">
-            Hiện backend đang dùng số dạng string lớn, ví dụ wei.
+            The backend currently expects large numeric values as strings, for
+            example in wei.
           </p>
         </CardContent>
       </Card>
