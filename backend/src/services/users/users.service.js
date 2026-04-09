@@ -180,10 +180,27 @@ export async function getUserPortfolio(walletAddress, repos = {}) {
 export async function getUserShares(walletAddress, repos = {}) {
   const repository = repos.shareRepo || shareRepo;
 
-  return await repository.findShares(
+  const shares = await repository.findShares(
     { holder: walletAddress.toLowerCase() },
     { populate: "eventId" },
   );
+
+  return Array.isArray(shares.docs) ? shares.docs : shares;
+}
+
+export async function getUserShareById(walletAddress, shareId, repos = {}) {
+  const repository = repos.shareRepo || shareRepo;
+  const normalizedAddress = walletAddress.toLowerCase();
+
+  const share = await repository.findById(shareId, {
+    populate: "eventId",
+  });
+
+  if (!share || share.holder !== normalizedAddress) {
+    throw new NotFoundError("Investment not found");
+  }
+
+  return share;
 }
 
 /**
