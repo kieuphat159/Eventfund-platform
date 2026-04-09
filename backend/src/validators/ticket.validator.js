@@ -26,6 +26,27 @@ const useTicketSchema = Joi.object({
   eventId: objectId.optional()
 });
 
+const txHashSchema = Joi.string()
+  .pattern(/^0x([A-Fa-f0-9]{64})$/)
+  .message('must be a valid transaction hash');
+
+const purchaseIntentSchema = Joi.object({
+  eventId: objectId.optional(),
+  tokenId: Joi.string().min(1).optional()
+}).or('eventId', 'tokenId');
+
+const confirmPurchaseSchema = Joi.object({
+  txHash: txHashSchema.required(),
+  tokenId: Joi.string().min(1).optional(),
+  buyerWallet: ethereumAddress.optional()
+});
+
+const confirmUseTicketSchema = Joi.object({
+  txHash: txHashSchema.required(),
+  tokenId: Joi.string().min(1).optional(),
+  verifierWallet: ethereumAddress.optional()
+});
+
 // Schema for GET /tickets query parameters
 const queryTicketsSchema = Joi.object({
   eventId: objectId.optional(),
@@ -62,6 +83,9 @@ const userTicketsQuerySchema = Joi.object({
 export const ticketSchemas = {
   verifyTicket: verifyTicketSchema,
   useTicket: useTicketSchema,
+  purchaseIntent: purchaseIntentSchema,
+  confirmPurchase: confirmPurchaseSchema,
+  confirmUseTicket: confirmUseTicketSchema,
   queryTickets: queryTicketsSchema,
   tokenIdParams: tokenIdParamsSchema,
   walletAddressParams: walletAddressParamsSchema,

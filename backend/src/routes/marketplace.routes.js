@@ -248,6 +248,32 @@ router.get('/listings/:id', (req, res, next) => marketplaceController.getListing
  */
 router.post('/listings', authenticate, validate({ body: marketplaceSchemas.createListing }), (req, res, next) => marketplaceController.createListing(req, res, next));
 
+router.post(
+	'/listings/intent',
+	authenticate,
+	validate({ body: marketplaceSchemas.createListingIntent }),
+	(req, res, next) => marketplaceController.createListingIntent(req, res, next)
+);
+
+router.post(
+	'/listings/:id/buy-intent',
+	authenticate,
+	(req, res, next) => marketplaceController.createBuyListingIntent(req, res, next)
+);
+
+router.post(
+	'/listings/:id/cancel-intent',
+	authenticate,
+	(req, res, next) => marketplaceController.createCancelListingIntent(req, res, next)
+);
+
+router.post(
+	'/listings/confirm-sold',
+	authenticate,
+	validate({ body: marketplaceSchemas.confirmSoldTransaction }),
+	(req, res, next) => marketplaceController.confirmSoldTransaction(req, res, next)
+);
+
 /**
  * @swagger
  * /marketplace/listings/{id}:

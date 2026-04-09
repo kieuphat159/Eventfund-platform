@@ -46,6 +46,43 @@ class MarketplaceController {
     res.status(201).json({ success: true, data: listing });
   });
 
+  createListingIntent = asyncHandler(async (req, res) => {
+    const body = req.validated?.body || req.body;
+
+    const intent = await this.marketplaceService.createListingIntent(
+      body,
+      req.user.walletAddress
+    );
+
+    res.status(200).json({ success: true, data: intent });
+  });
+
+  createBuyListingIntent = asyncHandler(async (req, res) => {
+    const intent = await this.marketplaceService.createBuyListingIntent(
+      req.params.id,
+      req.user.walletAddress
+    );
+
+    res.status(200).json({ success: true, data: intent });
+  });
+
+  createCancelListingIntent = asyncHandler(async (req, res) => {
+    const intent = await this.marketplaceService.createCancelListingIntent(
+      req.params.id,
+      req.user.walletAddress
+    );
+
+    res.status(200).json({ success: true, data: intent });
+  });
+
+  confirmSoldTransaction = asyncHandler(async (req, res) => {
+    const body = req.validated?.body || req.body;
+
+    const result = await this.marketplaceService.confirmListingSoldTransaction(body);
+
+    res.status(200).json({ success: true, data: result });
+  });
+
   cancelListing = asyncHandler(async (req, res) => {
     // Giao hết việc ném lỗi 403, 404 cho Service. Controller chỉ việc nhận kết quả.
     const listing = await this.marketplaceService.cancelListing(req.params.id, req.user.walletAddress);
