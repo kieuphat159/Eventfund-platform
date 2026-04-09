@@ -177,8 +177,13 @@ export async function getAdminEvents(params?: {
 }
 
 export async function createEvent(payload: CreateEventPayload): Promise<EventItem | null> {
-  const response = await api.post<CreateEventResponse>('/events', payload);
-  return response.data || null;
+  try {
+    const response = await api.post<CreateEventResponse>('/events', payload);
+    return response.data || null;
+  } catch (error) {
+    console.error('createEvent failed:', error);
+    throw error;
+  }
 }
 
 export async function updateEvent(

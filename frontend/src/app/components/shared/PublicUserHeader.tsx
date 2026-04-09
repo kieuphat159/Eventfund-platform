@@ -106,17 +106,17 @@ export const PublicUserHeader: React.FC = () => {
                   <DropdownMenuSeparator className="bg-slate-700" />
                   <DropdownMenuItem
                     onClick={() => navigate('/account/profile')}
-                    className="cursor-pointer hover:bg-slate-800"
+                    className="cursor-pointer hover:bg-slate-800 text-slate-200 focus:bg-slate-800 focus:text-white"
                   >
-                    <User className="w-4 h-4 mr-2" />
-                    Profile
+                    <User className="w-4 h-4 mr-2 text-blue-400" />
+                    <span className="text-slate-100">Profile</span>
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     onClick={disconnectWallet}
-                    className="cursor-pointer hover:bg-slate-800 text-red-400"
+                    className="cursor-pointer hover:bg-slate-800 text-red-400 focus:bg-slate-800 focus:text-red-300"
                   >
-                    <LogOut className="w-4 h-4 mr-2" />
-                    Disconnect
+                    <LogOut className="w-4 h-4 mr-2 text-red-400" />
+                    <span className="text-red-400">Disconnect</span>
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
