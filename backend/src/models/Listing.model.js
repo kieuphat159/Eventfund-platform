@@ -13,7 +13,7 @@ const listingSchema = new mongoose.Schema({
   ticketId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Ticket",
-    // not required: may be unresolved if ticket not yet indexed at listing time
+    required: true,
   },
 
   tokenId: {
@@ -24,7 +24,7 @@ const listingSchema = new mongoose.Schema({
   eventId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Event",
-    // not required: resolved from ticket lookup; may be null if ticket not yet indexed
+    required: true,
   },
 
   seller: {
