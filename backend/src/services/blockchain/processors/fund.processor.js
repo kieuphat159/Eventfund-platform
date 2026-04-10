@@ -1,11 +1,3 @@
-import { ChainLog } from "../../../models/ChainLog.js";
-import Event from "../../../models/Event.model.js";
-import Contribution from "../../../models/Contribution.model.js";
-import Share from "../../../models/Share.model.js";
-import RevenueDistribution from "../../../models/RevenueDistribution.model.js";
-import RewardClaim from "../../../models/RewardClaim.model.js";
-import Penalty from "../../../models/Penalty.model.js";
-
 import { provider } from "../core/provider.js";
 import { getFund } from "../core/contracts/index.js";
 import {
@@ -21,6 +13,15 @@ import {
   readReorgPolicyFromEnv,
 } from "../sync/reorgPolicy.js";
 
+// ==================== REPOSITORIES ====================
+import eventRepo from "../../../repositories/event.repo.js";
+import contributionRepo from "../../../repositories/contribution.repo.js";
+import shareRepo from "../../../repositories/share.repo.js";
+import revenueDistributionRepo from "../../../repositories/revenueDistribution.repo.js";
+import rewardClaimRepo from "../../../repositories/rewardClaim.repo.js";
+import penaltyRepo from "../../../repositories/penalty.repo.js";
+import chainLogRepo from "../../../repositories/chainLog.repo.js";
+
 const CONTRACT_NAME = "Fund";
 const PROCESSOR_NAME = "FundProcessor";
 
@@ -29,7 +30,6 @@ const PROCESSOR_NAME = "FundProcessor";
 // -------------------------
 const toStringId = (v) =>
   v === undefined || v === null ? undefined : String(v);
-
 const toNumberSafe = (v) => {
   if (v === undefined || v === null) return 0;
   const n = Number(v);
@@ -40,620 +40,373 @@ const lowerAddress = (v) => (v ? String(v).toLowerCase() : undefined);
 
 function getEventStatusLabel(statusValue) {
   const map = {
-    0: "none",
+    0: "draft", // Changed from "none" to match Event schema enum
     1: "funding",
     2: "funded",
     3: "ticketing",
     4: "completed",
     5: "cancelled",
   };
-
   const n = Number(statusValue);
-  return map[n] ?? `unknown_${statusValue}`;
+  const label = map[n];
+  // Fallback to "failed" instead of "unknown_X" to match enum
+  return label ?? "failed";
 }
 
-/**
- * Rebuild lại funding + shares từ bảng Contribution
- * Chỉ tính những contribution confirmed chưa bị refunded
- */
+// -------------------------
+// REBUILD FUND STATE
+// -------------------------
 async function rebuildFundState(eventObjectId) {
-  const contributions = await Contribution.find({
-    eventId: eventObjectId,
-    status: "confirmed",
-  }).lean();
-
-  const totalFunding = contributions.reduce(
-    (sum, c) => sum + toNumberSafe(c.amount),
-    0,
-  );
-
-  await Event.updateOne(
-    { _id: eventObjectId },
-    { $set: { currentFunding: totalFunding } },
-  );
-
-  const holderMap = {};
-
-  for (const c of contributions) {
-    const addr = lowerAddress(c.contributor);
-    if (!addr) continue;
-
-    if (!holderMap[addr]) {
-      holderMap[addr] = {
-        contributionAmount: 0,
-      };
-    }
-
-    holderMap[addr].contributionAmount += toNumberSafe(c.amount);
-  }
-
-  const shareOps = Object.entries(holderMap).map(([holder, data]) => {
-    const sharePercentage =
-      totalFunding > 0 ? (data.contributionAmount / totalFunding) * 100 : 0;
-
-    return {
-      updateOne: {
-        filter: { eventId: eventObjectId, holder },
-        update: {
-          $set: {
-            contributionAmount: data.contributionAmount,
-            sharePercentage,
-          },
-          $setOnInsert: {
-            claimedReward: 0,
-          },
-        },
-        upsert: true,
-      },
-    };
-  });
-
-  if (shareOps.length > 0) {
-    await Share.bulkWrite(shareOps);
-  }
+  await contributionRepo.rebuildFundState(eventObjectId);
 }
 
-/**
- * Tìm Event theo contractEventId.
- * Nếu chưa có thì trả null.
- */
-async function findReferencedEvent(contractEventId) {
-  if (!contractEventId) return null;
-
-  return Event.findOne({ contractEventId })
-    .select("_id organizer contractEventId")
-    .lean();
-}
-
-/**
- * Xử lý EventCreated
- * Tạo mới hoặc cập nhật Event local DB
- */
+// -------------------------
+// HANDLE FUNCTIONS (Idempotent)
+// -------------------------
 async function handleEventCreated(log) {
   const { args, transactionHash, blockNumber } = log;
-
   const contractEventId = toStringId(args.eventId);
   const organizer = lowerAddress(args.organizer);
 
-  await Event.updateOne(
-    { contractEventId },
-    {
-      $set: {
-        contractEventId,
-        organizer,
-        fundingGoal: toNumberSafe(args.fundingGoal),
-        fundingDeadline: toNumberSafe(args.fundingDeadline),
-        minStakeRequired: toNumberSafe(args.minStakeRequired),
-        organizerShareBps: toNumberSafe(args.organizerShareBps),
-        ticketPrice: toNumberSafe(args.ticketPrice),
-        maxTickets: toNumberSafe(args.maxTickets),
-        usedThreshold: toNumberSafe(args.usedThreshold),
-        organizerStakeLocked: toNumberSafe(args.stakeAmount),
-        currentFunding: 0,
-        totalRevenue: 0,
-        refundedAmount: 0,
-        status: "funding",
-        escrowStatus: "holding",
-        createdByTxHash: transactionHash?.toLowerCase(),
-        createdBlockNumber: blockNumber,
-      },
-      $setOnInsert: {
-        createdAt: new Date(),
-      },
-    },
-    { upsert: true },
-  );
+  await eventRepo.upsertByContractEventId(contractEventId, {
+    organizer,
+    fundingGoal: toStringId(args.fundingGoal),         // String in schema
+    fundingDeadline: toNumberSafe(args.fundingDeadline) > 0
+      ? new Date(toNumberSafe(args.fundingDeadline) * 1000)
+      : undefined,                                      // Date in schema, convert from unix
+    minStakeRequired: toStringId(args.minStakeRequired), // String in schema
+    organizerShareBps: toNumberSafe(args.organizerShareBps),
+    ticketPrice: toNumberSafe(args.ticketPrice),
+    maxTickets: toNumberSafe(args.maxTickets),
+    usedThreshold: toNumberSafe(args.usedThreshold),
+    organizerStake: toStringId(args.stakeAmount), // use organizerStake (schema field)
+    status: "funding",
+    escrowStatus: "holding",
+    // createdByTxHash and createdBlockNumber omitted: traceable via ChainLog
+  });
 
-  // stake ban đầu của organizer cũng lưu vào Contribution cho dễ rebuild
   if (toNumberSafe(args.stakeAmount) > 0) {
-    const eventDoc = await findReferencedEvent(contractEventId);
-    if (!eventDoc) return;
-
-    await Contribution.updateOne(
-      {
-        txHash: transactionHash.toLowerCase(),
-        type: "organizer_stake",
-      },
-      {
-        $set: {
-          eventId: eventDoc._id,
-          contributor: organizer,
-          amount: toNumberSafe(args.stakeAmount),
-          type: "organizer_stake",
-          status: "confirmed",
-          contractEventId,
-          txHash: transactionHash.toLowerCase(),
-          blockNumber,
-          timestamp: new Date(),
-        },
-      },
-      { upsert: true },
-    );
+    await contributionRepo.upsertOrganizerStake({
+      txHash: transactionHash.toLowerCase(),
+      eventContractId: contractEventId,
+      organizer,
+      amount: toNumberSafe(args.stakeAmount),
+      blockNumber,
+    });
   }
 }
 
-/**
- * Xử lý contribution của donator
- */
 async function handleContributionMade(log, eventDoc) {
   const { args, transactionHash, blockNumber } = log;
 
-  const contributor = lowerAddress(args.donator);
-  const amount = toNumberSafe(args.amount);
-
-  await Contribution.updateOne(
-    {
-      txHash: transactionHash.toLowerCase(),
-      type: "donator_contribution",
-    },
-    {
-      $set: {
-        eventId: eventDoc._id,
-        contributor,
-        amount,
-        type: "donator_contribution",
-        status: "confirmed",
-        contractEventId: eventDoc.contractEventId,
-        txHash: transactionHash.toLowerCase(),
-        blockNumber,
-        timestamp: new Date(),
-      },
-    },
-    { upsert: true },
-  );
+  await contributionRepo.upsertDonatorContribution({
+    txHash: transactionHash.toLowerCase(),
+    eventId: eventDoc._id,
+    contributor: lowerAddress(args.donator),
+    amount: toNumberSafe(args.amount),
+    blockNumber,
+  });
 
   await rebuildFundState(eventDoc._id);
 }
 
-/**
- * Xử lý SharesIssued
- * Có thể dùng để cập nhật Share ngay nếu muốn bám theo on-chain shares
- */
 async function handleSharesIssued(log, eventDoc) {
   const { args } = log;
-
   const holder = lowerAddress(args.donator);
   const sharesMinted = toNumberSafe(args.sharesMinted);
 
-  await Share.updateOne(
-    { eventId: eventDoc._id, holder },
-    {
-      $inc: {
-        mintedShares: sharesMinted,
-      },
-      $setOnInsert: {
-        claimedReward: 0,
-      },
-    },
-    { upsert: true },
-  );
-
+  // mintedShares not incremented here; rebuildFundState is the source of truth
+  await shareRepo.upsertSharesIssued(eventDoc._id, holder, sharesMinted);
   await rebuildFundState(eventDoc._id);
 }
 
 async function handleFundingSuccessful(eventDoc) {
-  await Event.updateOne(
-    { _id: eventDoc._id },
-    {
-      $set: {
-        status: "funded",
-      },
-    },
-  );
+  await eventRepo.updateFundingStatus(eventDoc._id, { $set: { status: "funded" } });
 }
 
 async function handleFundingFinalized(log, eventDoc) {
-  const { args } = log;
-
-  await Event.updateOne(
-    { _id: eventDoc._id },
-    {
-      $set: {
-        status: getEventStatusLabel(args.statusAfterFinalize),
-        sharesFinalized: true,
-        totalShares: toNumberSafe(args.totalShares),
-        fundingFinalizedAt: new Date(),
-      },
+  await eventRepo.updateById(eventDoc._id, {
+    $set: {
+      status: getEventStatusLabel(log.args.statusAfterFinalize),
+      // sharesFinalized omitted: derivable from status/timeline
+      // totalShares omitted: query from Share collection
+      fundingFinalizedAt: new Date(),
     },
-  );
+  });
 }
 
 async function handleTicketingStarted(log, eventDoc) {
-  const { args } = log;
-
-  await Event.updateOne(
-    { _id: eventDoc._id },
-    {
-      $set: {
-        status: "ticketing",
-        totalMinted: toNumberSafe(args.mintedQty),
-        ticketType: toNumberSafe(args.ticketType),
-        ticketingStartedAt: new Date(),
-      },
+  await eventRepo.updateById(eventDoc._id, {
+    $set: {
+      status: "ticketing",
+      // totalMinted omitted: use TicketStats.totalMinted
+      // ticketType omitted: tied to ticketTiers/Ticket, not Event
+      ticketingStartedAt: new Date(),
     },
-  );
+  });
 }
 
 async function handleCompleted(log, eventDoc) {
   const { args } = log;
-
-  await Event.updateOne(
-    { _id: eventDoc._id },
-    {
-      $set: {
-        status: "completed",
-        usedTickets: toNumberSafe(args.usedTickets),
-        completedAt: new Date(),
-      },
+  await eventRepo.updateById(eventDoc._id, {
+    $set: {
+      status: "completed",
+      totalTicketsUsed: toNumberSafe(args.usedTickets), // map to schema field
+      completedAt: new Date(),
     },
-  );
+  });
 }
 
 async function handleRevenueReleased(log, eventDoc) {
   const { args, transactionHash } = log;
 
-  const totalRevenue = toNumberSafe(args.totalRevenue);
-  const platformFee = toNumberSafe(args.platformFee);
-  const organizerShare = toNumberSafe(args.organizerShare);
-  const donatorPool = toNumberSafe(args.donatorPool);
-  const newAccRewardPerShare = toNumberSafe(args.newAccRewardPerShare);
+  await revenueDistributionRepo.upsertRevenueDistribution({
+    txHash: transactionHash.toLowerCase(),
+    eventId: eventDoc._id,
+    totalRevenue: toNumberSafe(args.totalRevenue),
+    platformFee: toNumberSafe(args.platformFee),
+    platformFeePercentage: toNumberSafe(args.totalRevenue) > 0
+      ? (toNumberSafe(args.platformFee) / toNumberSafe(args.totalRevenue)) * 100
+      : 0,
+    organizerShare: toNumberSafe(args.organizerShare),
+    organizerSharePercentage: toNumberSafe(args.totalRevenue) > 0
+      ? (toNumberSafe(args.organizerShare) / toNumberSafe(args.totalRevenue)) * 100
+      : 0,
+    donatorPool: toNumberSafe(args.donatorPool),
+    accRewardPerShare: toNumberSafe(args.newAccRewardPerShare),
+    status: "completed",
+    triggerType: "manual", // was "manual_release" - corrected to match enum
+  });
 
-  await RevenueDistribution.updateOne(
-    { txHash: transactionHash.toLowerCase() },
-    {
-      $set: {
-        eventId: eventDoc._id,
-        totalRevenue,
-        platformFee,
-        platformFeePercentage:
-          totalRevenue > 0 ? (platformFee / totalRevenue) * 100 : 0,
-        organizerShare,
-        organizerSharePercentage:
-          totalRevenue > 0 ? (organizerShare / totalRevenue) * 100 : 0,
-        donatorPool,
-        accRewardPerShare: newAccRewardPerShare,
-        status: "completed",
-        txHash: transactionHash.toLowerCase(),
-        triggeredAt: new Date(),
-        completedAt: new Date(),
-        triggerType: "manual_release",
-      },
+  await eventRepo.updateById(eventDoc._id, {
+    $set: {
+      status: "completed",
+      escrowStatus: "released",
+      totalRevenue: toStringId(args.totalRevenue),
+      // platformFee, organizerShare, donatorPool omitted: stored in RevenueDistribution
+      // revenueReleased boolean omitted: derivable from escrowStatus = "released"
+      revenueDistributedAt: new Date(),
     },
-    { upsert: true },
-  );
-
-  await Event.updateOne(
-    { _id: eventDoc._id },
-    {
-      $set: {
-        status: "completed",
-        escrowStatus: "released",
-        totalRevenue,
-        platformFee,
-        organizerShare,
-        donatorPool,
-        revenueReleased: true,
-        revenueDistributedAt: new Date(),
-      },
-    },
-  );
+  });
 }
 
 async function handleRewardClaimed(log, eventDoc) {
   const { args, transactionHash } = log;
-
   const claimer = lowerAddress(args.donator);
-  const amount = toNumberSafe(args.amount);
 
-  await RewardClaim.updateOne(
-    { txHash: transactionHash.toLowerCase() },
-    {
-      $set: {
-        eventId: eventDoc._id,
-        claimer,
-        rewardAmount: amount,
-        status: "confirmed",
-        txHash: transactionHash.toLowerCase(),
-        claimedAt: new Date(),
-      },
-    },
-    { upsert: true },
-  );
+  // Resolve distributionId: find latest completed distribution for this event
+  const distribution = await revenueDistributionRepo.findLatestByEventId(eventDoc._id);
 
-  await Share.updateOne(
-    { eventId: eventDoc._id, holder: claimer },
-    { $inc: { claimedReward: amount } },
+  // Resolve sharePercentage from Share record
+  const shareDoc = await shareRepo.findByEventAndHolder(eventDoc._id, claimer);
+  const sharePercentage = shareDoc?.sharePercentage ?? 0;
+
+  await rewardClaimRepo.upsertRewardClaim({
+    txHash: transactionHash.toLowerCase(),
+    eventId: eventDoc._id,
+    distributionId: distribution?._id,
+    claimer,
+    sharePercentage,
+    rewardAmount: toNumberSafe(args.amount),
+    status: "confirmed",
+  });
+
+  await shareRepo.incrementClaimedReward(
+    eventDoc._id,
+    claimer,
+    toNumberSafe(args.amount),
+    transactionHash
   );
 }
 
 async function handleRefundsEnabled(log, eventDoc) {
   const { args } = log;
-
-  await Event.updateOne(
-    { _id: eventDoc._id },
-    {
-      $set: {
-        escrowStatus: "refund_enabled",
-        refundsEnabled: true,
-        refundPool: toNumberSafe(args.refundPoolAmount),
-        refundEnabledAt: new Date(),
-      },
+  await eventRepo.updateById(eventDoc._id, {
+    $set: {
+      escrowStatus: "refund_enabled",
+      // refundsEnabled boolean omitted: derivable from escrowStatus
+      refundPool: toNumberSafe(args.refundPoolAmount),
+      refundEnabledAt: new Date(),
     },
-  );
+  });
 }
 
 async function handleTicketRefundPaid(log, eventDoc) {
-  const { args } = log;
+  const { args, transactionHash } = log;
+  const txHash = transactionHash.toLowerCase();
 
-  const amount = toNumberSafe(args.amount);
+  if (await eventRepo.isTxHashProcessed(eventDoc._id, txHash, "refundedAmount")) return;
 
-  await Event.updateOne(
-    { _id: eventDoc._id },
-    {
-      $inc: {
-        refundedAmount: amount,
-      },
-      $set: {
-        escrowStatus: "refunding",
-        lastRefundedAt: new Date(),
-      },
+  await eventRepo.updateById(eventDoc._id, {
+    $inc: { refundedAmount: toNumberSafe(args.amount) },
+    $set: {
+      escrowStatus: "refunding",
+      lastRefundedAt: new Date(),
     },
-  );
+  });
+
+  await eventRepo.markTxHashProcessed(eventDoc._id, txHash, "refundedAmount");
 }
 
 async function handleRefundPoolDeposited(log, eventDoc) {
-  const { args } = log;
+  const { args, transactionHash } = log;
+  const txHash = transactionHash.toLowerCase();
 
-  await Event.updateOne(
-    { _id: eventDoc._id },
-    {
-      $set: {
-        refundPool: toNumberSafe(args.newRefundPool),
-        escrowStatus: "refund_pool_funded",
-        lastRefundPoolDepositAt: new Date(),
-      },
-      $inc: {
-        extraRefundPoolDeposited: toNumberSafe(args.amount),
-      },
+  if (await eventRepo.isTxHashProcessed(eventDoc._id, txHash, "extraRefundPoolDeposited")) return;
+
+  await eventRepo.updateById(eventDoc._id, {
+    $set: {
+      refundPool: toNumberSafe(args.newRefundPool),
+      escrowStatus: "refund_pool_funded",
+      lastRefundPoolDepositAt: new Date(),
     },
-  );
+    $inc: {
+      extraRefundPoolDeposited: toNumberSafe(args.amount),
+    },
+  });
+
+  await eventRepo.markTxHashProcessed(eventDoc._id, txHash, "extraRefundPoolDeposited");
 }
 
 async function handlePenaltyApplied(log, eventDoc) {
   const { args, transactionHash } = log;
+  const txHash = transactionHash.toLowerCase();
 
-  const penaltyAmount = toNumberSafe(args.amount);
-  const penaltyBps = toNumberSafe(args.penaltyBps);
+  // Map reason to valid enum values; fallback to "threshold_not_met"
+  const validReasons = ["cancelled", "fraud", "threshold_not_met"];
+  const reason = validReasons.includes(args.reason) ? args.reason : "threshold_not_met";
 
-  await Penalty.updateOne(
-    { txHash: transactionHash.toLowerCase() },
-    {
-      $set: {
-        eventId: eventDoc._id,
-        organizer: lowerAddress(eventDoc.organizer),
-        penaltyAmount,
-        penaltyPercentage: penaltyBps / 100,
-        penaltyBps,
-        reason: args.reason ?? "unknown",
-        txHash: transactionHash.toLowerCase(),
-        status: "processed",
-        processedAt: new Date(),
-      },
-    },
-    { upsert: true },
-  );
+  await penaltyRepo.upsertPenalty({
+    txHash,
+    eventId: eventDoc._id,
+    organizer: lowerAddress(eventDoc.organizer),
+    stakeAmount: toNumberSafe(eventDoc.organizerStake),
+    penaltyAmount: toNumberSafe(args.amount),
+    penaltyPercentage: toNumberSafe(args.penaltyBps) / 100,
+    reason,
+  });
 
-  await Event.updateOne(
-    { _id: eventDoc._id },
-    {
-      $inc: {
-        totalPenaltyAmount: penaltyAmount,
-      },
-      $set: {
-        lastPenaltyAt: new Date(),
-      },
-    },
-  );
+  if (await eventRepo.isTxHashProcessed(eventDoc._id, txHash, "totalPenaltyAmount")) return;
+
+  await eventRepo.updateById(eventDoc._id, {
+    $inc: { totalPenaltyAmount: toNumberSafe(args.amount) },
+    $set: { lastPenaltyAt: new Date() },
+  });
+
+  await eventRepo.markTxHashProcessed(eventDoc._id, txHash, "totalPenaltyAmount");
 }
 
 async function handleTicketRevenueDeposited(log, eventDoc) {
-  const { args } = log;
+  const { args, transactionHash } = log;
+  const txHash = transactionHash.toLowerCase();
 
-  await Event.updateOne(
-    { _id: eventDoc._id },
-    {
-      $set: {
-        escrowStatus: "holding_revenue",
-        escrowedRevenue: toNumberSafe(args.newEscrowedRevenue),
-        lastTicketRevenueAt: new Date(),
-      },
-      $inc: {
-        ticketRevenueDeposited: toNumberSafe(args.amount),
-      },
+  if (await eventRepo.isTxHashProcessed(eventDoc._id, txHash, "ticketRevenueDeposited")) return;
+
+  await eventRepo.updateById(eventDoc._id, {
+    $set: {
+      escrowStatus: "holding_revenue",
+      escrowedRevenue: toNumberSafe(args.newEscrowedRevenue),
+      lastTicketRevenueAt: new Date(),
     },
-  );
+    $inc: { ticketRevenueDeposited: toNumberSafe(args.amount) },
+  });
+
+  await eventRepo.markTxHashProcessed(eventDoc._id, txHash, "ticketRevenueDeposited");
 }
 
 async function handleRoyaltyDeposited(log, eventDoc) {
-  const { args } = log;
+  const { args, transactionHash } = log;
+  const txHash = transactionHash.toLowerCase();
 
-  await Event.updateOne(
-    { _id: eventDoc._id },
-    {
-      $set: {
-        escrowStatus: "holding_revenue",
-        escrowedRevenue: toNumberSafe(args.newEscrowedRevenue),
-        lastRoyaltyRevenueAt: new Date(),
-      },
-      $inc: {
-        royaltyRevenueDeposited: toNumberSafe(args.amount),
-      },
+  if (await eventRepo.isTxHashProcessed(eventDoc._id, txHash, "royaltyRevenueDeposited")) return;
+
+  await eventRepo.updateById(eventDoc._id, {
+    $set: {
+      escrowStatus: "holding_revenue",
+      escrowedRevenue: toNumberSafe(args.newEscrowedRevenue),
+      lastRoyaltyRevenueAt: new Date(),
     },
-  );
+    $inc: { royaltyRevenueDeposited: toNumberSafe(args.amount) },
+  });
+
+  await eventRepo.markTxHashProcessed(eventDoc._id, txHash, "royaltyRevenueDeposited");
 }
 
 async function handleContributionRefunded(log, eventDoc) {
-  const { args } = log;
-
+  const { args, transactionHash } = log;
   const contributor = lowerAddress(args.donator);
   const amount = toNumberSafe(args.amount);
 
-  await Contribution.updateMany(
-    {
-      eventId: eventDoc._id,
-      contributor,
-      status: "confirmed",
-    },
-    {
-      $set: {
-        status: "refunded",
-        refundedAt: new Date(),
-      },
-    },
-  );
+  await contributionRepo.markContributionsAsRefunded(eventDoc._id, contributor);
 
-  await Event.updateOne(
-    { _id: eventDoc._id },
-    {
-      $inc: {
-        refundedAmount: amount,
-      },
-      $set: {
-        status: "cancelled",
-        escrowStatus: "refunded",
-        lastContributionRefundAt: new Date(),
-      },
+  const txHash = transactionHash.toLowerCase();
+  const alreadyProcessed = await eventRepo.isTxHashProcessed(eventDoc._id, txHash, "refundedAmount_contribution");
+
+  await eventRepo.updateById(eventDoc._id, {
+    ...(alreadyProcessed ? {} : { $inc: { refundedAmount: amount } }),
+    $set: {
+      status: "cancelled",
+      escrowStatus: "refunded",
+      lastContributionRefundAt: new Date(),
     },
-  );
+  });
+
+  if (!alreadyProcessed) {
+    await eventRepo.markTxHashProcessed(eventDoc._id, txHash, "refundedAmount_contribution");
+  }
 
   await rebuildFundState(eventDoc._id);
 }
 
 async function handleStakeWithdrawn(log, eventDoc) {
   const { args } = log;
-
-  await Event.updateOne(
-    { _id: eventDoc._id },
-    {
-      $set: {
-        organizerStakeWithdrawn: toNumberSafe(args.amount),
-        stakeWithdrawnAt: new Date(),
-      },
+  await eventRepo.updateById(eventDoc._id, {
+    $set: {
+      organizerStakeWithdrawn: toNumberSafe(args.amount),
+      stakeWithdrawnAt: new Date(),
     },
-  );
+  });
 }
 
 // -------------------------
-// Main log processor
+// MAIN PROCESSOR
 // -------------------------
 async function processFundLog(log) {
   const { eventName, args } = log;
-
   if (!eventName) return;
 
-  // EventCreated phải xử lý trước vì lúc này event local có thể chưa tồn tại
   if (eventName === "EventCreated") {
     await handleEventCreated(log);
     return;
   }
 
   const contractEventId = toStringId(args?.eventId);
-  const eventDoc = await findReferencedEvent(contractEventId);
-
+  const eventDoc = await eventRepo.findByContractEventId(contractEventId);
   if (!eventDoc) return;
 
   switch (eventName) {
-    case "ContributionMade":
-      await handleContributionMade(log, eventDoc);
-      break;
-
-    case "SharesIssued":
-      await handleSharesIssued(log, eventDoc);
-      break;
-
-    case "FundingSuccessful":
-      await handleFundingSuccessful(eventDoc);
-      break;
-
-    case "FundingFinalized":
-      await handleFundingFinalized(log, eventDoc);
-      break;
-
-    case "TicketingStarted":
-      await handleTicketingStarted(log, eventDoc);
-      break;
-
-    case "Completed":
-      await handleCompleted(log, eventDoc);
-      break;
-
-    case "RevenueReleased":
-      await handleRevenueReleased(log, eventDoc);
-      break;
-
-    case "RewardClaimed":
-      await handleRewardClaimed(log, eventDoc);
-      break;
-
-    case "RefundsEnabled":
-      await handleRefundsEnabled(log, eventDoc);
-      break;
-
-    case "TicketRefundPaid":
-      await handleTicketRefundPaid(log, eventDoc);
-      break;
-
-    case "RefundPoolDeposited":
-      await handleRefundPoolDeposited(log, eventDoc);
-      break;
-
-    case "PenaltyApplied":
-      await handlePenaltyApplied(log, eventDoc);
-      break;
-
-    case "TicketRevenueDeposited":
-      await handleTicketRevenueDeposited(log, eventDoc);
-      break;
-
-    case "RoyaltyDeposited":
-      await handleRoyaltyDeposited(log, eventDoc);
-      break;
-
-    case "ContributionRefunded":
-      await handleContributionRefunded(log, eventDoc);
-      break;
-
-    case "StakeWithdrawn":
-      await handleStakeWithdrawn(log, eventDoc);
-      break;
-
-    default:
-      break;
+    case "ContributionMade": await handleContributionMade(log, eventDoc); break;
+    case "SharesIssued": await handleSharesIssued(log, eventDoc); break;
+    case "FundingSuccessful": await handleFundingSuccessful(eventDoc); break;
+    case "FundingFinalized": await handleFundingFinalized(log, eventDoc); break;
+    case "TicketingStarted": await handleTicketingStarted(log, eventDoc); break;
+    case "Completed": await handleCompleted(log, eventDoc); break;
+    case "RevenueReleased": await handleRevenueReleased(log, eventDoc); break;
+    case "RewardClaimed": await handleRewardClaimed(log, eventDoc); break;
+    case "RefundsEnabled": await handleRefundsEnabled(log, eventDoc); break;
+    case "TicketRefundPaid": await handleTicketRefundPaid(log, eventDoc); break;
+    case "RefundPoolDeposited": await handleRefundPoolDeposited(log, eventDoc); break;
+    case "PenaltyApplied": await handlePenaltyApplied(log, eventDoc); break;
+    case "TicketRevenueDeposited": await handleTicketRevenueDeposited(log, eventDoc); break;
+    case "RoyaltyDeposited": await handleRoyaltyDeposited(log, eventDoc); break;
+    case "ContributionRefunded": await handleContributionRefunded(log, eventDoc); break;
+    case "StakeWithdrawn": await handleStakeWithdrawn(log, eventDoc); break;
+    default: break;
   }
 }
 
 // -------------------------
-// Main processor loop once
+// MAIN LOOP (giữ nguyên)
 // -------------------------
 export async function processFundLogsOnce() {
   const fund = getFund();
@@ -693,13 +446,16 @@ export async function processFundLogsOnce() {
   while (currentFrom <= target) {
     const currentTo = Math.min(target, currentFrom + chunkSize - 1);
 
-    const logs = await ChainLog.find({
-      contractName: CONTRACT_NAME,
-      contractAddress,
-      blockNumber: { $gte: currentFrom, $lte: currentTo },
-    })
-      .sort({ blockNumber: 1, transactionIndex: 1, logIndex: 1 })
-      .lean();
+  const logs = await chainLogRepo.findLogs(
+  {
+    contractName: CONTRACT_NAME,
+    contractAddress,
+    blockNumber: { $gte: currentFrom, $lte: currentTo },
+  },
+  {
+    sort: { blockNumber: 1, transactionIndex: 1, logIndex: 1 },
+  }
+);
 
     for (const log of logs) {
       await processFundLog(log);
@@ -724,19 +480,14 @@ export async function processFundLogsOnce() {
   };
 }
 
-// -------------------------
-// Infinite loop runner
-// -------------------------
 export async function runFundProcessorLoop() {
   const intervalMs = getNumberEnv("CHAIN_PROCESS_INTERVAL_MS", 10_000);
 
-  // eslint-disable-next-line no-constant-condition
   while (true) {
     try {
       await processFundLogsOnce();
     } catch (err) {
       await markError(PROCESSOR_NAME, err);
-      // eslint-disable-next-line no-console
       console.error("Fund processor error:", err);
     }
 
