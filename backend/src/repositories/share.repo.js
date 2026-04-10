@@ -147,34 +147,58 @@ export async function findByEvent(eventId, options = {}, models = {}) {
 export async function findByEventAndHolder(eventId, holderAddress, models = {}) {
   const Share = models.Share || DefaultShare;
 
-  // Normalize wallet address to lowercase
   const normalizedAddress = holderAddress.toLowerCase();
 
   const share = await Share.findOne({
     eventId,
-    holder: normalizedAddress
-  });
+    holder: normalizedAddress,
+  }).lean();
 
-  return share ? share.toObject() : null;
+  return share ?? null;
 }
 
 /**
- * Update share rewards
- * @param {string} shareId - Share ID
- * @param {Object} rewardData - Reward data (claimedReward, pendingReward)
- * @param {Object} models - Injected models (optional)
- * @returns {Promise<Object|null>} Updated share as plain object or null
+ * Tăng claimedReward cho một Share (theo eventId + holder) — idempotent theo txHash
  */
-export async function updateRewards(shareId, rewardData, models = {}) {
+export async function incrementClaimedReward(eventId, holder, amount, txHash, models = {}) {
   const Share = models.Share || DefaultShare;
 
-  const share = await Share.findByIdAndUpdate(
-    shareId,
-    rewardData,
-    { new: true, runValidators: true }
-  );
+  const normalizedTxHash = txHash?.toLowerCase();
 
-  return share ? share.toObject() : null;
+  // Check xem txHash nay da duoc xu ly chua
+  const existing = await Share.findOne({
+    eventId,
+    holder: holder.toLowerCase(),
+    processedRewardTxHashes: normalizedTxHash,
+  }).lean();
+
+  if (existing) return; // da xu ly, skip
+
+  await Share.updateOne(
+    { eventId, holder: holder.toLowerCase() },
+    {
+      $inc: { claimedReward: amount },
+      $addToSet: { processedRewardTxHashes: normalizedTxHash },
+    },
+    { upsert: true }
+  );
+}
+
+/**
+ * Update general rewards (nếu sau này cần update nhiều field)
+ * Giữ lại để tương thích cũ
+ */
+export async function updateRewards(eventId, holder, updateData, models = {}) {
+  const Share = models.Share || DefaultShare;
+
+  return await Share.updateOne(
+    {
+      eventId,
+      holder: holder.toLowerCase(),
+    },
+    updateData,
+    { upsert: true, new: true, runValidators: true }
+  );
 }
 
 /**
@@ -228,3 +252,27 @@ export async function deleteById(shareId, models = {}) {
   const result = await Share.findByIdAndDelete(shareId);
   return result !== null;
 }
+
+/**
+ * Upsert Shares Issued (idempotent)
+ * Dùng khi xử lý event SharesIssued
+ * sharesMinted is recorded for reference but Share percentage is rebuilt via rebuildFundState
+ */
+export async function upsertSharesIssued(eventId, holder, sharesMinted, models = {}) {
+  const Share = models.Share || DefaultShare;
+
+  await Share.updateOne(
+    { eventId, holder: holder.toLowerCase() },
+    {
+      // mintedShares removed: not in Share schema; rebuildFundState is source of truth
+      $setOnInsert: {
+        claimedReward: 0,
+        contributionAmount: 0,
+        sharePercentage: 0,
+      },
+    },
+    { upsert: true }
+  );
+}
+
+export default { createShare, findById, findShares, findByHolder, findByEvent, findByEventAndHolder, incrementClaimedReward, updateRewards, countShares, getTotalContributionByEvent, deleteById, upsertSharesIssued };
