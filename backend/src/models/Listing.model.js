@@ -2,10 +2,18 @@ import mongoose from "mongoose";
 import mongoosePaginate from "mongoose-paginate-v2";
 
 const listingSchema = new mongoose.Schema({
+  // On-chain listing ID (from smart contract)
+  contractListingId: {
+    type: String,
+    index: true,
+    unique: true,
+    sparse: true,
+  },
+
   ticketId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Ticket",
-    required: true,
+    // not required: may be unresolved if ticket not yet indexed at listing time
   },
 
   tokenId: {
@@ -16,7 +24,7 @@ const listingSchema = new mongoose.Schema({
   eventId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Event",
-    required: true,
+    // not required: resolved from ticket lookup; may be null if ticket not yet indexed
   },
 
   seller: {
