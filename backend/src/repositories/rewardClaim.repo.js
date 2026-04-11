@@ -318,4 +318,12 @@ export async function upsertRewardClaim(data, models = {}) {
   ).lean();
 }
 
-export default { createClaim, findById, findClaims, findRewards, findByClaimer, findByEvent, findByDistribution, updateStatus, countClaims, getTotalRewardsByClaimer, deleteById, upsertRewardClaim };
+/**
+ * Xoa RewardClaim theo txHashes (dung khi reorg)
+ */
+export async function deleteByTxHashes(txHashes, models = {}) {
+  const RewardClaim = models.RewardClaim || DefaultRewardClaim;
+  return await RewardClaim.deleteMany({ txHash: { $in: txHashes } });
+}
+
+export default { createClaim, findById, findClaims, findRewards, findByClaimer, findByEvent, findByDistribution, updateStatus, countClaims, getTotalRewardsByClaimer, deleteById, upsertRewardClaim, deleteByTxHashes };

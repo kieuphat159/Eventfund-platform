@@ -247,6 +247,13 @@ export async function upsertListingCreated(event, models = {}) {
         listedAt: new Date(),
         txHash: event.transactionHash,
       },
+      // Clear sale fields khi re-process ListingCreated (reorg rollback)
+      $unset: {
+        soldTo: "",
+        soldAt: "",
+        soldTxHash: "",
+        buyer: "",
+      },
       $setOnInsert: {
         createdAt: new Date(),
       },
@@ -296,4 +303,12 @@ export async function updateListingCancelled(contractListingId, models = {}) {
   );
 }
 
-export default { createListing, findById, findListings, findBySeller, updateStatus, deleteById, getMarketplaceStats, countListings, getListingStats, upsertListingCreated, upsertListingSold, updateListingCancelled };
+/**
+ * Xoa Listing theo contractListingId (dung khi reorg xoa hoan toan listing)
+ */
+export async function deleteByContractListingId(contractListingId, models = {}) {
+  const Listing = models.Listing || DefaultListing;
+  return await Listing.deleteOne({ contractListingId });
+}
+
+export default { createListing, findById, findListings, findBySeller, updateStatus, deleteById, getMarketplaceStats, countListings, getListingStats, upsertListingCreated, upsertListingSold, updateListingCancelled, deleteByContractListingId };

@@ -275,4 +275,23 @@ export async function upsertSharesIssued(eventId, holder, sharesMinted, models =
   );
 }
 
-export default { createShare, findById, findShares, findByHolder, findByEvent, findByEventAndHolder, incrementClaimedReward, updateRewards, countShares, getTotalContributionByEvent, deleteById, upsertSharesIssued };
+/**
+ * Clear processedRewardTxHashes entries cho cac txHash bi reorg
+ */
+export async function clearProcessedRewardTxHashes(txHashes, models = {}) {
+  const Share = models.Share || DefaultShare;
+  return await Share.updateMany(
+    {},
+    { $pullAll: { processedRewardTxHashes: txHashes } }
+  );
+}
+
+/**
+ * Xoa tat ca Share cua 1 event (dung khi full rebuild sau reorg)
+ */
+export async function deleteByEventId(eventId, models = {}) {
+  const Share = models.Share || DefaultShare;
+  return await Share.deleteMany({ eventId });
+}
+
+export default { createShare, findById, findShares, findByHolder, findByEvent, findByEventAndHolder, incrementClaimedReward, updateRewards, countShares, getTotalContributionByEvent, deleteById, upsertSharesIssued, clearProcessedRewardTxHashes, deleteByEventId };

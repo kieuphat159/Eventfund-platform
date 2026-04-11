@@ -212,6 +212,18 @@ export async function upsertByContractEventId(contractEventId, data, models = {}
 }
 
 /**
+ * Update event by contractEventId (dùng trong full rebuild)
+ */
+export async function updateByContractEventId(contractEventId, updates, models = {}) {
+  const Event = models.Event || DefaultEvent;
+  return await Event.findOneAndUpdate(
+    { contractEventId },
+    updates,
+    { new: true, lean: true }
+  );
+}
+
+/**
  * Find event by contractEventId (dùng trong processor)
  */
 export async function findByContractEventId(contractEventId, models = {}) {
@@ -243,4 +255,16 @@ export async function markTxHashProcessed(eventId, txHash, field, models = {}) {
   );
 }
 
-export default { createEvent, findById, findEvents, updateById, deleteById, updateFundingStatus, incrementTicketCounters, countEvents, getRevenueStats, upsertByContractEventId, findByContractEventId, isTxHashProcessed, markTxHashProcessed };
+/**
+ * Clear processedTxHashes entries cho cac txHash bi reorg
+ * Cho phep processor re-process lai cac tx do
+ */
+export async function clearProcessedTxHashes(txHashes, models = {}) {
+  const Event = models.Event || DefaultEvent;
+  return await Event.updateMany(
+    {},
+    { $pull: { processedTxHashes: { txHash: { $in: txHashes } } } }
+  );
+}
+
+export default { createEvent, findById, findEvents, updateById, deleteById, updateFundingStatus, incrementTicketCounters, countEvents, getRevenueStats, upsertByContractEventId, findByContractEventId, isTxHashProcessed, markTxHashProcessed, updateByContractEventId, clearProcessedTxHashes };

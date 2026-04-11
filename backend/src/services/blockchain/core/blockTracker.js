@@ -47,6 +47,8 @@ export async function updateProgress({
     contractName,
     contractAddress,
     lastProcessedBlock,
+    lastBlockHash = null,
+    recentBlockHashes = null,
     status = "syncing",
 }) {
     const normalizedAddress = normalizeContractAddress(contractAddress);
@@ -58,6 +60,8 @@ export async function updateProgress({
             $set: {
                 ...(normalizedAddress ? { contractAddress: normalizedAddress } : {}),
                 lastProcessedBlock: next,
+                ...(lastBlockHash ? { lastBlockHash } : {}),
+                ...(recentBlockHashes ? { recentBlockHashes } : {}),
                 lastSyncAt: new Date(),
                 status,
             },

@@ -47,4 +47,12 @@ export async function findLatestByEventId(eventId, models = {}) {
   ).lean();
 }
 
-export default { upsertRevenueDistribution, findLatestByEventId };
+/**
+ * Xoa RevenueDistribution theo txHashes (dung khi reorg)
+ */
+export async function deleteByTxHashes(txHashes, models = {}) {
+  const RevenueDistribution = models.RevenueDistribution || DefaultRevenueDistribution;
+  return await RevenueDistribution.deleteMany({ txHash: { $in: txHashes } });
+}
+
+export default { upsertRevenueDistribution, findLatestByEventId, deleteByTxHashes };

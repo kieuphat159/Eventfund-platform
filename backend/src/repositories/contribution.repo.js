@@ -102,4 +102,12 @@ export async function markContributionsAsRefunded(eventId, contributor, models =
   );
 }
 
-export default { upsertOrganizerStake, upsertDonatorContribution, rebuildFundState, markContributionsAsRefunded };
+/**
+ * Xoa Contribution theo txHashes (dung khi reorg)
+ */
+export async function deleteByTxHashes(txHashes, models = {}) {
+  const Contribution = models.Contribution || DefaultContribution;
+  return await Contribution.deleteMany({ txHash: { $in: txHashes } });
+}
+
+export default { upsertOrganizerStake, upsertDonatorContribution, rebuildFundState, markContributionsAsRefunded, deleteByTxHashes };

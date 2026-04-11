@@ -30,4 +30,12 @@ export async function upsertPenalty(data, models = {}) {
   ).lean();
 }
 
-export default { upsertPenalty };
+/**
+ * Xoa Penalty theo txHashes (dung khi reorg)
+ */
+export async function deleteByTxHashes(txHashes, models = {}) {
+  const Penalty = models.Penalty || DefaultPenalty;
+  return await Penalty.deleteMany({ txHash: { $in: txHashes } });
+}
+
+export default { upsertPenalty, deleteByTxHashes };

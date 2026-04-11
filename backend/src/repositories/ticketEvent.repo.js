@@ -39,4 +39,13 @@ export async function deleteInRange(contractAddressLower, fromBlock, toBlock, mo
   });
 }
 
-export default { upsertTicketEvent, deleteInRange };
+/**
+ * Insert nhiều TicketEvent cùng lúc (dùng sau deleteInRange)
+ */
+export async function insertMany(docs, models = {}) {
+  const TicketEvent = models.TicketEvent || DefaultTicketEvent;
+  if (!docs || docs.length === 0) return;
+  await TicketEvent.insertMany(docs, { ordered: false });
+}
+
+export default { upsertTicketEvent, deleteInRange, insertMany };
