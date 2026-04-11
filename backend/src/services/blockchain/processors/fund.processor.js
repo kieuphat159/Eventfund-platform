@@ -60,6 +60,10 @@ async function rebuildFundState(eventObjectId) {
   await contributionRepo.rebuildFundState(eventObjectId);
 }
 
+async function rebuildShareState(eventObjectId) {
+  await shareRepo.rebuildShareStateFromContributions(eventObjectId);
+}
+
 // -------------------------
 // FULL REBUILD FROM CHAINLOG (dùng khi detect reorg)
 // Replay toan bo ChainLog cua 1 contractEventId de tinh lai state
@@ -222,6 +226,7 @@ async function rebuildFullEventStateFromChainLog(contractEventId, contractAddres
 
     // Rebuild currentFunding va sharePercentage sau khi Share da duoc rebuild
     await rebuildFundState(eventDoc._id);
+    await rebuildShareState(eventDoc._id);
   }
 }
 
@@ -273,6 +278,7 @@ async function handleContributionMade(log, eventDoc) {
   });
 
   await rebuildFundState(eventDoc._id);
+  await rebuildShareState(eventDoc._id);
 }
 
 async function handleSharesIssued(log, eventDoc) {
@@ -283,6 +289,7 @@ async function handleSharesIssued(log, eventDoc) {
   // mintedShares not incremented here; rebuildFundState is the source of truth
   await shareRepo.upsertSharesIssued(eventDoc._id, holder, sharesMinted);
   await rebuildFundState(eventDoc._id);
+  await rebuildShareState(eventDoc._id);
 }
 
 async function handleFundingSuccessful(eventDoc) {
@@ -482,7 +489,7 @@ async function handleContributionRefunded(log, eventDoc) {
   const contributor = lowerAddress(args.donator);
   const amount = toNumberSafe(args.amount);
 
-  await contributionRepo.markContributionsAsRefunded(eventDoc._id, contributor);
+  await contributionRepo.markDonatorContributionsAsRefunded(eventDoc._id, contributor);
 
   const txHash = transactionHash.toLowerCase();
   const applied = await eventRepo.applyIdempotentDeltaByTxHash(
@@ -511,6 +518,7 @@ async function handleContributionRefunded(log, eventDoc) {
   }
 
   await rebuildFundState(eventDoc._id);
+  await rebuildShareState(eventDoc._id);
 }
 
 async function handleStakeWithdrawn(log, eventDoc) {

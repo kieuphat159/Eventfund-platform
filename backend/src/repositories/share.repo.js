@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { Share as DefaultShare } from '../models/index.js';
+import { Contribution as DefaultContribution } from '../models/index.js';
 
 /**
  * Create a new share
@@ -276,6 +277,74 @@ export async function upsertSharesIssued(eventId, holder, sharesMinted, models =
 }
 
 /**
+ * Rebuild contributionAmount + sharePercentage from confirmed donator contributions.
+ * This keeps Share projection aligned with Fund contract semantics.
+ */
+export async function rebuildShareStateFromContributions(eventId, models = {}) {
+  const Share = models.Share || DefaultShare;
+  const Contribution = models.Contribution || DefaultContribution;
+
+  const contributions = await Contribution.find({
+    eventId,
+    type: 'donator_contribution',
+    status: 'confirmed',
+  }).select('contributor amount').lean();
+
+  const contributionByHolder = new Map();
+  let totalDonatorContribution = 0;
+
+  for (const c of contributions) {
+    const holder = String(c.contributor || '').toLowerCase();
+    if (!holder) continue;
+
+    const amount = Number(c.amount || 0);
+    if (!Number.isFinite(amount) || amount <= 0) continue;
+
+    const next = (contributionByHolder.get(holder) || 0) + amount;
+    contributionByHolder.set(holder, next);
+    totalDonatorContribution += amount;
+  }
+
+  const existingHolders = await Share.find({ eventId }).select('holder').lean();
+  const allHolders = new Set(existingHolders.map((d) => String(d.holder || '').toLowerCase()).filter(Boolean));
+  for (const holder of contributionByHolder.keys()) {
+    allHolders.add(holder);
+  }
+
+  if (allHolders.size === 0) {
+    return { totalDonatorContribution: 0, holderCount: 0 };
+  }
+
+  const ops = [];
+  for (const holder of allHolders) {
+    const holderContribution = contributionByHolder.get(holder) || 0;
+    const sharePercentage = totalDonatorContribution > 0
+      ? (holderContribution / totalDonatorContribution) * 100
+      : 0;
+
+    ops.push({
+      updateOne: {
+        filter: { eventId, holder },
+        update: {
+          $set: {
+            contributionAmount: holderContribution,
+            sharePercentage,
+          },
+          $setOnInsert: {
+            claimedReward: 0,
+            pendingReward: 0,
+          },
+        },
+        upsert: true,
+      },
+    });
+  }
+
+  await Share.bulkWrite(ops, { ordered: false });
+  return { totalDonatorContribution, holderCount: allHolders.size };
+}
+
+/**
  * Clear processedRewardTxHashes entries cho cac txHash bi reorg
  */
 export async function clearProcessedRewardTxHashes(txHashes, models = {}) {
@@ -294,4 +363,20 @@ export async function deleteByEventId(eventId, models = {}) {
   return await Share.deleteMany({ eventId });
 }
 
-export default { createShare, findById, findShares, findByHolder, findByEvent, findByEventAndHolder, incrementClaimedReward, updateRewards, countShares, getTotalContributionByEvent, deleteById, upsertSharesIssued, clearProcessedRewardTxHashes, deleteByEventId };
+export default {
+  createShare,
+  findById,
+  findShares,
+  findByHolder,
+  findByEvent,
+  findByEventAndHolder,
+  incrementClaimedReward,
+  updateRewards,
+  countShares,
+  getTotalContributionByEvent,
+  deleteById,
+  upsertSharesIssued,
+  rebuildShareStateFromContributions,
+  clearProcessedRewardTxHashes,
+  deleteByEventId,
+};

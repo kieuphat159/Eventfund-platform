@@ -17,6 +17,7 @@ describe("Blockchain Reorg Safety Regressions", () => {
 
   let ChainLog;
   let EventModel;
+  let ContributionModel;
   let TicketModel;
   let TicketStats;
   let ListingModel;
@@ -96,6 +97,7 @@ describe("Blockchain Reorg Safety Regressions", () => {
 
     ({ ChainLog } = await import("../../../models/ChainLog.js"));
     ({ default: EventModel } = await import("../../../models/Event.model.js"));
+    ({ default: ContributionModel } = await import("../../../models/Contribution.model.js"));
     ({ default: TicketModel } = await import("../../../models/Ticket.model.js"));
     ({ TicketStats } = await import("../../../models/TicketStats.model.js"));
     ({ default: ListingModel } = await import("../../../models/Listing.model.js"));
@@ -175,7 +177,7 @@ describe("Blockchain Reorg Safety Regressions", () => {
     await processFundLogsOnce();
 
     let ev = await EventModel.findOne({ contractEventId: CONTRACT_EID }).lean();
-    expect(ev.currentFunding).toBe("700000000000000000");
+    expect(ev.currentFunding).toBe("500000000000000000");
 
     await ChainLog.deleteMany({ contractAddress: FUND_ADDR.toLowerCase(), blockNumber: 20 });
     const canonicalLog = makeLog({
@@ -195,7 +197,62 @@ describe("Blockchain Reorg Safety Regressions", () => {
     await processFundLogsOnce();
 
     ev = await EventModel.findOne({ contractEventId: CONTRACT_EID }).lean();
-    expect(ev.currentFunding).toBe("300000000000000000");
+    expect(ev.currentFunding).toBe("100000000000000000");
+  });
+
+  test("Fund: ContributionRefunded must not mark organizer_stake as refunded", async () => {
+    const eventDoc = await createEventDoc();
+    mockLatestBlock = 12;
+
+    await ContributionModel.insertMany([
+      {
+        eventId: eventDoc._id,
+        contributor: ORGANIZER.toLowerCase(),
+        type: "organizer_stake",
+        amount: 200,
+        txHash: "0xstake000000000000000000000000000000000000000000000000000000000001",
+        status: "confirmed",
+      },
+      {
+        eventId: eventDoc._id,
+        contributor: ORGANIZER.toLowerCase(),
+        type: "donator_contribution",
+        amount: 50,
+        txHash: "0xcontrib0000000000000000000000000000000000000000000000000000000001",
+        status: "confirmed",
+      },
+    ]);
+
+    await ChainLog.insertMany([
+      makeLog({
+        contractName: "Fund",
+        contractAddress: FUND_ADDR,
+        eventName: "ContributionRefunded",
+        args: {
+          eventId: CONTRACT_EID,
+          donator: ORGANIZER,
+          amount: "50",
+        },
+        blockNumber: 12,
+      }),
+    ]);
+
+    await processFundLogsOnce();
+
+    const stakeDoc = await ContributionModel.findOne({
+      eventId: eventDoc._id,
+      contributor: ORGANIZER.toLowerCase(),
+      type: "organizer_stake",
+    }).lean();
+
+    const donatorDoc = await ContributionModel.findOne({
+      eventId: eventDoc._id,
+      contributor: ORGANIZER.toLowerCase(),
+      type: "donator_contribution",
+    }).lean();
+
+    expect(stakeDoc.status).toBe("confirmed");
+    expect(donatorDoc.status).toBe("refunded");
   });
 
   test("Ticket: when canonical logs disappear, TicketStats must rebuild down to zero", async () => {

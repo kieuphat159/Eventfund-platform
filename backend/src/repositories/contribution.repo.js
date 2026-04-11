@@ -66,6 +66,7 @@ export async function rebuildFundState(eventObjectId, models = {}) {
 
   const contributions = await Contribution.find({
     eventId: eventObjectId,
+    type: "donator_contribution",
     status: "confirmed",
   }).lean();
 
@@ -91,6 +92,7 @@ export async function markContributionsAsRefunded(eventId, contributor, models =
     {
       eventId,
       contributor: contributor.toLowerCase(),
+      type: "donator_contribution",
       status: "confirmed",
     },
     {
@@ -110,4 +112,15 @@ export async function deleteByTxHashes(txHashes, models = {}) {
   return await Contribution.deleteMany({ txHash: { $in: txHashes } });
 }
 
-export default { upsertOrganizerStake, upsertDonatorContribution, rebuildFundState, markContributionsAsRefunded, deleteByTxHashes };
+export async function markDonatorContributionsAsRefunded(eventId, contributor, models = {}) {
+  return markContributionsAsRefunded(eventId, contributor, models);
+}
+
+export default {
+  upsertOrganizerStake,
+  upsertDonatorContribution,
+  rebuildFundState,
+  markContributionsAsRefunded,
+  markDonatorContributionsAsRefunded,
+  deleteByTxHashes,
+};
