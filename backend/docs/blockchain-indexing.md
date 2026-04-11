@@ -3,7 +3,7 @@
 Tài liệu này mô tả **chi tiết** pipeline đồng bộ dữ liệu blockchain trong backend:
 
 - **Indexer**: lấy log từ RPC (EVM) và lưu thô vào MongoDB (`ChainLog`).
-- **Processor**: đọc `ChainLog` và materialize dữ liệu “dễ query” (`TicketEvent`, `TicketStats`).
+- **Processor**: đọc `ChainLog` và materialize dữ liệu “dễ query” (Fund/Ticket/Marketplace models).
 
 Mục tiêu thiết kế:
 
@@ -17,11 +17,17 @@ Mục tiêu thiết kế:
 flowchart LR
   RPC[(EVM RPC)] -->|getLogs| IDX[Indexers]
   IDX -->|insertMany| CHAINLOG[(Mongo: ChainLog)]
-  CHAINLOG --> PROC[Ticket Processor]
-  PROC -->|insertMany| TE[(Mongo: TicketEvent)]
-  PROC -->|upsert| TS[(Mongo: TicketStats)]
+  CHAINLOG --> PF[Fund Processor]
+  CHAINLOG --> PT[Ticket Processor]
+  CHAINLOG --> PM[Marketplace Processor]
+  PT -->|insertMany| TE[(Mongo: TicketEvent)]
+  PT -->|rebuild| TS[(Mongo: TicketStats)]
+  PF -->|upsert/rebuild| EF[(Mongo: Event + Fund derived)]
+  PM -->|upsert/rebuild| LM[(Mongo: Listing)]
   IDX --> SS[(Mongo: BlockchainSyncState)]
-  PROC --> SS
+  PF --> SS
+  PT --> SS
+  PM --> SS
 ```
 
 ### Indexer là gì?
@@ -38,8 +44,8 @@ Indexer là các job chạy nền theo vòng lặp, mỗi vòng:
 Processor là job chạy nền đọc `ChainLog` đã được index:
 
 1. Rescan theo cửa sổ reorg (giống indexer) nhưng thay vì RPC, nó query từ Mongo.
-2. Xóa các bản ghi derived trong range rồi re-insert.
-3. Rebuild thống kê theo `eventId`.
+2. So sánh block hash trong cửa sổ reorg để phát hiện block biến mất/hash đổi.
+3. Xóa dữ liệu derived bị ảnh hưởng và rebuild từ canonical `ChainLog`.
 4. Cập nhật checkpoint riêng.
 
 ## 2) Data model (MongoDB)
@@ -96,9 +102,22 @@ Trong EVM, chain có thể reorg vài block gần tip. Để tránh dữ liệu 
 - Mỗi vòng lặp đều **rewind** `REORG_BUFFER_BLOCKS` (mặc định 12) từ `lastProcessedBlock`.
 - Với mỗi chunk trong cửa sổ rescan:
   - Indexer: xóa `ChainLog` trong `[fromBlock..toBlock]` rồi fetch lại từ RPC.
-  - Processor: xóa `TicketEvent` trong `[fromBlock..toBlock]` rồi build lại từ `ChainLog`.
+  - Processor:
+    - Fund/Marketplace: detect block disappeared/hash changed bằng `recentBlockHashes`, sau đó rebuild theo entity bị ảnh hưởng.
+    - Ticket: delete/reinsert theo range, rồi rebuild stats theo tập eventId bị ảnh hưởng.
 
 Helper chung nằm ở `backend/src/services/blockchain/sync/reorgPolicy.js`.
+
+### 3.1. Cập nhật mới sau fix
+
+- **Fund (hash-changed)**:
+  - Cleanup tx dùng tx hash của block cũ (`savedEntry.txHashes`), không xóa nhầm tx canonical mới.
+- **Ticket stats**:
+  - Rebuild stats bằng `preDeleteEventIds U postInsertEventIds` nên canonical chunk rỗng vẫn cập nhật đúng.
+- **Marketplace (hash-changed)**:
+  - Rebuild listing dùng cả listing IDs từ block cũ và block canonical mới, tránh bỏ sót listing ngoài buffer.
+- **Fund idempotency**:
+  - Các nhánh increment quan trọng dùng atomic update theo `(txHash, field)` để tránh TOCTOU khi có concurrency.
 
 ## 4) Checkpointing (`BlockchainSyncState`)
 
@@ -181,3 +200,16 @@ node src/services/blockchain/processors/ticket/run.js
 - Trong dev/local chain, có thể set `CHAIN_CONFIRMATIONS=0` để index tới tip nhanh hơn (chấp nhận rủi ro reorg khi chạy mạng public).
 - Nếu DB đã bị sai do test nhiều lần, có thể xoá collections derived (`TicketEvent`, `TicketStats`) rồi chạy processor lại (processor sẽ rebuild).
 - Indexer/processor được thiết kế để chạy lặp lâu dài; lỗi tạm thời sẽ được ghi vào `BlockchainSyncState.status=error` và vòng sau có thể tự hồi phục.
+
+## 8) Regression tests
+
+File: `backend/src/tests/integration/blockchain/reorg-safety.integration.test.js`
+
+Hiện tại đã có các regression case chính:
+
+- Fund hash-changed orphan tx cleanup
+- Ticket stats khi canonical chunk rỗng
+- Marketplace hash-changed với listing cũ nằm ngoài reorg buffer
+- Fund idempotency race (TOCTOU)
+
+Trạng thái hiện tại: **6/6 pass**.

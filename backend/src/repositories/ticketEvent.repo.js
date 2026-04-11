@@ -40,6 +40,25 @@ export async function deleteInRange(contractAddressLower, fromBlock, toBlock, mo
 }
 
 /**
+ * Lay danh sach eventId co TicketEvent trong range
+ * Dung de rebuild stats ngay ca khi canonical logs trong chunk rong
+ */
+export async function findEventIdsInRange(contractAddressLower, fromBlock, toBlock, models = {}) {
+  const TicketEvent = models.TicketEvent || DefaultTicketEvent;
+
+  const rows = await TicketEvent.find(
+    {
+      contractAddress: contractAddressLower,
+      blockNumber: { $gte: fromBlock, $lte: toBlock },
+      eventId: { $ne: null },
+    },
+    { eventId: 1 }
+  ).lean();
+
+  return [...new Set(rows.map((r) => r.eventId).filter(Boolean))];
+}
+
+/**
  * Insert nhiều TicketEvent cùng lúc (dùng sau deleteInRange)
  */
 export async function insertMany(docs, models = {}) {
@@ -48,4 +67,4 @@ export async function insertMany(docs, models = {}) {
   await TicketEvent.insertMany(docs, { ordered: false });
 }
 
-export default { upsertTicketEvent, deleteInRange, insertMany };
+export default { upsertTicketEvent, deleteInRange, findEventIdsInRange, insertMany };

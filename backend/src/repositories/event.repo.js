@@ -256,6 +256,40 @@ export async function markTxHashProcessed(eventId, txHash, field, models = {}) {
 }
 
 /**
+ * Atomically apply $inc/$set once per (txHash, field).
+ * Returns true when delta is applied, false when txHash+field was already processed.
+ */
+export async function applyIdempotentDeltaByTxHash(
+  eventId,
+  txHash,
+  field,
+  { inc = {}, set = {} } = {},
+  models = {}
+) {
+  const Event = models.Event || DefaultEvent;
+  const normalizedTxHash = txHash.toLowerCase();
+
+  const update = {
+    $addToSet: { processedTxHashes: { txHash: normalizedTxHash, field } },
+  };
+
+  if (inc && Object.keys(inc).length > 0) update.$inc = inc;
+  if (set && Object.keys(set).length > 0) update.$set = set;
+
+  const result = await Event.updateOne(
+    {
+      _id: eventId,
+      processedTxHashes: {
+        $not: { $elemMatch: { txHash: normalizedTxHash, field } },
+      },
+    },
+    update
+  );
+
+  return result.modifiedCount > 0;
+}
+
+/**
  * Clear processedTxHashes entries cho cac txHash bi reorg
  * Cho phep processor re-process lai cac tx do
  */
@@ -267,4 +301,4 @@ export async function clearProcessedTxHashes(txHashes, models = {}) {
   );
 }
 
-export default { createEvent, findById, findEvents, updateById, deleteById, updateFundingStatus, incrementTicketCounters, countEvents, getRevenueStats, upsertByContractEventId, findByContractEventId, isTxHashProcessed, markTxHashProcessed, updateByContractEventId, clearProcessedTxHashes };
+export default { createEvent, findById, findEvents, updateById, deleteById, updateFundingStatus, incrementTicketCounters, countEvents, getRevenueStats, upsertByContractEventId, findByContractEventId, isTxHashProcessed, markTxHashProcessed, applyIdempotentDeltaByTxHash, updateByContractEventId, clearProcessedTxHashes };

@@ -233,8 +233,11 @@ export async function processMarketplaceLogsOnce() {
             reorgAffectedListingIds.add(lid);
           }
         } else if (currentHash !== savedEntry.blockHash) {
-          // Block co blockHash khac → collect tu canonical logs
+          // Block co blockHash khac → collect ca listingIds cu va canonical moi
           console.log(`[MarketplaceProcessor] Reorg: block ${blockNum} hash changed`);
+          for (const lid of (savedEntry.contractListingIds || [])) {
+            reorgAffectedListingIds.add(lid);
+          }
           for (const log of logs) {
             if (log.blockNumber === blockNum) {
               const lid = toStringId(log.args?.listingId);

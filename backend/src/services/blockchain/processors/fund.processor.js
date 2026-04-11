@@ -400,37 +400,29 @@ async function handleTicketRefundPaid(log, eventDoc) {
   const { args, transactionHash } = log;
   const txHash = transactionHash.toLowerCase();
 
-  if (await eventRepo.isTxHashProcessed(eventDoc._id, txHash, "refundedAmount")) return;
-
-  await eventRepo.updateById(eventDoc._id, {
-    $inc: { refundedAmount: toNumberSafe(args.amount) },
-    $set: {
+  await eventRepo.applyIdempotentDeltaByTxHash(eventDoc._id, txHash, "refundedAmount", {
+    inc: { refundedAmount: toNumberSafe(args.amount) },
+    set: {
       escrowStatus: "refunding",
       lastRefundedAt: new Date(),
     },
   });
-
-  await eventRepo.markTxHashProcessed(eventDoc._id, txHash, "refundedAmount");
 }
 
 async function handleRefundPoolDeposited(log, eventDoc) {
   const { args, transactionHash } = log;
   const txHash = transactionHash.toLowerCase();
 
-  if (await eventRepo.isTxHashProcessed(eventDoc._id, txHash, "extraRefundPoolDeposited")) return;
-
-  await eventRepo.updateById(eventDoc._id, {
-    $set: {
+  await eventRepo.applyIdempotentDeltaByTxHash(eventDoc._id, txHash, "extraRefundPoolDeposited", {
+    inc: {
+      extraRefundPoolDeposited: toNumberSafe(args.amount),
+    },
+    set: {
       refundPool: toNumberSafe(args.newRefundPool),
       escrowStatus: "refund_pool_funded",
       lastRefundPoolDepositAt: new Date(),
     },
-    $inc: {
-      extraRefundPoolDeposited: toNumberSafe(args.amount),
-    },
   });
-
-  await eventRepo.markTxHashProcessed(eventDoc._id, txHash, "extraRefundPoolDeposited");
 }
 
 async function handlePenaltyApplied(log, eventDoc) {
@@ -451,50 +443,38 @@ async function handlePenaltyApplied(log, eventDoc) {
     reason,
   });
 
-  if (await eventRepo.isTxHashProcessed(eventDoc._id, txHash, "totalPenaltyAmount")) return;
-
-  await eventRepo.updateById(eventDoc._id, {
-    $inc: { totalPenaltyAmount: toNumberSafe(args.amount) },
-    $set: { lastPenaltyAt: new Date() },
+  await eventRepo.applyIdempotentDeltaByTxHash(eventDoc._id, txHash, "totalPenaltyAmount", {
+    inc: { totalPenaltyAmount: toNumberSafe(args.amount) },
+    set: { lastPenaltyAt: new Date() },
   });
-
-  await eventRepo.markTxHashProcessed(eventDoc._id, txHash, "totalPenaltyAmount");
 }
 
 async function handleTicketRevenueDeposited(log, eventDoc) {
   const { args, transactionHash } = log;
   const txHash = transactionHash.toLowerCase();
 
-  if (await eventRepo.isTxHashProcessed(eventDoc._id, txHash, "ticketRevenueDeposited")) return;
-
-  await eventRepo.updateById(eventDoc._id, {
-    $set: {
+  await eventRepo.applyIdempotentDeltaByTxHash(eventDoc._id, txHash, "ticketRevenueDeposited", {
+    inc: { ticketRevenueDeposited: toNumberSafe(args.amount) },
+    set: {
       escrowStatus: "holding_revenue",
       escrowedRevenue: toNumberSafe(args.newEscrowedRevenue),
       lastTicketRevenueAt: new Date(),
     },
-    $inc: { ticketRevenueDeposited: toNumberSafe(args.amount) },
   });
-
-  await eventRepo.markTxHashProcessed(eventDoc._id, txHash, "ticketRevenueDeposited");
 }
 
 async function handleRoyaltyDeposited(log, eventDoc) {
   const { args, transactionHash } = log;
   const txHash = transactionHash.toLowerCase();
 
-  if (await eventRepo.isTxHashProcessed(eventDoc._id, txHash, "royaltyRevenueDeposited")) return;
-
-  await eventRepo.updateById(eventDoc._id, {
-    $set: {
+  await eventRepo.applyIdempotentDeltaByTxHash(eventDoc._id, txHash, "royaltyRevenueDeposited", {
+    inc: { royaltyRevenueDeposited: toNumberSafe(args.amount) },
+    set: {
       escrowStatus: "holding_revenue",
       escrowedRevenue: toNumberSafe(args.newEscrowedRevenue),
       lastRoyaltyRevenueAt: new Date(),
     },
-    $inc: { royaltyRevenueDeposited: toNumberSafe(args.amount) },
   });
-
-  await eventRepo.markTxHashProcessed(eventDoc._id, txHash, "royaltyRevenueDeposited");
 }
 
 async function handleContributionRefunded(log, eventDoc) {
@@ -505,19 +485,29 @@ async function handleContributionRefunded(log, eventDoc) {
   await contributionRepo.markContributionsAsRefunded(eventDoc._id, contributor);
 
   const txHash = transactionHash.toLowerCase();
-  const alreadyProcessed = await eventRepo.isTxHashProcessed(eventDoc._id, txHash, "refundedAmount_contribution");
+  const applied = await eventRepo.applyIdempotentDeltaByTxHash(
+    eventDoc._id,
+    txHash,
+    "refundedAmount_contribution",
+    {
+      inc: { refundedAmount: amount },
+      set: {
+        status: "cancelled",
+        escrowStatus: "refunded",
+        lastContributionRefundAt: new Date(),
+      },
+    }
+  );
 
-  await eventRepo.updateById(eventDoc._id, {
-    ...(alreadyProcessed ? {} : { $inc: { refundedAmount: amount } }),
-    $set: {
-      status: "cancelled",
-      escrowStatus: "refunded",
-      lastContributionRefundAt: new Date(),
-    },
-  });
-
-  if (!alreadyProcessed) {
-    await eventRepo.markTxHashProcessed(eventDoc._id, txHash, "refundedAmount_contribution");
+  // Ensure terminal status is still refreshed for repeated processing of same tx.
+  if (!applied) {
+    await eventRepo.updateById(eventDoc._id, {
+      $set: {
+        status: "cancelled",
+        escrowStatus: "refunded",
+        lastContributionRefundAt: new Date(),
+      },
+    });
   }
 
   await rebuildFundState(eventDoc._id);
@@ -659,13 +649,16 @@ export async function processFundLogsOnce() {
           }
           reorgDetectedBlocks.add(blockNum);
         } else if (currentHash !== savedEntry.blockHash) {
-          // Block co blockHash khac → reorg
+          // Block co blockHash khac -> reorg
           console.log(`[FundProcessor] Reorg: block ${blockNum} hash changed`);
+          // Chi xoa txHashes cua block cu (savedEntry). Tx canonical moi phai duoc giu lai.
+          for (const txHash of (savedEntry.txHashes || [])) {
+            reorgAffectedTxHashes.add(txHash);
+          }
           for (const log of logs) {
             if (log.blockNumber === blockNum) {
               const eid = toStringId(log.args?.eventId);
               if (eid) reorgAffectedEventIds.add(eid);
-              if (log.transactionHash) reorgAffectedTxHashes.add(log.transactionHash.toLowerCase());
             }
           }
         }

@@ -196,16 +196,25 @@ export async function processTicketLogsOnce() {
       { sort: { blockNumber: 1, transactionIndex: 1, logIndex: 1 } }
     );
 
+    const preDeleteEventIds = await ticketEventRepo.findEventIdsInRange(
+      contractAddressLower,
+      currentFrom,
+      currentTo
+    );
+
     // Reorg-safe: xoa TicketEvent trong range truoc, insert lai tu ChainLog canonical
     // Neu block bi reorg, indexer da xoa ChainLog do → insertMany chi insert canonical
     await ticketEventRepo.deleteInRange(contractAddressLower, currentFrom, currentTo);
 
     const docs = logs.map(l => mapChainLogToTicketEventDoc(l, contractAddressLower));
+    const postInsertEventIds = [...new Set(docs.map(d => d.eventId).filter(Boolean))];
+
     if (docs.length > 0) {
       await ticketEventRepo.insertMany(docs);
-      const affectedEventIds = [...new Set(docs.map(d => d.eventId).filter(Boolean))];
-      await ticketStatsRepo.rebuildForEventIds(contractAddressLower, affectedEventIds);
     }
+
+    const affectedEventIds = [...new Set([...preDeleteEventIds, ...postInsertEventIds])];
+    await ticketStatsRepo.rebuildForEventIds(contractAddressLower, affectedEventIds);
 
     await updateProgress({
       contractName: PROCESSOR_NAME,
