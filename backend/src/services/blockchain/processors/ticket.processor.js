@@ -146,19 +146,6 @@ function mapChainLogToTicketEventDoc(chainLog, contractAddressLower) {
 // -------------------------
 // MAIN PROCESSOR
 // -------------------------
-async function processTicketLog(log) {
-  const contractAddressLower = log.contractAddress || "";
-  const doc = mapChainLogToTicketEventDoc(log, contractAddressLower);
-
-  // Insert hoặc update TicketEvent (idempotent)
-  await ticketEventRepo.upsertTicketEvent(doc);
-
-  // Nếu event ảnh hưởng đến stats thì rebuild
-  if (doc.eventId) {
-    await ticketStatsRepo.rebuildForEventIds(contractAddressLower, [doc.eventId]);
-  }
-}
-
 export async function processTicketLogsOnce() {
   const ticket = getTicket();
   const { confirmations, reorgBuffer, chunkSize } = readReorgPolicyFromEnv();
@@ -200,19 +187,24 @@ export async function processTicketLogsOnce() {
     const currentTo = Math.min(target, currentFrom + chunkSize - 1);
 
     const logs = await chainLogRepo.findLogs(
-  {
-    contractName: CONTRACT_NAME,
-    contractAddress: contractAddressLower,
-    blockNumber: { $gte: currentFrom, $lte: currentTo },
-    eventName: { $ne: null },
-  },
-  {
-    sort: { blockNumber: 1, transactionIndex: 1, logIndex: 1 },
-  }
-);
+      {
+        contractName: CONTRACT_NAME,
+        contractAddress: contractAddressLower,
+        blockNumber: { $gte: currentFrom, $lte: currentTo },
+        eventName: { $ne: null },
+      },
+      { sort: { blockNumber: 1, transactionIndex: 1, logIndex: 1 } }
+    );
 
-    for (const log of logs) {
-      await processTicketLog(log);
+    // Reorg-safe: xoa TicketEvent trong range truoc, insert lai tu ChainLog canonical
+    // Neu block bi reorg, indexer da xoa ChainLog do → insertMany chi insert canonical
+    await ticketEventRepo.deleteInRange(contractAddressLower, currentFrom, currentTo);
+
+    const docs = logs.map(l => mapChainLogToTicketEventDoc(l, contractAddressLower));
+    if (docs.length > 0) {
+      await ticketEventRepo.insertMany(docs);
+      const affectedEventIds = [...new Set(docs.map(d => d.eventId).filter(Boolean))];
+      await ticketStatsRepo.rebuildForEventIds(contractAddressLower, affectedEventIds);
     }
 
     await updateProgress({

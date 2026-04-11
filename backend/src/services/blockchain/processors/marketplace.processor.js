@@ -87,6 +87,32 @@ function mapMarketplaceEvent(chainLog, contractAddressLower) {
 }
 
 // -------------------------
+// REBUILD LISTING FROM CHAINLOG (dung khi detect reorg)
+// Replay tat ca ChainLog cua 1 contractListingId de tinh lai state
+// -------------------------
+async function rebuildListingFromChainLog(contractListingId, contractAddressLower) {
+  const logs = await chainLogRepo.findLogs(
+    {
+      contractName: CONTRACT_NAME,
+      contractAddress: contractAddressLower,
+      "args.listingId": contractListingId,
+    },
+    { sort: { blockNumber: 1, logIndex: 1 } }
+  );
+
+  if (logs.length === 0) {
+    // Khong con ChainLog nao → listing bi reorg hoan toan → xoa
+    await listingRepo.deleteByContractListingId(contractListingId);
+    return;
+  }
+
+  // Replay tung log theo thu tu
+  for (const log of logs) {
+    await processMarketplaceLog(log);
+  }
+}
+
+// -------------------------
 // MAIN PROCESSOR LOGIC
 // -------------------------
 async function processMarketplaceLog(log) {
@@ -164,6 +190,16 @@ export async function processMarketplaceLogsOnce() {
 
   let currentFrom = from;
 
+  // Build map blockNumber -> { blockHash, contractListingIds } tu recentBlockHashes da luu
+  const savedBlockHashMap = new Map(
+    (syncState.recentBlockHashes || []).map(({ blockNumber, blockHash, contractListingIds }) => [
+      blockNumber,
+      { blockHash, contractListingIds: contractListingIds || [] },
+    ])
+  );
+
+  const reorgAffectedListingIds = new Set();
+
   while (currentFrom <= target) {
     const currentTo = Math.min(target, currentFrom + chunkSize - 1);
 
@@ -176,18 +212,95 @@ export async function processMarketplaceLogsOnce() {
       sort: { blockNumber: 1, logIndex: 1 }
     });
 
+    // ── Reorg detection ────────────────────────────────────────────────────
+    if (savedBlockHashMap.size > 0) {
+      const currentBlockHashMap = new Map();
+      for (const log of logs) {
+        if (!currentBlockHashMap.has(log.blockNumber)) {
+          currentBlockHashMap.set(log.blockNumber, log.blockHash);
+        }
+      }
+
+      for (const [blockNum, savedEntry] of savedBlockHashMap) {
+        if (blockNum < currentFrom || blockNum > currentTo) continue;
+
+        const currentHash = currentBlockHashMap.get(blockNum);
+
+        if (currentHash === undefined) {
+          // Block bien mat → collect contractListingIds bi anh huong
+          console.log(`[MarketplaceProcessor] Reorg: block ${blockNum} disappeared`);
+          for (const lid of (savedEntry.contractListingIds || [])) {
+            reorgAffectedListingIds.add(lid);
+          }
+        } else if (currentHash !== savedEntry.blockHash) {
+          // Block co blockHash khac → collect tu canonical logs
+          console.log(`[MarketplaceProcessor] Reorg: block ${blockNum} hash changed`);
+          for (const log of logs) {
+            if (log.blockNumber === blockNum) {
+              const lid = toStringId(log.args?.listingId);
+              if (lid) reorgAffectedListingIds.add(lid);
+            }
+          }
+        }
+      }
+    }
+
     for (const log of logs) {
       await processMarketplaceLog(log);
+    }
+
+    // Cap nhat recentBlockHashes voi contractListingIds
+    const newBlockHashes = [];
+    for (const log of logs) {
+      let entry = newBlockHashes.find(b => b.blockNumber === log.blockNumber);
+      if (!entry) {
+        entry = { blockNumber: log.blockNumber, blockHash: log.blockHash, contractListingIds: [] };
+        newBlockHashes.push(entry);
+      }
+      const lid = toStringId(log.args?.listingId);
+      if (lid && !entry.contractListingIds.includes(lid)) {
+        entry.contractListingIds.push(lid);
+      }
+    }
+
+    const mergedFullMap = new Map();
+    for (const [blockNumber, entry] of savedBlockHashMap) {
+      mergedFullMap.set(blockNumber, entry);
+    }
+    for (const entry of newBlockHashes) {
+      mergedFullMap.set(entry.blockNumber, { blockHash: entry.blockHash, contractListingIds: entry.contractListingIds });
+    }
+    const sortedEntries = [...mergedFullMap.entries()]
+      .sort(([a], [b]) => b - a)
+      .slice(0, reorgBuffer);
+    const updatedRecentBlockHashes = sortedEntries.map(([blockNumber, entry]) => ({
+      blockNumber,
+      blockHash: entry.blockHash,
+      contractListingIds: entry.contractListingIds,
+    }));
+
+    savedBlockHashMap.clear();
+    for (const [blockNumber, entry] of sortedEntries) {
+      savedBlockHashMap.set(blockNumber, entry);
     }
 
     await updateProgress({
       contractName: PROCESSOR_NAME,
       contractAddress,
       lastProcessedBlock: currentTo,
+      recentBlockHashes: updatedRecentBlockHashes,
       status: "syncing",
     });
 
     currentFrom = currentTo + 1;
+  }
+
+  // ── Rebuild listings bi anh huong boi reorg ────────────────────────────
+  if (reorgAffectedListingIds.size > 0) {
+    console.log(`[MarketplaceProcessor] Rebuilding ${reorgAffectedListingIds.size} listing(s) due to reorg...`);
+    for (const contractListingId of reorgAffectedListingIds) {
+      await rebuildListingFromChainLog(contractListingId, contractAddressLower);
+    }
   }
 
   await markSynced(PROCESSOR_NAME);

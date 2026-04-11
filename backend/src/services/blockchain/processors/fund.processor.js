@@ -61,6 +61,171 @@ async function rebuildFundState(eventObjectId) {
 }
 
 // -------------------------
+// FULL REBUILD FROM CHAINLOG (dùng khi detect reorg)
+// Replay toan bo ChainLog cua 1 contractEventId de tinh lai state
+// -------------------------
+async function rebuildFullEventStateFromChainLog(contractEventId, contractAddress) {
+  const logs = await chainLogRepo.findLogs(
+    { contractName: CONTRACT_NAME, contractAddress, "args.eventId": contractEventId },
+    { sort: { blockNumber: 1, transactionIndex: 1, logIndex: 1 } }
+  );
+
+  if (logs.length === 0) return;
+
+  // Reset state ve default
+  const state = {
+    status: "funding",
+    escrowStatus: "holding",
+    totalTicketsUsed: 0,
+    totalPenaltyAmount: 0,
+    ticketRevenueDeposited: 0,
+    royaltyRevenueDeposited: 0,
+    refundedAmount: 0,
+    extraRefundPoolDeposited: 0,
+    escrowedRevenue: 0,
+    refundPool: 0,
+    totalRevenue: "0",
+    organizerStakeWithdrawn: 0,
+    // Clear timestamps
+    fundingFinalizedAt: null,
+    ticketingStartedAt: null,
+    completedAt: null,
+    revenueDistributedAt: null,
+    refundEnabledAt: null,
+    lastRefundedAt: null,
+    lastRefundPoolDepositAt: null,
+    lastTicketRevenueAt: null,
+    lastRoyaltyRevenueAt: null,
+    lastContributionRefundAt: null,
+    stakeWithdrawnAt: null,
+    lastPenaltyAt: null,
+    // Clear processedTxHashes — rebuild tu dau nen reset guard
+    processedTxHashes: [],
+  };
+
+  // Replay tung log
+  for (const log of logs) {
+    const args = log.args || {};
+    switch (log.eventName) {
+      case "EventCreated":
+        state.status = "funding";
+        state.escrowStatus = "holding";
+        break;
+      case "FundingSuccessful":
+        state.status = "funded";
+        break;
+      case "FundingFinalized":
+        state.status = getEventStatusLabel(args.statusAfterFinalize);
+        state.fundingFinalizedAt = new Date();
+        break;
+      case "TicketingStarted":
+        state.status = "ticketing";
+        state.ticketingStartedAt = new Date();
+        break;
+      case "Completed":
+        state.status = "completed";
+        state.totalTicketsUsed = toNumberSafe(args.usedTickets);
+        state.completedAt = new Date();
+        break;
+      case "RevenueReleased":
+        state.status = "completed";
+        state.escrowStatus = "released";
+        state.totalRevenue = toStringId(args.totalRevenue);
+        state.revenueDistributedAt = new Date();
+        break;
+      case "RefundsEnabled":
+        state.escrowStatus = "refund_enabled";
+        state.refundPool = toNumberSafe(args.refundPoolAmount);
+        state.refundEnabledAt = new Date();
+        break;
+      case "RefundPoolDeposited":
+        state.refundPool = toNumberSafe(args.newRefundPool);
+        state.escrowStatus = "refund_pool_funded";
+        state.extraRefundPoolDeposited += toNumberSafe(args.amount);
+        state.lastRefundPoolDepositAt = new Date();
+        break;
+      case "TicketRefundPaid":
+        state.refundedAmount += toNumberSafe(args.amount);
+        state.escrowStatus = "refunding";
+        state.lastRefundedAt = new Date();
+        break;
+      case "TicketRevenueDeposited":
+        state.escrowStatus = "holding_revenue";
+        state.escrowedRevenue = toNumberSafe(args.newEscrowedRevenue);
+        state.ticketRevenueDeposited += toNumberSafe(args.amount);
+        state.lastTicketRevenueAt = new Date();
+        break;
+      case "RoyaltyDeposited":
+        state.escrowStatus = "holding_revenue";
+        state.escrowedRevenue = toNumberSafe(args.newEscrowedRevenue);
+        state.royaltyRevenueDeposited += toNumberSafe(args.amount);
+        state.lastRoyaltyRevenueAt = new Date();
+        break;
+      case "PenaltyApplied":
+        state.totalPenaltyAmount += toNumberSafe(args.amount);
+        state.lastPenaltyAt = new Date();
+        break;
+      case "ContributionRefunded":
+        state.status = "cancelled";
+        state.escrowStatus = "refunded";
+        state.refundedAmount += toNumberSafe(args.amount);
+        state.lastContributionRefundAt = new Date();
+        break;
+      case "StakeWithdrawn":
+        state.organizerStakeWithdrawn = toNumberSafe(args.amount);
+        state.stakeWithdrawnAt = new Date();
+        break;
+      default:
+        break;
+    }
+  }
+
+  // $set toan bo state len Event document
+  await eventRepo.updateByContractEventId(contractEventId, { $set: state });
+
+  // Rebuild currentFunding va sharePercentage tu Contribution
+  const eventDoc = await eventRepo.findByContractEventId(contractEventId);
+  if (eventDoc) {
+    await rebuildFundState(eventDoc._id);
+
+    // Xoa toan bo Share cua event nay, rebuild lai tu ChainLog canonical
+    // Giai quyet: Share cua donator bi reorg van con (Bug 1)
+    //             Share.claimedReward khong duoc reset (Bug 2)
+    await shareRepo.deleteByEventId(eventDoc._id);
+
+    // Re-process SharesIssued logs con lai → tao lai Share dung
+    for (const log of logs) {
+      if (log.eventName === "SharesIssued") {
+        const holder = lowerAddress(log.args?.donator);
+        const sharesMinted = toNumberSafe(log.args?.sharesMinted);
+        if (holder) {
+          await shareRepo.upsertSharesIssued(eventDoc._id, holder, sharesMinted);
+        }
+      }
+    }
+
+    // Re-process RewardClaimed logs con lai → rebuild claimedReward dung
+    for (const log of logs) {
+      if (log.eventName === "RewardClaimed") {
+        const claimer = lowerAddress(log.args?.donator);
+        const amount = toNumberSafe(log.args?.amount);
+        if (claimer) {
+          await shareRepo.incrementClaimedReward(
+            eventDoc._id,
+            claimer,
+            amount,
+            log.transactionHash
+          );
+        }
+      }
+    }
+
+    // Rebuild currentFunding va sharePercentage sau khi Share da duoc rebuild
+    await rebuildFundState(eventDoc._id);
+  }
+}
+
+// -------------------------
 // HANDLE FUNCTIONS (Idempotent)
 // -------------------------
 async function handleEventCreated(log) {
@@ -443,32 +608,164 @@ export async function processFundLogsOnce() {
   let currentFrom = plan.fromBlock;
   const target = plan.targetBlock;
 
+  // Tap hop contractEventId can full rebuild neu detect reorg
+  const reorgAffectedEventIds = new Set();
+  // TxHashes cua cac logs bi reorg (de xoa derived data)
+  const reorgAffectedTxHashes = new Set();
+  // Blocks bi reorg (bien mat hoac blockHash khac)
+  const reorgDetectedBlocks = new Set();
+
+  // Build map blockNumber -> { blockHash, txHashes } tu recentBlockHashes da luu
+  // Giu ca txHashes de dung khi detect block bien mat
+  const savedBlockHashMap = new Map(
+    (syncState.recentBlockHashes || []).map(({ blockNumber, blockHash, txHashes }) => [
+      blockNumber,
+      { blockHash, txHashes: txHashes || [] },
+    ])
+  );
+
   while (currentFrom <= target) {
     const currentTo = Math.min(target, currentFrom + chunkSize - 1);
 
-  const logs = await chainLogRepo.findLogs(
-  {
-    contractName: CONTRACT_NAME,
-    contractAddress,
-    blockNumber: { $gte: currentFrom, $lte: currentTo },
-  },
-  {
-    sort: { blockNumber: 1, transactionIndex: 1, logIndex: 1 },
-  }
-);
+    const logs = await chainLogRepo.findLogs(
+      {
+        contractName: CONTRACT_NAME,
+        contractAddress,
+        blockNumber: { $gte: currentFrom, $lte: currentTo },
+      },
+      { sort: { blockNumber: 1, transactionIndex: 1, logIndex: 1 } }
+    );
+
+    // ── Reorg detection: kiem tra ca block co blockHash khac VA block bien mat
+    if (savedBlockHashMap.size > 0) {
+      const currentBlockHashMap = new Map();
+      for (const log of logs) {
+        if (!currentBlockHashMap.has(log.blockNumber)) {
+          currentBlockHashMap.set(log.blockNumber, log.blockHash);
+        }
+      }
+
+      for (const [blockNum, savedEntry] of savedBlockHashMap) {
+        if (blockNum < currentFrom || blockNum > currentTo) continue;
+
+        const currentHash = currentBlockHashMap.get(blockNum);
+
+        if (currentHash === undefined) {
+          // Block bien mat → reorg
+          console.log(`[FundProcessor] Reorg: block ${blockNum} disappeared`);
+          // Lay txHashes tu savedEntry (da luu truoc khi block bi xoa)
+          for (const txHash of (savedEntry.txHashes || [])) {
+            reorgAffectedTxHashes.add(txHash);
+          }
+          reorgDetectedBlocks.add(blockNum);
+        } else if (currentHash !== savedEntry.blockHash) {
+          // Block co blockHash khac → reorg
+          console.log(`[FundProcessor] Reorg: block ${blockNum} hash changed`);
+          for (const log of logs) {
+            if (log.blockNumber === blockNum) {
+              const eid = toStringId(log.args?.eventId);
+              if (eid) reorgAffectedEventIds.add(eid);
+              if (log.transactionHash) reorgAffectedTxHashes.add(log.transactionHash.toLowerCase());
+            }
+          }
+        }
+      }
+    }
 
     for (const log of logs) {
       await processFundLog(log);
     }
 
+    // Cap nhat recentBlockHashes: giu lai reorgBuffer blocks cuoi, luu ca txHashes
+    const newBlockHashes = [];
+    for (const log of logs) {
+      let entry = newBlockHashes.find(b => b.blockNumber === log.blockNumber);
+      if (!entry) {
+        entry = { blockNumber: log.blockNumber, blockHash: log.blockHash, txHashes: [] };
+        newBlockHashes.push(entry);
+      }
+      if (log.transactionHash && !entry.txHashes.includes(log.transactionHash.toLowerCase())) {
+        entry.txHashes.push(log.transactionHash.toLowerCase());
+      }
+    }
+
+    // Merge voi saved, giu lai reorgBuffer entries moi nhat, BAO GOM txHashes
+    const mergedFullMap = new Map();
+    // Dua vao saved truoc
+    for (const [blockNumber, entry] of savedBlockHashMap) {
+      mergedFullMap.set(blockNumber, entry);
+    }
+    // Override/them voi new (new co txHashes day du)
+    for (const entry of newBlockHashes) {
+      mergedFullMap.set(entry.blockNumber, { blockHash: entry.blockHash, txHashes: entry.txHashes });
+    }
+    // Chi giu reorgBuffer blocks cuoi
+    const sortedEntries = [...mergedFullMap.entries()]
+      .sort(([a], [b]) => b - a)
+      .slice(0, reorgBuffer);
+    const updatedRecentBlockHashes = sortedEntries.map(([blockNumber, entry]) => ({
+      blockNumber,
+      blockHash: entry.blockHash,
+      txHashes: entry.txHashes,
+    }));
+
+    // Cap nhat savedBlockHashMap cho chunk tiep theo
+    savedBlockHashMap.clear();
+    for (const [blockNumber, entry] of sortedEntries) {
+      savedBlockHashMap.set(blockNumber, entry);
+    }
+
+    const lastLogInChunk = logs[logs.length - 1];
+    const lastBlockHashInChunk = lastLogInChunk?.blockHash ?? syncState.lastBlockHash;
+
     await updateProgress({
       contractName: PROCESSOR_NAME,
       contractAddress,
       lastProcessedBlock: currentTo,
+      lastBlockHash: lastBlockHashInChunk,
+      recentBlockHashes: updatedRecentBlockHashes,
       status: "syncing",
     });
 
     currentFrom = currentTo + 1;
+  }
+
+  // ── Xu ly block bien mat: collect eventIds tu ChainLog con lai
+  // txHashes da duoc collect truc tiep trong detection loop tu savedEntry.txHashes
+  for (const _blockNum of reorgDetectedBlocks) {
+    // Collect eventIds tu tat ca ChainLog con lai (canonical)
+    const relatedLogs = await chainLogRepo.findLogs(
+      { contractName: CONTRACT_NAME, contractAddress },
+      {}
+    );
+    for (const l of relatedLogs) {
+      const eid = toStringId(l.args?.eventId);
+      if (eid) reorgAffectedEventIds.add(eid);
+    }
+  }
+
+  // ── Full rebuild cho cac event bi anh huong boi reorg
+  if (reorgAffectedEventIds.size > 0 || reorgAffectedTxHashes.size > 0) {
+    console.log(`[FundProcessor] Reorg cleanup: ${reorgAffectedTxHashes.size} txHashes, ${reorgAffectedEventIds.size} events`);
+
+    // Buoc 3: Xoa derived data cua cac tx bi reorg
+    if (reorgAffectedTxHashes.size > 0) {
+      const txHashArr = [...reorgAffectedTxHashes];
+      await contributionRepo.deleteByTxHashes(txHashArr);
+      await penaltyRepo.deleteByTxHashes(txHashArr);
+      await revenueDistributionRepo.deleteByTxHashes(txHashArr);
+      await rewardClaimRepo.deleteByTxHashes(txHashArr);
+      // Xoa processedTxHashes guard tren Event de cho phep re-process
+      await eventRepo.clearProcessedTxHashes(txHashArr);
+      // Xoa processedRewardTxHashes tren Share
+      await shareRepo.clearProcessedRewardTxHashes(txHashArr);
+      console.log(`[FundProcessor] Deleted derived data for ${txHashArr.length} reorged txHashes`);
+    }
+
+    // Buoc 4+5: Rebuild Event state va Fund state
+    for (const contractEventId of reorgAffectedEventIds) {
+      await rebuildFullEventStateFromChainLog(contractEventId, contractAddress);
+    }
   }
 
   await markSynced(PROCESSOR_NAME);
