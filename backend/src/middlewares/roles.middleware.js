@@ -9,7 +9,7 @@ import { UnauthorizedError, ForbiddenError } from '../utils/customErrors.js';
  * Require specific role(s) to access endpoint
  * Admin role always has access to all endpoints
  *
- * @param {...string} roles - Required roles (user, organizer, verifier, admin)
+ * @param {...string} roles - Required roles (user, verifier, admin)
  * @returns {Function} Express middleware function
  */
 export function requireRole(...roles) {
@@ -34,16 +34,14 @@ export function requireRole(...roles) {
 }
 
 /**
- * Require organizer or admin role
- * Convenience helper for organizer-only endpoints
- */
-export const requireOrganizer = requireRole('organizer', 'admin');
+
+
 
 /**
- * Require app user, organizer, or admin role
+
  * Used for self-service event CRUD; ownership is validated separately.
  */
-export const requireEventCreator = requireRole('user', 'organizer', 'admin');
+export const requireEventCreator = requireRole('user', 'admin');
 
 /**
  * Require verifier or admin role
