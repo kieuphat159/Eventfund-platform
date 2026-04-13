@@ -19,12 +19,17 @@ import { useAuth } from "../../contexts/AuthContext";
 import { getUserTickets, type ApiTicket } from "../../services/tickets.service";
 import { listTicket } from "@/app/services/listings.service";
 import { QRCodeCanvas } from "qrcode.react";
-import { ethers } from "ethers";
+import { ethers, formatEther } from "ethers";
 
 const ETH_ADDRESS_REGEX = /^0x[a-fA-F0-9]{40}$/;
 
 const buildQR = (ticket: ApiTicket) => {
   return `http://localhost:3000/tickets/verify/${ticket.tokenId}`;
+};
+
+const getTicketQrCanvasId = (ticket: ApiTicket) => {
+  const rawId = String(ticket._id || ticket.tokenId || "unknown");
+  return `ticket-qr-${rawId.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
 };
 
 const formatTicketType = (type?: string) => {
@@ -91,15 +96,47 @@ export const MyTickets: React.FC = () => {
 
   const totalValue = useMemo(() => {
     return tickets.reduce(
-      (sum, ticket) => sum + Number(ticket.originalPrice || 0),
-      0,
+      (sum, ticket) => sum + BigInt(ticket.originalPrice || "0"),
+      0n, // 0n là khởi tạo kiểu BigInt
     );
   }, [tickets]);
 
-  const formatEth = (amount: number) => {
-    return Number.isFinite(amount)
-      ? amount.toFixed(3).replace(/\.?0+$/, "")
-      : "0";
+  const formatEth = (wei: string | bigint | number) => {
+    if (!wei || wei === "0" || wei === "0x0") return "0";
+
+    try {
+      // formatEther nhận string hoặc bigint
+      const ethString = formatEther(wei.toString());
+
+      return parseFloat(ethString)
+        .toFixed(3)
+        .replace(/\.?0+$/, "");
+    } catch (error) {
+      return "0";
+    }
+  };
+  // Test thử:
+  console.log(formatEth("1500000000000000000")); // "1.5"
+  console.log(formatEth("2000000000000000")); // "0.002"
+  console.log(formatEth(1000000000000000000n)); // "1" (Hỗ trợ cả BigInt)
+
+  const downloadTicketQR = (ticket: ApiTicket) => {
+    const canvasId = getTicketQrCanvasId(ticket);
+    const canvas = document.getElementById(
+      canvasId,
+    ) as HTMLCanvasElement | null;
+
+    if (!canvas) {
+      return;
+    }
+
+    const url = canvas.toDataURL("image/png");
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `ticket-${ticket.tokenId}-qr.png`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   return (
@@ -160,7 +197,7 @@ export const MyTickets: React.FC = () => {
             [event?.venue?.name, event?.venue?.address]
               .filter(Boolean)
               .join(" - ") || "Unknown venue";
-          const purchasePrice = Number(ticket.originalPrice || 0);
+          const purchasePrice = ticket.originalPrice || "0";
 
           return (
             <Card
@@ -215,6 +252,14 @@ export const MyTickets: React.FC = () => {
                 </div>
 
                 <div className="grid grid-cols-3 gap-2">
+                  <div className="hidden">
+                    <QRCodeCanvas
+                      id={getTicketQrCanvasId(ticket)}
+                      value={buildQR(ticket)}
+                      size={800}
+                      includeMargin
+                    />
+                  </div>
                   <Button
                     variant="outline"
                     size="sm"
@@ -227,6 +272,7 @@ export const MyTickets: React.FC = () => {
                     variant="outline"
                     size="sm"
                     className="border-slate-700 hover:bg-slate-800"
+                    onClick={() => downloadTicketQR(ticket)}
                   >
                     <Download className="w-4 h-4" />
                   </Button>

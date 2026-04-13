@@ -62,6 +62,15 @@ export interface GetListingsParams {
   sortOrder?: "asc" | "desc";
 }
 
+export interface MarketplaceStats {
+  totalListings: number;
+  activeListings: number;
+  soldListings: number;
+  cancelledListings: number;
+  totalVolume: string;
+  averagePrice: string;
+}
+
 /* =========================
    RESPONSE TYPES
 ========================= */
@@ -154,6 +163,12 @@ export async function listTicket(payload: CreateListingPayload) {
   }
 }
 
+export async function getMarketplaceStats() {
+  const res =
+    await api.get<ApiResponse<MarketplaceStats>>("/marketplace/stats");
+  return res.data;
+}
+
 /* =========================
    EXPORT OBJECT
 ========================= */
@@ -162,4 +177,5 @@ export const listingService = {
   getAll: getListings,
   getById: getListingById,
   create: listTicket,
+  getStats: getMarketplaceStats,
 };
