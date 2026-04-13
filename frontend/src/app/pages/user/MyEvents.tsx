@@ -1,10 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Calendar, MapPin, Users, Plus, Edit, Trash2 } from 'lucide-react';
 import { Card, CardContent } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { StatusBadge } from '../../components/StatusBadge';
-import { deleteEvent, getEvents, type EventItem } from '../../services/events.service';
+import { deleteEvent, getMyEvents, type EventItem } from '../../services/events.service';
 import { useAuth } from '../../contexts/AuthContext';
 
 export const MyEvents: React.FC = () => {
@@ -17,10 +17,16 @@ export const MyEvents: React.FC = () => {
   const [deletingId, setDeletingId] = useState<string>('');
 
   const fetchEvents = async () => {
+    if (!user?.walletAddress) {
+      setEvents([]);
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
       setError('');
-      const data = await getEvents();
+      const data = await getMyEvents(user.walletAddress);
       setEvents(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load events');
@@ -31,17 +37,7 @@ export const MyEvents: React.FC = () => {
 
   useEffect(() => {
     fetchEvents();
-  }, []);
-
-  const myEvents = useMemo(() => {
-    const wallet = user?.walletAddress?.toLowerCase?.() || '';
-    if (!wallet) return events;
-
-    return events.filter((event) => {
-      const organizer = (event.organizer || event.organizerWallet || '').toLowerCase();
-      return organizer === wallet;
-    });
-  }, [events, user]);
+  }, [user?.walletAddress]);
 
   const handleDelete = async (event: EventItem) => {
     const eventId = event._id || event.id;
@@ -64,10 +60,10 @@ export const MyEvents: React.FC = () => {
   };
 
   const stats = [
-    { label: 'Total Events', value: myEvents.length.toString() },
-    { label: 'Draft', value: myEvents.filter((e) => e.status === 'draft').length.toString() },
-    { label: 'Total Tickets Sold', value: myEvents.reduce((sum, e) => sum + (e.ticketsSold || 0), 0).toString() },
-    { label: 'Revenue', value: '-' },
+    { label: 'Total Events', value: events.length.toString() },
+    { label: 'Draft', value: events.filter((e) => e.status === 'draft').length.toString() },
+    { label: 'Total Tickets Sold', value: events.reduce((sum, e) => sum + (e.ticketsSold || 0), 0).toString() },
+    { label: 'Funding Raised', value: events.reduce((sum, e) => sum + Number(e.currentFunding || 0), 0).toString() },
   ];
 
   if (loading) return <div className="text-white">Loading your events...</div>;
@@ -103,8 +99,8 @@ export const MyEvents: React.FC = () => {
       </div>
 
       <div className="space-y-4">
-        {myEvents.length > 0 ? (
-          myEvents.map((event) => {
+        {events.length > 0 ? (
+          events.map((event) => {
             const eventId = event._id || event.id || '';
             const totalTickets =
               typeof event.totalTickets === 'number'

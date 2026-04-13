@@ -56,8 +56,14 @@ export const EventDetail: React.FC = () => {
     );
   }, [event]);
 
+  const eventId = event?._id || event?.id || "";
+  const fundingGoal = Number(event?.fundingGoal ?? 0);
+  const currentFunding = Number(event?.currentFunding ?? 0);
+  const fundingProgress =
+    fundingGoal > 0 ? Math.min((currentFunding / fundingGoal) * 100, 100) : 0;
+
   const isInvestable =
-    event?.status === "funding" && Number(event?.fundingGoal ?? 0) > 0;
+    event?.status === "funding" && fundingGoal > 0;
 
   const coverImage = event?.imageUrls?.[0] || "";
 
@@ -67,15 +73,15 @@ export const EventDetail: React.FC = () => {
       return;
     }
 
-    if (!event?._id) return;
+    if (!eventId) return;
 
     setInvestError("");
     setInvestSuccess("");
     setInvesting(true);
     try {
-      await investInEvent(event._id, investmentAmount);
+      await investInEvent(eventId, investmentAmount);
       setInvestSuccess("Investment successful. Refreshing event data...");
-      const refreshedEvent = await getEventById(event._id);
+      const refreshedEvent = await getEventById(eventId);
       setEvent(refreshedEvent);
     } catch (err) {
       setInvestError(err instanceof Error ? err.message : "Investment failed");
@@ -143,6 +149,28 @@ export const EventDetail: React.FC = () => {
                   event.organizerWallet ||
                   "Unknown organizer"}
               </code>
+            </div>
+
+            <div className="bg-slate-900 border border-slate-800 rounded-lg p-4">
+              <div className="flex items-center justify-between text-sm text-slate-300 mb-2">
+                <span>Funding progress</span>
+                <span>{fundingProgress.toFixed(1)}%</span>
+              </div>
+              <div className="h-2 rounded-full bg-slate-800 overflow-hidden mb-3">
+                <div
+                  className="h-full bg-gradient-to-r from-emerald-400 to-cyan-400"
+                  style={{ width: `${fundingProgress}%` }}
+                />
+              </div>
+              <div className="flex flex-wrap gap-4 text-sm text-slate-400">
+                <span>Raised: {currentFunding}</span>
+                <span>Goal: {fundingGoal}</span>
+                {event.fundingDeadline ? (
+                  <span>
+                    Deadline: {new Date(event.fundingDeadline).toLocaleDateString()}
+                  </span>
+                ) : null}
+              </div>
             </div>
           </div>
         </div>

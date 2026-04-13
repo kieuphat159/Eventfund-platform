@@ -18,13 +18,23 @@ export interface InvestmentDetail {
   createdAt: string;
 }
 
+function normalizeInvestment(detail: InvestmentDetail): InvestmentDetail {
+  return {
+    ...detail,
+    contributionAmount: Number(detail.contributionAmount || 0),
+    sharePercentage: Number(detail.sharePercentage || 0),
+    claimedReward: Number(detail.claimedReward || 0),
+    pendingReward: Number(detail.pendingReward || 0),
+  };
+}
+
 export async function getInvestments(): Promise<InvestmentDetail[]> {
   const response = await api.get<{
     success: boolean;
     data: InvestmentDetail[];
   }>("/users/shares");
 
-  return response.data || [];
+  return (response.data || []).map(normalizeInvestment);
 }
 
 export async function getInvestmentById(id: string): Promise<InvestmentDetail> {
@@ -32,7 +42,7 @@ export async function getInvestmentById(id: string): Promise<InvestmentDetail> {
     `/users/shares/${id}`,
   );
 
-  return response.data;
+  return normalizeInvestment(response.data);
 }
 
 export async function investInEvent(

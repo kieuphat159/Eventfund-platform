@@ -125,7 +125,7 @@ export const MyInvestments: React.FC = () => {
           ) : investments.length === 0 ? (
             <div className="py-12 text-center space-y-4">
               <p className="text-slate-400">No investments found yet.</p>
-              <Link to="/app/events/my-events">
+              <Link to="/explore">
                 <Button className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white">
                   Browse events to invest
                 </Button>
@@ -245,7 +245,7 @@ export const MyInvestments: React.FC = () => {
                 Browse events and invest in their success
               </p>
             </div>
-            <Link to="/app/events/my-events">
+            <Link to="/explore">
               <Button className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white">
                 Browse Events
               </Button>

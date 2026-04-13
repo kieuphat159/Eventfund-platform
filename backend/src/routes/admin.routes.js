@@ -340,6 +340,21 @@ router.delete('/users/:walletAddress', authenticate, requireAdmin, controller.de
  */
 router.get('/events', authenticate, requireAdmin, controller.getEvents);
 
+router.get(
+  '/events/:id',
+  authenticate,
+  requireAdmin,
+  controller.getEventById,
+);
+
+router.patch(
+  '/events/:id',
+  authenticate,
+  requireAdmin,
+  validate({ body: adminSchemas.updateEvent }),
+  controller.updateEvent,
+);
+
 /**
  * @swagger
  * /admin/events/{id}/status:
@@ -397,6 +412,14 @@ router.get('/events', authenticate, requireAdmin, controller.getEvents);
  *         description: Server error
  */
 router.patch('/events/:id/status', authenticate, requireAdmin, validate({ body: adminSchemas.updateEventStatus }), controller.updateEventStatus);
+
+router.get(
+  '/events/:id/investments',
+  authenticate,
+  requireAdmin,
+  validate({ query: adminSchemas.eventInvestmentsQuery }),
+  controller.getEventInvestments,
+);
 
 /**
  * @swagger
