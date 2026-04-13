@@ -23,6 +23,7 @@ import { Card, CardContent } from "../../components/ui/card";
 import { Badge } from "../../components/ui/badge";
 import { ImageWithFallback } from "../../components/figma/ImageWithFallback";
 import { useAuth } from "../../contexts/AuthContext";
+import { ethers } from "ethers";
 import {
   listingService,
   type ApiEvent,
@@ -31,7 +32,9 @@ import {
 } from "../../services/listings.service";
 
 type ListingEvent = ApiEvent & {
-  venue?: string;
+  venue?: {
+    address: string;
+  };
   description?: string;
   contractEventId?: string;
   network?: string;
@@ -40,6 +43,11 @@ type ListingEvent = ApiEvent & {
 type ListingTicket = ApiTicket & {
   transferHistory?: unknown[];
   metadataUri?: string;
+};
+
+const formatTicketType = (type?: string) => {
+  if (!type) return "Standard";
+  return type.charAt(0).toUpperCase() + type.slice(1);
 };
 
 export const TicketDetail: React.FC = () => {
@@ -106,8 +114,9 @@ export const TicketDetail: React.FC = () => {
   }
 
   const parseEth = (value?: string | number) => {
-    const parsed = Number(value ?? 0);
-    return Number.isFinite(parsed) ? parsed : 0;
+    if (!value) return 0;
+
+    return Number(ethers.formatEther(value.toString()));
   };
 
   const shortenAddress = (address?: string) => {
@@ -138,7 +147,6 @@ export const TicketDetail: React.FC = () => {
   const listingPrice = parseEth(listing.price);
   const maxPrice = parseEth(listing.maxPrice);
   const originalPrice = parseEth(ticket?.originalPrice);
-  const lastSalePrice = parseEth(ticket?.originalPrice);
   const belowMaxPct =
     maxPrice > 0
       ? Math.max(0, ((maxPrice - listingPrice) / maxPrice) * 100)
@@ -155,13 +163,9 @@ export const TicketDetail: React.FC = () => {
     ? `https://etherscan.io/tx/${listing.txHash}`
     : "#";
 
-  // Gallery images (main image + additional placeholder images)
-  const galleryImages = [
-    ...(event?.imageUrls ?? []),
-    "https://images.unsplash.com/photo-1540039155733-5bb30b53aa14?w=800",
-    "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=800",
-    "https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=800",
-  ];
+  // Gallery images
+
+  const galleryImages = event?.imageUrls?.length ? event.imageUrls : [];
 
   const handleCopyAddress = (address: string) => {
     navigator.clipboard.writeText(address);
@@ -199,7 +203,7 @@ export const TicketDetail: React.FC = () => {
             {/* Main Image */}
             <div className="aspect-video rounded-2xl overflow-hidden bg-slate-900 border border-slate-800">
               <ImageWithFallback
-                src={galleryImages[selectedImage]}
+                src={galleryImages[selectedImage] || ""}
                 alt={event?.title || "Event image"}
                 className="w-full h-full object-cover"
               />
@@ -242,7 +246,7 @@ export const TicketDetail: React.FC = () => {
                   <MapPin className="w-5 h-5 text-orange-400 mx-auto mb-2" />
                   <p className="text-xs text-slate-500 mb-1">Location</p>
                   <p className="text-sm text-white font-medium">
-                    {event?.venue || "N/A"}
+                    {event?.venue?.address || "N/A"}
                   </p>
                 </CardContent>
               </Card>
@@ -269,7 +273,7 @@ export const TicketDetail: React.FC = () => {
                   <div>
                     <p className="text-xs text-slate-500 mb-1">Ticket Type</p>
                     <p className="text-xl font-bold text-white">
-                      {ticket?.ticketType || "standard"}
+                      {formatTicketType(ticket?.ticketType)}
                     </p>
                   </div>
                   <Ticket className="w-8 h-8 text-purple-400" />
@@ -283,11 +287,11 @@ export const TicketDetail: React.FC = () => {
                 <p className="text-sm text-slate-500 mb-2">Current Price</p>
                 <div className="flex items-baseline gap-2 mb-3">
                   <span className="text-4xl font-bold text-purple-400">
-                    {listingPrice.toFixed(4)}
+                    {listingPrice}
                   </span>
                   <span className="text-xl text-slate-400">ETH</span>
                   <span className="text-sm text-slate-500 ml-2">
-                    (≈ ${(listingPrice * 2400).toFixed(2)} USD)
+                    (≈ ${(Number(listingPrice) * 2400).toFixed(2)} USD)
                   </span>
                 </div>
                 <div className="flex items-center gap-2 text-sm text-green-400">
@@ -329,10 +333,7 @@ export const TicketDetail: React.FC = () => {
                     <p className="text-xs text-slate-500">Location</p>
                   </div>
                   <p className="text-sm text-white font-medium">
-                    {event?.venue || "N/A"}
-                  </p>
-                  <p className="text-xs text-slate-400 mt-1">
-                    {event?._id || "Event ID unavailable"}
+                    {event?.venue?.address || "N/A"}
                   </p>
                 </CardContent>
               </Card>
@@ -425,12 +426,6 @@ export const TicketDetail: React.FC = () => {
                   Buy Now for {listingPrice.toFixed(4)} ETH
                 </Button>
               )}
-              <Button
-                variant="outline"
-                className="w-full h-12 border-slate-800 text-white hover:bg-slate-800"
-              >
-                Make Offer
-              </Button>
             </div>
 
             {/* Security Notice */}
@@ -725,14 +720,7 @@ export const TicketDetail: React.FC = () => {
                       {maxPrice > 0 ? `${maxPrice.toFixed(4)} ETH` : "N/A"}
                     </span>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-slate-400">Last Sale</span>
-                    <span className="text-sm text-white font-medium">
-                      {lastSalePrice > 0
-                        ? `${lastSalePrice.toFixed(4)} ETH`
-                        : "N/A"}
-                    </span>
-                  </div>
+                  <div className="flex items-center justify-between"></div>
                   <div className="pt-3 border-t border-slate-800">
                     <div className="flex items-center justify-between">
                       <span className="text-sm text-slate-400">
