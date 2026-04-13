@@ -38,6 +38,12 @@ const revenueDistributionSchema = new mongoose.Schema({
     required: true,
   },
 
+  // Accumulated reward per share snapshot at distribution time
+  accRewardPerShare: {
+    type: Number,
+    default: 0,
+  },
+
   // Distribution status
   status: {
     type: String,
@@ -57,6 +63,8 @@ const revenueDistributionSchema = new mongoose.Schema({
     type: String,
     trim: true,
     lowercase: true,
+    unique: true,
+    sparse: true,
   },
 
   // Trigger info

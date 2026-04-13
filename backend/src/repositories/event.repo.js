@@ -158,3 +158,147 @@ export async function getRevenueStats(models = {}) {
     totalFunding: totalFunding.toString()
   };
 }
+
+/**
+ * Upsert Event by contractEventId (idempotent)
+ * @param {string} contractEventId
+ * @param {Object} data - Data to update/insert
+ * @param {Object} models - Injected models (optional)
+ * @returns {Promise<Object>} Updated/created event as plain object
+ */
+export async function upsertByContractEventId(contractEventId, data, models = {}) {
+  const Event = models.Event || DefaultEvent;
+
+  // Build $set explicitly — no spread to avoid injecting stale/unknown fields
+  const setFields = {
+    contractEventId,
+    organizer: data.organizer,
+    fundingGoal: data.fundingGoal,
+    fundingDeadline: data.fundingDeadline,
+    minStakeRequired: data.minStakeRequired,
+    organizerShareBps: data.organizerShareBps,
+    ticketPrice: data.ticketPrice,
+    maxTickets: data.maxTickets,
+    usedThreshold: data.usedThreshold,
+    organizerStake: data.organizerStake, // was organizerStakeLocked — corrected
+    status: data.status,
+    escrowStatus: data.escrowStatus,
+    // createdByTxHash and createdBlockNumber omitted: traceable via ChainLog
+  };
+
+  // Strip undefined values so Mongoose doesn't overwrite existing fields with undefined
+  Object.keys(setFields).forEach((k) => setFields[k] === undefined && delete setFields[k]);
+
+  const result = await Event.findOneAndUpdate(
+    { contractEventId },
+    {
+      $set: setFields,
+      $setOnInsert: {
+        createdAt: new Date(),
+        currentFunding: "0",  // String to match schema type
+        totalRevenue: "0",    // String to match schema type
+        refundedAmount: 0,
+      },
+    },
+    {
+      new: true,
+      upsert: true,
+      runValidators: true,
+      lean: true
+    }
+  );
+
+  return result;
+}
+
+/**
+ * Update event by contractEventId (dùng trong full rebuild)
+ */
+export async function updateByContractEventId(contractEventId, updates, models = {}) {
+  const Event = models.Event || DefaultEvent;
+  return await Event.findOneAndUpdate(
+    { contractEventId },
+    updates,
+    { new: true, lean: true }
+  );
+}
+
+/**
+ * Find event by contractEventId (dùng trong processor)
+ */
+export async function findByContractEventId(contractEventId, models = {}) {
+  const Event = models.Event || DefaultEvent;
+  return await Event.findOne({ contractEventId }).lean();
+}
+
+/**
+ * Check xem txHash+field da duoc xu ly chua (idempotency guard cho $inc)
+ * Tra ve true neu da xu ly (should skip), false neu chua (should process)
+ */
+export async function isTxHashProcessed(eventId, txHash, field, models = {}) {
+  const Event = models.Event || DefaultEvent;
+  const count = await Event.countDocuments({
+    _id: eventId,
+    processedTxHashes: { $elemMatch: { txHash: txHash.toLowerCase(), field } },
+  });
+  return count > 0;
+}
+
+/**
+ * Mark txHash+field da xu ly (them vao processedTxHashes array)
+ */
+export async function markTxHashProcessed(eventId, txHash, field, models = {}) {
+  const Event = models.Event || DefaultEvent;
+  await Event.updateOne(
+    { _id: eventId },
+    { $addToSet: { processedTxHashes: { txHash: txHash.toLowerCase(), field } } }
+  );
+}
+
+/**
+ * Atomically apply $inc/$set once per (txHash, field).
+ * Returns true when delta is applied, false when txHash+field was already processed.
+ */
+export async function applyIdempotentDeltaByTxHash(
+  eventId,
+  txHash,
+  field,
+  { inc = {}, set = {} } = {},
+  models = {}
+) {
+  const Event = models.Event || DefaultEvent;
+  const normalizedTxHash = txHash.toLowerCase();
+
+  const update = {
+    $addToSet: { processedTxHashes: { txHash: normalizedTxHash, field } },
+  };
+
+  if (inc && Object.keys(inc).length > 0) update.$inc = inc;
+  if (set && Object.keys(set).length > 0) update.$set = set;
+
+  const result = await Event.updateOne(
+    {
+      _id: eventId,
+      processedTxHashes: {
+        $not: { $elemMatch: { txHash: normalizedTxHash, field } },
+      },
+    },
+    update
+  );
+
+  return result.modifiedCount > 0;
+}
+
+/**
+ * Clear processedTxHashes entries cho cac txHash bi reorg
+ * Cho phep processor re-process lai cac tx do
+ */
+export async function clearProcessedTxHashes(txHashes, models = {}) {
+  const Event = models.Event || DefaultEvent;
+  return await Event.updateMany(
+    {},
+    { $pull: { processedTxHashes: { txHash: { $in: txHashes } } } }
+  );
+}
+
+export default { createEvent, findById, findEvents, updateById, deleteById, updateFundingStatus, incrementTicketCounters, countEvents, getRevenueStats, upsertByContractEventId, findByContractEventId, isTxHashProcessed, markTxHashProcessed, applyIdempotentDeltaByTxHash, updateByContractEventId, clearProcessedTxHashes };

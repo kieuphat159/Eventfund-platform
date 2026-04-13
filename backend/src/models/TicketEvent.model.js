@@ -29,7 +29,7 @@ const TicketEventSchema = new mongoose.Schema(
     // TicketUsed
     owner: { type: String, index: true },
     verifier: { type: String, index: true },
-    usedAt: { type: String },
+    usedAt: { type: String }, // Unix timestamp as string (on-chain value)
 
     // TicketRefunded
     refundAmountWei: { type: String },
