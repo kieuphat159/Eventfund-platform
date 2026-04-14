@@ -21,8 +21,9 @@ const contributionSchema = new mongoose.Schema({
   },
 
   amount: {
-    type: Number,
+    type: String,
     required: true,
+    default: "0",
   },
 
   sharePercentage: {

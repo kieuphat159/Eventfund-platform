@@ -6,7 +6,6 @@ export interface ApiEvent {
   startDate?: string;
   endDate?: string;
   venue?: {
-    name?: string;
     address?: string;
   };
 }

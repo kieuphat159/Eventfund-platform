@@ -1,27 +1,39 @@
-import React, { useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Calendar, MapPin, Plus, Trash2 } from 'lucide-react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
-import { Button } from '../../components/ui/button';
-import { Input } from '../../components/ui/input';
-import { Textarea } from '../../components/ui/textarea';
-import { Label } from '../../components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
+import React, { useEffect, useRef, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { ArrowLeft, Calendar, MapPin, Plus, Trash2 } from "lucide-react";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "../../components/ui/card";
+import { Button } from "../../components/ui/button";
+import { Input } from "../../components/ui/input";
+import { Textarea } from "../../components/ui/textarea";
+import { Label } from "../../components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../../components/ui/select";
 import {
   getAdminEventById,
   updateAdminEvent,
   type EventStatus,
-} from '../../services/events.service';
+} from "../../services/events.service";
 
 const EVENT_STATUSES: EventStatus[] = [
-  'draft',
-  'funding',
-  'funded',
-  'ticketing',
-  'ongoing',
-  'completed',
-  'cancelled',
-  'failed',
+  "draft",
+  "funding",
+  "funded",
+  "ticketing",
+  "ongoing",
+  "completed",
+  "cancelled",
+  "failed",
 ];
 
 type TicketTierForm = {
@@ -36,76 +48,86 @@ export const AdminEditEvent: React.FC = () => {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
   const [formData, setFormData] = useState({
-    title: '',
-    description: '',
-    category: '',
-    status: 'draft' as EventStatus,
-    startDate: '',
-    endDate: '',
-    fundingGoal: '',
-    minStakeRequired: '',
-    fundingDeadline: '',
-    venueName: '',
-    venueAddress: '',
+    title: "",
+    description: "",
+    category: "",
+    status: "draft" as EventStatus,
+    startDate: "",
+    endDate: "",
+    fundingGoal: "",
+    minStakeRequired: "",
+    fundingDeadline: "",
+    venueAddress: "",
   });
   const [ticketTiers, setTicketTiers] = useState<TicketTierForm[]>([
-    { name: '', price: '', supply: '' },
+    { name: "", price: "", supply: "" },
   ]);
+  const topAnchorRef = useRef<HTMLDivElement | null>(null);
+
+  const scrollToTop = () => {
+    topAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
 
   useEffect(() => {
     const fetchEvent = async () => {
       if (!id) {
-        setError('Invalid event id');
+        setError("Invalid event id");
         setLoading(false);
         return;
       }
 
       try {
         setLoading(true);
-        setError('');
+        setError("");
 
         const foundEvent = await getAdminEventById(id);
 
         if (!foundEvent) {
-          setError('Event not found');
+          setError("Event not found");
           return;
         }
 
         setFormData({
-          title: foundEvent.title || '',
-          description: foundEvent.description || '',
-          category: foundEvent.category || '',
-          status: foundEvent.status || 'draft',
+          title: foundEvent.title || "",
+          description: foundEvent.description || "",
+          category: foundEvent.category || "",
+          status: foundEvent.status || "draft",
           startDate: foundEvent.startDate
             ? new Date(foundEvent.startDate).toISOString().slice(0, 16)
-            : '',
+            : "",
           endDate: foundEvent.endDate
             ? new Date(foundEvent.endDate).toISOString().slice(0, 16)
-            : '',
-          fundingGoal: foundEvent.fundingGoal != null ? String(foundEvent.fundingGoal) : '',
+            : "",
+          fundingGoal:
+            foundEvent.fundingGoal != null
+              ? String(foundEvent.fundingGoal)
+              : "",
           minStakeRequired:
-            foundEvent.minStakeRequired != null ? String(foundEvent.minStakeRequired) : '',
+            foundEvent.minStakeRequired != null
+              ? String(foundEvent.minStakeRequired)
+              : "",
           fundingDeadline: foundEvent.fundingDeadline
             ? new Date(foundEvent.fundingDeadline).toISOString().slice(0, 16)
-            : '',
-          venueName: foundEvent.venue?.name || '',
-          venueAddress: foundEvent.venue?.address || '',
+            : "",
+          venueAddress: foundEvent.venue?.address || "",
         });
         setTicketTiers(
           foundEvent.ticketTiers?.length
             ? foundEvent.ticketTiers.map((tier) => ({
-                name: tier.name || '',
-                price: tier.price != null ? String(tier.price) : '',
-                supply: tier.totalSupply != null ? String(tier.totalSupply) : '',
+                name: tier.name || "",
+                price: tier.price != null ? String(tier.price) : "",
+                supply:
+                  tier.totalSupply != null ? String(tier.totalSupply) : "",
               }))
-            : [{ name: '', price: '', supply: '' }],
+            : [{ name: "", price: "", supply: "" }],
         );
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load event');
+        setError(err instanceof Error ? err.message : "Failed to load event");
       } finally {
         setLoading(false);
       }
@@ -114,11 +136,21 @@ export const AdminEditEvent: React.FC = () => {
     fetchEvent();
   }, [id]);
 
+  useEffect(() => {
+    if (error || success) {
+      scrollToTop();
+    }
+  }, [error, success]);
+
   const handleChange = (field: keyof typeof formData, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
   };
 
-  const updateTier = (index: number, field: keyof TicketTierForm, value: string) => {
+  const updateTier = (
+    index: number,
+    field: keyof TicketTierForm,
+    value: string,
+  ) => {
     setTicketTiers((prev) => {
       const next = [...prev];
       next[index] = { ...next[index], [field]: value };
@@ -127,28 +159,32 @@ export const AdminEditEvent: React.FC = () => {
   };
 
   const addTier = () => {
-    setTicketTiers((prev) => [...prev, { name: '', price: '', supply: '' }]);
+    setTicketTiers((prev) => [...prev, { name: "", price: "", supply: "" }]);
   };
 
   const removeTier = (index: number) => {
-    setTicketTiers((prev) => prev.filter((_, currentIndex) => currentIndex !== index));
+    setTicketTiers((prev) =>
+      prev.filter((_, currentIndex) => currentIndex !== index),
+    );
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!id) {
-      setError('Invalid event id');
+      setError("Invalid event id");
       return;
     }
 
     try {
       setSaving(true);
-      setError('');
-      setSuccess('');
+      setError("");
+      setSuccess("");
 
       const normalizedTiers = ticketTiers
-        .filter((tier) => tier.name.trim() && tier.price !== '' && tier.supply !== '')
+        .filter(
+          (tier) => tier.name.trim() && tier.price !== "" && tier.supply !== "",
+        )
         .map((tier) => ({
           name: tier.name.trim(),
           price: Number(tier.price),
@@ -156,21 +192,24 @@ export const AdminEditEvent: React.FC = () => {
         }));
 
       if (!normalizedTiers.length) {
-        setError('At least one valid ticket tier is required');
+        setError("At least one valid ticket tier is required");
         return;
       }
 
       if (!formData.startDate || !formData.endDate) {
-        setError('Start date and end date are required');
+        setError("Start date and end date are required");
         return;
       }
 
       if (!formData.venueAddress.trim()) {
-        setError('Venue address is required');
+        setError("Venue address is required");
         return;
       }
 
-      const totalTickets = normalizedTiers.reduce((sum, tier) => sum + tier.totalSupply, 0);
+      const totalTickets = normalizedTiers.reduce(
+        (sum, tier) => sum + tier.totalSupply,
+        0,
+      );
 
       await updateAdminEvent(id, {
         title: formData.title,
@@ -179,23 +218,24 @@ export const AdminEditEvent: React.FC = () => {
         status: formData.status,
         startDate: new Date(formData.startDate).toISOString(),
         endDate: new Date(formData.endDate).toISOString(),
-        fundingGoal: formData.fundingGoal || '0',
-        minStakeRequired: formData.minStakeRequired || '0',
+        fundingGoal: formData.fundingGoal || "0",
+        minStakeRequired: formData.minStakeRequired || "0",
         fundingDeadline: formData.fundingDeadline
           ? new Date(formData.fundingDeadline).toISOString()
           : undefined,
         venue: {
-          name: formData.venueName,
           address: formData.venueAddress,
         },
         totalTickets,
         ticketTiers: normalizedTiers,
       });
 
-      setSuccess('Event updated successfully');
+      setSuccess("Event updated successfully");
       navigate(`/admin/events/${id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update event status');
+      setError(
+        err instanceof Error ? err.message : "Failed to update event status",
+      );
     } finally {
       setSaving(false);
     }
@@ -210,7 +250,10 @@ export const AdminEditEvent: React.FC = () => {
       <div className="space-y-4">
         <div className="text-red-400">{error}</div>
         <Link to="/admin/events">
-          <Button variant="outline" className="border-slate-600 hover:bg-slate-700 text-white">
+          <Button
+            variant="outline"
+            className="border-slate-600 hover:bg-slate-700 text-white"
+          >
             <ArrowLeft className="w-4 h-4 mr-2" />
             Back to Events
           </Button>
@@ -221,6 +264,7 @@ export const AdminEditEvent: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      <div ref={topAnchorRef} />
       <div>
         <Link
           to={`/admin/events/${id}`}
@@ -230,7 +274,9 @@ export const AdminEditEvent: React.FC = () => {
           Back to Details
         </Link>
         <h1 className="text-3xl font-bold text-white mb-2">Edit Event</h1>
-        <p className="text-slate-400">Admin can update operational details and funding configuration</p>
+        <p className="text-slate-400">
+          Admin can update operational details and funding configuration
+        </p>
       </div>
 
       <Card className="bg-slate-900 border-slate-800">
@@ -244,13 +290,15 @@ export const AdminEditEvent: React.FC = () => {
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-6">
             {error && <div className="text-sm text-red-400">{error}</div>}
-            {success && <div className="text-sm text-emerald-400">{success}</div>}
+            {success && (
+              <div className="text-sm text-emerald-400">{success}</div>
+            )}
 
             <div className="space-y-2">
               <Label className="text-slate-300">Title</Label>
               <Input
                 value={formData.title}
-                onChange={(e) => handleChange('title', e.target.value)}
+                onChange={(e) => handleChange("title", e.target.value)}
                 className="bg-slate-800 border-slate-700 text-white"
                 placeholder="Event title"
               />
@@ -260,7 +308,7 @@ export const AdminEditEvent: React.FC = () => {
               <Label className="text-slate-300">Description</Label>
               <Textarea
                 value={formData.description}
-                onChange={(e) => handleChange('description', e.target.value)}
+                onChange={(e) => handleChange("description", e.target.value)}
                 className="bg-slate-800 border-slate-700 text-white min-h-[120px]"
                 placeholder="Event description"
               />
@@ -271,7 +319,7 @@ export const AdminEditEvent: React.FC = () => {
                 <Label className="text-slate-300">Category</Label>
                 <Input
                   value={formData.category}
-                  onChange={(e) => handleChange('category', e.target.value)}
+                  onChange={(e) => handleChange("category", e.target.value)}
                   className="bg-slate-800 border-slate-700 text-white"
                   placeholder="Category"
                 />
@@ -281,7 +329,7 @@ export const AdminEditEvent: React.FC = () => {
                 <Label className="text-slate-300">Status</Label>
                 <Select
                   value={formData.status}
-                  onValueChange={(value) => handleChange('status', value)}
+                  onValueChange={(value) => handleChange("status", value)}
                 >
                   <SelectTrigger className="bg-slate-800 border-slate-700 text-white">
                     <SelectValue placeholder="Select status" />
@@ -305,7 +353,7 @@ export const AdminEditEvent: React.FC = () => {
                   <Input
                     type="datetime-local"
                     value={formData.startDate}
-                    onChange={(e) => handleChange('startDate', e.target.value)}
+                    onChange={(e) => handleChange("startDate", e.target.value)}
                     className="pl-10 bg-slate-800 border-slate-700 text-white"
                   />
                 </div>
@@ -318,7 +366,7 @@ export const AdminEditEvent: React.FC = () => {
                   <Input
                     type="datetime-local"
                     value={formData.endDate}
-                    onChange={(e) => handleChange('endDate', e.target.value)}
+                    onChange={(e) => handleChange("endDate", e.target.value)}
                     className="pl-10 bg-slate-800 border-slate-700 text-white"
                   />
                 </div>
@@ -330,16 +378,20 @@ export const AdminEditEvent: React.FC = () => {
                 <Label className="text-slate-300">Funding Goal</Label>
                 <Input
                   value={formData.fundingGoal}
-                  onChange={(e) => handleChange('fundingGoal', e.target.value)}
+                  onChange={(e) => handleChange("fundingGoal", e.target.value)}
                   className="bg-slate-800 border-slate-700 text-white"
                   placeholder="1000"
                 />
               </div>
               <div className="space-y-2">
-                <Label className="text-slate-300">Min Stake</Label>
+                <Label className="text-slate-300">
+                  Minimum Organizer Stake
+                </Label>
                 <Input
                   value={formData.minStakeRequired}
-                  onChange={(e) => handleChange('minStakeRequired', e.target.value)}
+                  onChange={(e) =>
+                    handleChange("minStakeRequired", e.target.value)
+                  }
                   className="bg-slate-800 border-slate-700 text-white"
                   placeholder="10"
                 />
@@ -349,34 +401,29 @@ export const AdminEditEvent: React.FC = () => {
                 <Input
                   type="datetime-local"
                   value={formData.fundingDeadline}
-                  onChange={(e) => handleChange('fundingDeadline', e.target.value)}
+                  onChange={(e) =>
+                    handleChange("fundingDeadline", e.target.value)
+                  }
                   className="bg-slate-800 border-slate-700 text-white"
                 />
               </div>
             </div>
 
-            <div className="grid md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label className="text-slate-300">Venue Name</Label>
-                <Input
-                  value={formData.venueName}
-                  onChange={(e) => handleChange('venueName', e.target.value)}
-                  className="bg-slate-800 border-slate-700 text-white"
-                  placeholder="Venue name"
-                />
-              </div>
+            <p className="text-xs text-slate-500">
+              Funding values are stored as integer strings in wei. The stake
+              field here represents organizer collateral, not the donor minimum.
+            </p>
 
-              <div className="space-y-2">
-                <Label className="text-slate-300">Venue Address</Label>
-                <div className="relative">
-                  <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-                  <Input
-                    value={formData.venueAddress}
-                    onChange={(e) => handleChange('venueAddress', e.target.value)}
-                    className="pl-10 bg-slate-800 border-slate-700 text-white"
-                    placeholder="Venue address"
-                  />
-                </div>
+            <div className="space-y-2">
+              <Label className="text-slate-300">Venue Address</Label>
+              <div className="relative">
+                <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                <Input
+                  value={formData.venueAddress}
+                  onChange={(e) => handleChange("venueAddress", e.target.value)}
+                  className="pl-10 bg-slate-800 border-slate-700 text-white"
+                  placeholder="Venue address"
+                />
               </div>
             </div>
 
@@ -384,7 +431,9 @@ export const AdminEditEvent: React.FC = () => {
               <div className="flex items-center justify-between">
                 <div>
                   <Label className="text-slate-300">Ticket Tiers</Label>
-                  <p className="text-sm text-slate-500 mt-1">Admin can tune supply and pricing here.</p>
+                  <p className="text-sm text-slate-500 mt-1">
+                    Admin can tune supply and pricing here.
+                  </p>
                 </div>
                 <Button
                   type="button"
@@ -404,21 +453,23 @@ export const AdminEditEvent: React.FC = () => {
                 >
                   <Input
                     value={tier.name}
-                    onChange={(e) => updateTier(index, 'name', e.target.value)}
+                    onChange={(e) => updateTier(index, "name", e.target.value)}
                     className="bg-slate-800 border-slate-700 text-white"
                     placeholder="Tier name"
                   />
                   <Input
                     type="number"
                     value={tier.price}
-                    onChange={(e) => updateTier(index, 'price', e.target.value)}
+                    onChange={(e) => updateTier(index, "price", e.target.value)}
                     className="bg-slate-800 border-slate-700 text-white"
                     placeholder="Price"
                   />
                   <Input
                     type="number"
                     value={tier.supply}
-                    onChange={(e) => updateTier(index, 'supply', e.target.value)}
+                    onChange={(e) =>
+                      updateTier(index, "supply", e.target.value)
+                    }
                     className="bg-slate-800 border-slate-700 text-white"
                     placeholder="Supply"
                   />
@@ -451,7 +502,7 @@ export const AdminEditEvent: React.FC = () => {
                 disabled={saving}
                 className="bg-blue-600 hover:bg-blue-700 text-white"
               >
-                {saving ? 'Saving...' : 'Save Event'}
+                {saving ? "Saving..." : "Save Event"}
               </Button>
             </div>
           </form>

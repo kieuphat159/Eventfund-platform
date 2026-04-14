@@ -7,6 +7,7 @@ import mongoose from 'mongoose';
 import UploadService from '../upload/upload.service.js';
 import { NotFoundError, BadRequestError } from '../../utils/customErrors.js';
 import Contribution from '../../models/Contribution.model.js';
+import { addBigInt, compareBigInt, toBigInt } from '../../utils/bigint.js';
 
 // Default upload service instance (lazy initialization for future use)
 let defaultUploadService = null;
@@ -15,6 +16,11 @@ function getDefaultUploadService() {
     defaultUploadService = new UploadService();
   }
   return defaultUploadService;
+}
+
+function calculateAverage(total, count) {
+  if (!count) return '0';
+  return (toBigInt(total) / BigInt(count)).toString();
 }
 
 /**
@@ -292,19 +298,23 @@ export async function getEventInvestments(eventId, query = {}, repos = {}) {
   const confirmedContributions = await Contribution.find({
     eventId,
     status: 'confirmed',
+    type: 'donator_contribution',
   })
     .select('amount')
     .lean();
 
   const totalInvested = confirmedContributions.reduce(
-    (sum, contribution) => sum + (Number(contribution.amount) || 0),
-    0,
+    (sum, contribution) => addBigInt(sum, contribution.amount || '0'),
+    '0',
   );
 
   const docs = Array.isArray(investments.docs) ? investments.docs : [];
   const largestInvestment = docs.reduce(
-    (max, share) => Math.max(max, Number(share.contributionAmount) || 0),
-    0,
+    (max, share) =>
+      compareBigInt(share.contributionAmount || '0', max) > 0
+        ? share.contributionAmount || '0'
+        : max,
+    '0',
   );
 
   return {
@@ -319,8 +329,7 @@ export async function getEventInvestments(eventId, query = {}, repos = {}) {
     summary: {
       totalInvestors: investments.totalDocs || docs.length,
       totalInvested,
-      averageInvestment:
-        docs.length > 0 ? totalInvested / docs.length : 0,
+      averageInvestment: calculateAverage(totalInvested, docs.length),
       largestInvestment,
       contributionCount: confirmedContributions.length,
     },

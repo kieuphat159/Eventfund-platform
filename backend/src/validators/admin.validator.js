@@ -37,7 +37,6 @@ const updateEventSchema = Joi.object({
   fundingDeadline: Joi.date().iso().optional(),
   status: Joi.string().valid(...eventStatusEnum).optional(),
   venue: Joi.object({
-    name: Joi.string().trim().optional(),
     address: Joi.string().trim().required(),
   }).optional(),
   imageUrls: Joi.array().items(Joi.string().uri()).optional(),

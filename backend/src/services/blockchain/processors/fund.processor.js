@@ -20,6 +20,7 @@ import {
   planReorgSafeSync,
   readReorgPolicyFromEnv,
 } from "../sync/reorgPolicy.js";
+import { addBigInt, compareBigInt, toBigInt } from "../../../utils/bigint.js";
 
 const CONTRACT_NAME = "Fund";
 const PROCESSOR_NAME = "FundProcessor";
@@ -36,11 +37,14 @@ const toNumberSafe = (v) => {
   return Number.isFinite(n) ? n : 0;
 };
 
+const toAmountString = (v) =>
+  v === undefined || v === null ? "0" : String(v);
+
 const lowerAddress = (v) => (v ? String(v).toLowerCase() : undefined);
 
 function getEventStatusLabel(statusValue) {
   const map = {
-    0: "none",
+    0: "draft",
     1: "funding",
     2: "funded",
     3: "ticketing",
@@ -60,11 +64,12 @@ async function rebuildFundState(eventObjectId) {
   const contributions = await Contribution.find({
     eventId: eventObjectId,
     status: "confirmed",
+    type: "donator_contribution",
   }).lean();
 
   const totalFunding = contributions.reduce(
-    (sum, c) => sum + toNumberSafe(c.amount),
-    0,
+    (sum, c) => addBigInt(sum, c.amount || "0"),
+    "0",
   );
 
   await Event.updateOne(
@@ -80,16 +85,22 @@ async function rebuildFundState(eventObjectId) {
 
     if (!holderMap[addr]) {
       holderMap[addr] = {
-        contributionAmount: 0,
+        contributionAmount: "0",
       };
     }
 
-    holderMap[addr].contributionAmount += toNumberSafe(c.amount);
+    holderMap[addr].contributionAmount = addBigInt(
+      holderMap[addr].contributionAmount,
+      c.amount || "0",
+    );
   }
 
   const shareOps = Object.entries(holderMap).map(([holder, data]) => {
     const sharePercentage =
-      totalFunding > 0 ? (data.contributionAmount / totalFunding) * 100 : 0;
+      compareBigInt(totalFunding, "0") > 0
+        ? Number((toBigInt(data.contributionAmount) * 10000n) / toBigInt(totalFunding)) /
+          100
+        : 0;
 
     return {
       updateOne: {
@@ -100,7 +111,9 @@ async function rebuildFundState(eventObjectId) {
             sharePercentage,
           },
           $setOnInsert: {
-            claimedReward: 0,
+            claimedReward: "0",
+            pendingReward: "0",
+            mintedShares: "0",
           },
         },
         upsert: true,
@@ -121,7 +134,7 @@ async function findReferencedEvent(contractEventId) {
   if (!contractEventId) return null;
 
   return Event.findOne({ contractEventId })
-    .select("_id organizer contractEventId")
+    .select("_id organizer organizerStake contractEventId")
     .lean();
 }
 
@@ -141,17 +154,18 @@ async function handleEventCreated(log) {
       $set: {
         contractEventId,
         organizer,
-        fundingGoal: toNumberSafe(args.fundingGoal),
-        fundingDeadline: toNumberSafe(args.fundingDeadline),
-        minStakeRequired: toNumberSafe(args.minStakeRequired),
+        fundingGoal: toAmountString(args.fundingGoal),
+        fundingDeadline: args.fundingDeadline
+          ? new Date(Number(args.fundingDeadline) * 1000)
+          : undefined,
+        minStakeRequired: toAmountString(args.minStakeRequired),
         organizerShareBps: toNumberSafe(args.organizerShareBps),
-        ticketPrice: toNumberSafe(args.ticketPrice),
-        maxTickets: toNumberSafe(args.maxTickets),
-        usedThreshold: toNumberSafe(args.usedThreshold),
-        organizerStakeLocked: toNumberSafe(args.stakeAmount),
-        currentFunding: 0,
-        totalRevenue: 0,
-        refundedAmount: 0,
+        totalTickets: toNumberSafe(args.maxTickets),
+        ticketUsageThreshold: toNumberSafe(args.usedThreshold),
+        organizerStake: toAmountString(args.stakeAmount),
+        currentFunding: "0",
+        totalRevenue: "0",
+        refundedAmount: "0",
         status: "funding",
         escrowStatus: "holding",
         createdByTxHash: transactionHash?.toLowerCase(),
@@ -165,7 +179,7 @@ async function handleEventCreated(log) {
   );
 
   // stake ban đầu của organizer cũng lưu vào Contribution cho dễ rebuild
-  if (toNumberSafe(args.stakeAmount) > 0) {
+  if (compareBigInt(toAmountString(args.stakeAmount), "0") > 0) {
     const eventDoc = await findReferencedEvent(contractEventId);
     if (!eventDoc) return;
 
@@ -178,7 +192,7 @@ async function handleEventCreated(log) {
         $set: {
           eventId: eventDoc._id,
           contributor: organizer,
-          amount: toNumberSafe(args.stakeAmount),
+          amount: toAmountString(args.stakeAmount),
           type: "organizer_stake",
           status: "confirmed",
           contractEventId,
@@ -199,7 +213,7 @@ async function handleContributionMade(log, eventDoc) {
   const { args, transactionHash, blockNumber } = log;
 
   const contributor = lowerAddress(args.donator);
-  const amount = toNumberSafe(args.amount);
+  const amount = toAmountString(args.amount);
 
   await Contribution.updateOne(
     {
@@ -233,18 +247,26 @@ async function handleSharesIssued(log, eventDoc) {
   const { args } = log;
 
   const holder = lowerAddress(args.donator);
-  const sharesMinted = toNumberSafe(args.sharesMinted);
+  const sharesMinted = toAmountString(args.sharesMinted);
 
   await Share.updateOne(
     { eventId: eventDoc._id, holder },
-    {
-      $inc: {
-        mintedShares: sharesMinted,
+    [
+      {
+        $set: {
+          mintedShares: {
+            $toString: {
+              $add: [
+                { $convert: { input: "$mintedShares", to: "decimal", onError: 0, onNull: 0 } },
+                { $convert: { input: sharesMinted, to: "decimal", onError: 0, onNull: 0 } },
+              ],
+            },
+          },
+          claimedReward: { $ifNull: ["$claimedReward", "0"] },
+          pendingReward: { $ifNull: ["$pendingReward", "0"] },
+        },
       },
-      $setOnInsert: {
-        claimedReward: 0,
-      },
-    },
+    ],
     { upsert: true },
   );
 
@@ -271,7 +293,7 @@ async function handleFundingFinalized(log, eventDoc) {
       $set: {
         status: getEventStatusLabel(args.statusAfterFinalize),
         sharesFinalized: true,
-        totalShares: toNumberSafe(args.totalShares),
+        totalShares: toAmountString(args.totalShares),
         fundingFinalizedAt: new Date(),
       },
     },
@@ -302,7 +324,7 @@ async function handleCompleted(log, eventDoc) {
     {
       $set: {
         status: "completed",
-        usedTickets: toNumberSafe(args.usedTickets),
+        totalTicketsUsed: toNumberSafe(args.usedTickets),
         completedAt: new Date(),
       },
     },
@@ -312,11 +334,11 @@ async function handleCompleted(log, eventDoc) {
 async function handleRevenueReleased(log, eventDoc) {
   const { args, transactionHash } = log;
 
-  const totalRevenue = toNumberSafe(args.totalRevenue);
-  const platformFee = toNumberSafe(args.platformFee);
-  const organizerShare = toNumberSafe(args.organizerShare);
-  const donatorPool = toNumberSafe(args.donatorPool);
-  const newAccRewardPerShare = toNumberSafe(args.newAccRewardPerShare);
+  const totalRevenue = toAmountString(args.totalRevenue);
+  const platformFee = toAmountString(args.platformFee);
+  const organizerShare = toAmountString(args.organizerShare);
+  const donatorPool = toAmountString(args.donatorPool);
+  const newAccRewardPerShare = toAmountString(args.newAccRewardPerShare);
 
   await RevenueDistribution.updateOne(
     { txHash: transactionHash.toLowerCase() },
@@ -326,10 +348,17 @@ async function handleRevenueReleased(log, eventDoc) {
         totalRevenue,
         platformFee,
         platformFeePercentage:
-          totalRevenue > 0 ? (platformFee / totalRevenue) * 100 : 0,
+          compareBigInt(totalRevenue, "0") > 0
+            ? Number((toBigInt(platformFee) * 10000n) / toBigInt(totalRevenue)) /
+              100
+            : 0,
         organizerShare,
         organizerSharePercentage:
-          totalRevenue > 0 ? (organizerShare / totalRevenue) * 100 : 0,
+          compareBigInt(totalRevenue, "0") > 0
+            ? Number(
+                (toBigInt(organizerShare) * 10000n) / toBigInt(totalRevenue),
+              ) / 100
+            : 0,
         donatorPool,
         accRewardPerShare: newAccRewardPerShare,
         status: "completed",
@@ -363,7 +392,7 @@ async function handleRewardClaimed(log, eventDoc) {
   const { args, transactionHash } = log;
 
   const claimer = lowerAddress(args.donator);
-  const amount = toNumberSafe(args.amount);
+  const amount = toAmountString(args.amount);
 
   await RewardClaim.updateOne(
     { txHash: transactionHash.toLowerCase() },
@@ -382,7 +411,20 @@ async function handleRewardClaimed(log, eventDoc) {
 
   await Share.updateOne(
     { eventId: eventDoc._id, holder: claimer },
-    { $inc: { claimedReward: amount } },
+    [
+      {
+        $set: {
+          claimedReward: {
+            $toString: {
+              $add: [
+                { $convert: { input: "$claimedReward", to: "decimal", onError: 0, onNull: 0 } },
+                { $convert: { input: amount, to: "decimal", onError: 0, onNull: 0 } },
+              ],
+            },
+          },
+        },
+      },
+    ],
   );
 }
 
@@ -395,7 +437,7 @@ async function handleRefundsEnabled(log, eventDoc) {
       $set: {
         escrowStatus: "refund_enabled",
         refundsEnabled: true,
-        refundPool: toNumberSafe(args.refundPoolAmount),
+        refundPool: toAmountString(args.refundPoolAmount),
         refundEnabledAt: new Date(),
       },
     },
@@ -405,19 +447,26 @@ async function handleRefundsEnabled(log, eventDoc) {
 async function handleTicketRefundPaid(log, eventDoc) {
   const { args } = log;
 
-  const amount = toNumberSafe(args.amount);
+  const amount = toAmountString(args.amount);
 
   await Event.updateOne(
     { _id: eventDoc._id },
-    {
-      $inc: {
-        refundedAmount: amount,
+    [
+      {
+        $set: {
+          refundedAmount: {
+            $toString: {
+              $add: [
+                { $convert: { input: "$refundedAmount", to: "decimal", onError: 0, onNull: 0 } },
+                { $convert: { input: amount, to: "decimal", onError: 0, onNull: 0 } },
+              ],
+            },
+          },
+          escrowStatus: "refunding",
+          lastRefundedAt: new Date(),
+        },
       },
-      $set: {
-        escrowStatus: "refunding",
-        lastRefundedAt: new Date(),
-      },
-    },
+    ],
   );
 }
 
@@ -428,12 +477,9 @@ async function handleRefundPoolDeposited(log, eventDoc) {
     { _id: eventDoc._id },
     {
       $set: {
-        refundPool: toNumberSafe(args.newRefundPool),
+        refundPool: toAmountString(args.newRefundPool),
         escrowStatus: "refund_pool_funded",
         lastRefundPoolDepositAt: new Date(),
-      },
-      $inc: {
-        extraRefundPoolDeposited: toNumberSafe(args.amount),
       },
     },
   );
@@ -442,7 +488,7 @@ async function handleRefundPoolDeposited(log, eventDoc) {
 async function handlePenaltyApplied(log, eventDoc) {
   const { args, transactionHash } = log;
 
-  const penaltyAmount = toNumberSafe(args.amount);
+  const penaltyAmount = toAmountString(args.amount);
   const penaltyBps = toNumberSafe(args.penaltyBps);
 
   await Penalty.updateOne(
@@ -451,6 +497,7 @@ async function handlePenaltyApplied(log, eventDoc) {
       $set: {
         eventId: eventDoc._id,
         organizer: lowerAddress(eventDoc.organizer),
+        stakeAmount: eventDoc.organizerStake || "0",
         penaltyAmount,
         penaltyPercentage: penaltyBps / 100,
         penaltyBps,
@@ -465,14 +512,21 @@ async function handlePenaltyApplied(log, eventDoc) {
 
   await Event.updateOne(
     { _id: eventDoc._id },
-    {
-      $inc: {
-        totalPenaltyAmount: penaltyAmount,
+    [
+      {
+        $set: {
+          totalPenaltyAmount: {
+            $toString: {
+              $add: [
+                { $convert: { input: "$totalPenaltyAmount", to: "decimal", onError: 0, onNull: 0 } },
+                { $convert: { input: penaltyAmount, to: "decimal", onError: 0, onNull: 0 } },
+              ],
+            },
+          },
+          lastPenaltyAt: new Date(),
+        },
       },
-      $set: {
-        lastPenaltyAt: new Date(),
-      },
-    },
+    ],
   );
 }
 
@@ -481,16 +535,37 @@ async function handleTicketRevenueDeposited(log, eventDoc) {
 
   await Event.updateOne(
     { _id: eventDoc._id },
-    {
-      $set: {
-        escrowStatus: "holding_revenue",
-        escrowedRevenue: toNumberSafe(args.newEscrowedRevenue),
-        lastTicketRevenueAt: new Date(),
+    [
+      {
+        $set: {
+          escrowStatus: "holding_revenue",
+          escrowedRevenue: toAmountString(args.newEscrowedRevenue),
+          ticketRevenueDeposited: {
+            $toString: {
+              $add: [
+                {
+                  $convert: {
+                    input: "$ticketRevenueDeposited",
+                    to: "decimal",
+                    onError: 0,
+                    onNull: 0,
+                  },
+                },
+                {
+                  $convert: {
+                    input: toAmountString(args.amount),
+                    to: "decimal",
+                    onError: 0,
+                    onNull: 0,
+                  },
+                },
+              ],
+            },
+          },
+          lastTicketRevenueAt: new Date(),
+        },
       },
-      $inc: {
-        ticketRevenueDeposited: toNumberSafe(args.amount),
-      },
-    },
+    ],
   );
 }
 
@@ -499,16 +574,37 @@ async function handleRoyaltyDeposited(log, eventDoc) {
 
   await Event.updateOne(
     { _id: eventDoc._id },
-    {
-      $set: {
-        escrowStatus: "holding_revenue",
-        escrowedRevenue: toNumberSafe(args.newEscrowedRevenue),
-        lastRoyaltyRevenueAt: new Date(),
+    [
+      {
+        $set: {
+          escrowStatus: "holding_revenue",
+          escrowedRevenue: toAmountString(args.newEscrowedRevenue),
+          royaltyRevenueDeposited: {
+            $toString: {
+              $add: [
+                {
+                  $convert: {
+                    input: "$royaltyRevenueDeposited",
+                    to: "decimal",
+                    onError: 0,
+                    onNull: 0,
+                  },
+                },
+                {
+                  $convert: {
+                    input: toAmountString(args.amount),
+                    to: "decimal",
+                    onError: 0,
+                    onNull: 0,
+                  },
+                },
+              ],
+            },
+          },
+          lastRoyaltyRevenueAt: new Date(),
+        },
       },
-      $inc: {
-        royaltyRevenueDeposited: toNumberSafe(args.amount),
-      },
-    },
+    ],
   );
 }
 
@@ -516,7 +612,7 @@ async function handleContributionRefunded(log, eventDoc) {
   const { args } = log;
 
   const contributor = lowerAddress(args.donator);
-  const amount = toNumberSafe(args.amount);
+  const amount = toAmountString(args.amount);
 
   await Contribution.updateMany(
     {
@@ -534,16 +630,23 @@ async function handleContributionRefunded(log, eventDoc) {
 
   await Event.updateOne(
     { _id: eventDoc._id },
-    {
-      $inc: {
-        refundedAmount: amount,
+    [
+      {
+        $set: {
+          refundedAmount: {
+            $toString: {
+              $add: [
+                { $convert: { input: "$refundedAmount", to: "decimal", onError: 0, onNull: 0 } },
+                { $convert: { input: amount, to: "decimal", onError: 0, onNull: 0 } },
+              ],
+            },
+          },
+          status: "cancelled",
+          escrowStatus: "refunded",
+          lastContributionRefundAt: new Date(),
+        },
       },
-      $set: {
-        status: "cancelled",
-        escrowStatus: "refunded",
-        lastContributionRefundAt: new Date(),
-      },
-    },
+    ],
   );
 
   await rebuildFundState(eventDoc._id);
@@ -556,7 +659,7 @@ async function handleStakeWithdrawn(log, eventDoc) {
     { _id: eventDoc._id },
     {
       $set: {
-        organizerStakeWithdrawn: toNumberSafe(args.amount),
+        organizerStakeWithdrawn: toAmountString(args.amount),
         stakeWithdrawnAt: new Date(),
       },
     },

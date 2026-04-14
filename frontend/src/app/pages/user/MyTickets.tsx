@@ -113,7 +113,7 @@ export const MyTickets: React.FC = () => {
           const event = typeof ticket.eventId === 'object' ? ticket.eventId : undefined;
           const eventName = event?.title || 'Unknown Event';
           const eventDate = event?.startDate;
-          const venue = [event?.venue?.name, event?.venue?.address].filter(Boolean).join(' - ') || 'Unknown venue';
+          const venue = event?.venue?.address || 'Unknown venue';
           const purchasePrice = Number(ticket.originalPrice || 0);
 
           return (

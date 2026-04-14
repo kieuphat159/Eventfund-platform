@@ -20,6 +20,10 @@ import {
   type AdminEventInvestmentsData,
   type EventItem,
 } from '../../services/events.service';
+import {
+  calculatePercentage,
+  formatIntegerWithUnit,
+} from '../../lib/utils';
 
 export const AdminEventDetail: React.FC = () => {
   const { id } = useParams();
@@ -62,12 +66,12 @@ export const AdminEventDetail: React.FC = () => {
     fetchEvent();
   }, [id]);
 
-  const fundingGoal = Number(event?.fundingGoal || 0);
-  const currentFunding = Number(event?.currentFunding || 0);
   const fundingProgress = useMemo(() => {
-    if (fundingGoal <= 0) return 0;
-    return Math.min((currentFunding / fundingGoal) * 100, 100);
-  }, [currentFunding, fundingGoal]);
+    return Math.min(
+      calculatePercentage(event?.currentFunding, event?.fundingGoal, 1),
+      100,
+    );
+  }, [event?.currentFunding, event?.fundingGoal]);
 
   if (loading) {
     return <div className="text-white">Loading event details...</div>;
@@ -113,13 +117,17 @@ export const AdminEventDetail: React.FC = () => {
         <Card className="bg-slate-900 border-slate-800">
           <CardContent className="p-5">
             <p className="text-sm text-slate-400 mb-1">Current Funding</p>
-            <p className="text-2xl font-bold text-white">{currentFunding}</p>
+            <p className="text-2xl font-bold text-white">
+              {formatIntegerWithUnit(event?.currentFunding, 'wei')}
+            </p>
           </CardContent>
         </Card>
         <Card className="bg-slate-900 border-slate-800">
           <CardContent className="p-5">
             <p className="text-sm text-slate-400 mb-1">Funding Goal</p>
-            <p className="text-2xl font-bold text-white">{fundingGoal}</p>
+            <p className="text-2xl font-bold text-white">
+              {formatIntegerWithUnit(event?.fundingGoal, 'wei')}
+            </p>
           </CardContent>
         </Card>
         <Card className="bg-slate-900 border-slate-800">
@@ -177,7 +185,6 @@ export const AdminEventDetail: React.FC = () => {
                 <span className="font-medium">Venue</span>
               </div>
               <p className="text-slate-400">
-                {event.venue?.name ? `${event.venue.name} - ` : ''}
                 {event.venue?.address || 'Unknown location'}
               </p>
             </div>
@@ -195,12 +202,16 @@ export const AdminEventDetail: React.FC = () => {
             <div className="p-4 rounded-lg bg-slate-800/50 border border-slate-700">
               <div className="flex items-center space-x-2 text-slate-300 mb-2">
                 <DollarSign className="w-4 h-4" />
-                <span className="font-medium">Tickets / Price</span>
+                <span className="font-medium">Funding / Tickets</span>
               </div>
               <p className="text-slate-400">
+                {formatIntegerWithUnit(event.minStakeRequired, 'wei')} organizer
+                minimum stake
+              </p>
+              <p className="text-xs text-slate-500 mt-1">
                 {typeof event.totalTickets === 'number'
-                  ? `${event.totalTickets} tickets`
-                  : `From ${event.ticketTiers?.[0]?.price ?? 0} ETH`}
+                  ? `${event.totalTickets} tickets planned`
+                  : `From ${event.ticketTiers?.[0]?.price ?? 0} ETH ticket price`}
               </p>
             </div>
 
@@ -299,7 +310,9 @@ export const AdminEventDetail: React.FC = () => {
                   <div className="grid grid-cols-2 gap-4 md:w-auto">
                     <div>
                       <p className="text-xs text-slate-500">Contribution</p>
-                      <p className="text-sm font-semibold text-white">{Number(investment.contributionAmount || 0)}</p>
+                      <p className="text-sm font-semibold text-white">
+                        {formatIntegerWithUnit(investment.contributionAmount, 'wei')}
+                      </p>
                     </div>
                     <div>
                       <p className="text-xs text-slate-500">Share</p>

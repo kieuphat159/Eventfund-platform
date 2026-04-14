@@ -1,7 +1,6 @@
 import { api } from '../lib/api';
 
 export interface EventVenue {
-  name?: string;
   address?: string;
 }
 
@@ -37,6 +36,7 @@ export interface EventItem {
 
   organizer?: string;
   organizerWallet?: string;
+  organizerStake?: string | number;
 
   venue?: EventVenue;
   imageUrls?: string[];
@@ -85,7 +85,6 @@ export interface CreateEventPayload {
   startDate: string;
   endDate: string;
   venue: {
-    name?: string;
     address: string;
   };
   fundingGoal: string;
@@ -104,7 +103,6 @@ export interface UpdateEventPayload {
   startDate?: string;
   endDate?: string;
   venue?: {
-    name?: string;
     address?: string;
   };
   fundingGoal?: string;
@@ -126,10 +124,10 @@ export interface EventInvestmentItem {
   _id: string;
   eventId: string;
   holder: string;
-  contributionAmount: number;
+  contributionAmount: string;
   sharePercentage: number;
-  claimedReward: number;
-  pendingReward: number;
+  claimedReward: string;
+  pendingReward: string;
   shareTokenId?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -144,9 +142,9 @@ export interface AdminEventInvestmentsData {
   event?: Pick<EventItem, '_id' | 'title' | 'status' | 'fundingGoal' | 'currentFunding'>;
   summary?: {
     totalInvestors?: number;
-    totalInvested?: number;
-    averageInvestment?: number;
-    largestInvestment?: number;
+    totalInvested?: string;
+    averageInvestment?: string;
+    largestInvestment?: string;
     contributionCount?: number;
   };
 }

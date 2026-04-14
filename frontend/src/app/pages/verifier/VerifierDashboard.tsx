@@ -25,7 +25,6 @@ interface ApiEventItem {
   title?: string;
   startDate?: string;
   venue?: {
-    name?: string;
     address?: string;
   };
   totalTickets?: number;
@@ -452,9 +451,7 @@ export const VerifierDashboard: React.FC = () => {
                   <div className="flex items-center justify-between">
                     <span className="text-slate-400">Location</span>
                     <span className="text-white font-medium">
-                      {[selectedEventData?.venue?.name, selectedEventData?.venue?.address]
-                        .filter(Boolean)
-                        .join(' - ') || 'TBA'}
+                      {selectedEventData?.venue?.address || 'TBA'}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">

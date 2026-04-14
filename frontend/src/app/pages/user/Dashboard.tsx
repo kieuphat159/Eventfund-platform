@@ -71,9 +71,7 @@ export const Dashboard: React.FC = () => {
       map.set(key, {
         id: key,
         title: event.title,
-        location:
-          [event.venue?.name, event.venue?.address].filter(Boolean).join(' - ') ||
-          'TBA',
+        location: event.venue?.address || 'TBA',
         startDate: event.startDate,
       });
     });
