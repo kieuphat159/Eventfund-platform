@@ -24,6 +24,7 @@ import { Badge } from "../../components/ui/badge";
 import { ImageWithFallback } from "../../components/figma/ImageWithFallback";
 import { useAuth } from "../../contexts/AuthContext";
 import { ethers } from "ethers";
+import { useWeb3Auth } from "@web3auth/modal/react";
 import {
   listingService,
   type ApiEvent,
@@ -53,12 +54,35 @@ const formatTicketType = (type?: string) => {
 export const TicketDetail: React.FC = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, connectWallet } = useAuth();
+  const { web3Auth } = useWeb3Auth();
   const [selectedImage, setSelectedImage] = React.useState(0);
   const [copiedAddress, setCopiedAddress] = React.useState(false);
 
   const [listing, setListing] = React.useState<ApiListing | null>(null);
   const [loading, setLoading] = React.useState(true);
+  const [buying, setBuying] = React.useState(false);
+  const [showBuyConfirm, setShowBuyConfirm] = React.useState(false);
+  const [buyPopup, setBuyPopup] = React.useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(null);
+
+  React.useEffect(() => {
+    if (!buyPopup) return;
+
+    const timeoutId = window.setTimeout(() => {
+      setBuyPopup(null);
+    }, 3000);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [buyPopup]);
+
+  const showListingPopup = (type: "success" | "error", message: string) => {
+    setBuyPopup({ type, message });
+  };
 
   React.useEffect(() => {
     const fetchData = async () => {
@@ -89,7 +113,6 @@ export const TicketDetail: React.FC = () => {
     listing && typeof listing.ticketId === "object"
       ? (listing.ticketId as ListingTicket)
       : null;
-  console.log("Listing:", listing);
   if (!listing) {
     return (
       <div className="min-h-screen bg-slate-950 py-12">
@@ -173,18 +196,87 @@ export const TicketDetail: React.FC = () => {
     setTimeout(() => setCopiedAddress(false), 2000);
   };
 
-  const handleBuyNow = () => {
-    if (user?.role === "public") {
-      alert("Please connect your wallet to purchase tickets");
-    } else {
-      alert(
-        "Purchase functionality would be integrated with smart contract here",
+  const handleBuyNow = async () => {
+    if (!user?.walletAddress) {
+      try {
+        await connectWallet();
+        showListingPopup(
+          "success",
+          "Wallet connected. Please click Buy Now again to continue.",
+        );
+      } catch (err) {
+        showListingPopup(
+          "error",
+          err instanceof Error ? err.message : "Failed to connect wallet",
+        );
+      }
+      return;
+    }
+
+    setShowBuyConfirm(true);
+  };
+
+  const handleConfirmBuy = async () => {
+    if (!listing?._id || !user?.walletAddress) {
+      showListingPopup("error", "Missing listing or wallet information");
+      return;
+    }
+
+    const provider = web3Auth?.provider as
+      | {
+          request: (args: {
+            method: string;
+            params?: unknown[];
+          }) => Promise<unknown>;
+        }
+      | undefined;
+
+    if (!provider?.request) {
+      showListingPopup(
+        "error",
+        "Wallet provider is not ready. Please reconnect wallet and try again.",
       );
+      return;
+    }
+
+    setBuying(true);
+    try {
+      const result = await listingService.buy(
+        provider,
+        listing._id,
+        user.walletAddress,
+      );
+      showListingPopup("success", `Purchase successful. Tx: ${result.txHash}`);
+
+      const refreshed = await listingService.getById(listing._id);
+      setListing(refreshed);
+      setShowBuyConfirm(false);
+    } catch (err) {
+      showListingPopup(
+        "error",
+        err instanceof Error ? err.message : "Failed to purchase ticket",
+      );
+    } finally {
+      setBuying(false);
     }
   };
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-950 via-purple-950/20 to-slate-950 py-8">
+      {buyPopup && (
+        <div className="fixed top-4 right-4 z-[60]">
+          <div
+            className={`min-w-[260px] max-w-[360px] rounded-lg border px-4 py-3 text-sm shadow-lg ${
+              buyPopup.type === "success"
+                ? "bg-emerald-900/95 border-emerald-600 text-emerald-100"
+                : "bg-red-900/95 border-red-600 text-red-100"
+            }`}
+          >
+            {buyPopup.message}
+          </div>
+        </div>
+      )}
+
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Back Button */}
         <Button
@@ -413,6 +505,7 @@ export const TicketDetail: React.FC = () => {
                 <Button
                   className="w-full h-12 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white text-base font-semibold"
                   onClick={handleBuyNow}
+                  disabled={buying}
                 >
                   <Wallet className="w-5 h-5 mr-2" />
                   Connect Wallet to Buy
@@ -421,9 +514,12 @@ export const TicketDetail: React.FC = () => {
                 <Button
                   className="w-full h-12 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white text-base font-semibold"
                   onClick={handleBuyNow}
+                  disabled={buying}
                 >
                   <ShoppingCart className="w-5 h-5 mr-2" />
-                  Buy Now for {listingPrice.toFixed(4)} ETH
+                  {buying
+                    ? "Processing purchase..."
+                    : `Buy Now for ${listingPrice.toFixed(4)} ETH`}
                 </Button>
               )}
             </div>
@@ -826,6 +922,40 @@ export const TicketDetail: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {showBuyConfirm && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+          <div className="bg-slate-900 p-6 rounded-xl border border-slate-700 w-[360px]">
+            <h3 className="text-white mb-2 font-semibold">Confirm Purchase</h3>
+            <p className="text-slate-300 text-sm mb-4">
+              Do you want to purchase ticket{" "}
+              <span className="font-semibold">#{listing.tokenId}</span> for{" "}
+              <span className="font-semibold">
+                {listingPrice.toFixed(4)} ETH
+              </span>
+              ?
+            </p>
+
+            <div className="flex gap-2">
+              <Button
+                className="flex-1 bg-purple-600 hover:bg-purple-700 text-white"
+                disabled={buying}
+                onClick={handleConfirmBuy}
+              >
+                {buying ? "Purchasing..." : "Confirm"}
+              </Button>
+              <Button
+                variant="outline"
+                className="flex-1"
+                disabled={buying}
+                onClick={() => setShowBuyConfirm(false)}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

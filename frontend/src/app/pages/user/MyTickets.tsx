@@ -17,7 +17,11 @@ import {
 import { Button } from "../../components/ui/button";
 import { useAuth } from "../../contexts/AuthContext";
 import { getUserTickets, type ApiTicket } from "../../services/tickets.service";
-import { listTicket } from "@/app/services/listings.service";
+import {
+  cancelListing,
+  getListings,
+  listTicket,
+} from "@/app/services/listings.service";
 import { QRCodeCanvas } from "qrcode.react";
 import { ethers, formatEther } from "ethers";
 
@@ -39,6 +43,10 @@ const formatTicketType = (type?: string) => {
 
 export const MyTickets: React.FC = () => {
   const { user } = useAuth();
+  const [listingPopup, setListingPopup] = useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(null);
   const [tickets, setTickets] = useState<ApiTicket[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -48,6 +56,24 @@ export const MyTickets: React.FC = () => {
   const [listingPrice, setListingPrice] = useState("");
   const [listingError, setListingError] = useState<string | null>(null);
   const [listingLoading, setListingLoading] = useState(false);
+  const [cancelTicket, setCancelTicket] = useState<ApiTicket | null>(null);
+  const [cancelLoading, setCancelLoading] = useState(false);
+
+  useEffect(() => {
+    if (!listingPopup) return;
+
+    const timeoutId = window.setTimeout(() => {
+      setListingPopup(null);
+    }, 3000);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [listingPopup]);
+
+  const showListingPopup = (type: "success" | "error", message: string) => {
+    setListingPopup({ type, message });
+  };
 
   useEffect(() => {
     const fetchTickets = async () => {
@@ -115,10 +141,6 @@ export const MyTickets: React.FC = () => {
       return "0";
     }
   };
-  // Test thử:
-  console.log(formatEth("1500000000000000000")); // "1.5"
-  console.log(formatEth("2000000000000000")); // "0.002"
-  console.log(formatEth(1000000000000000000n)); // "1" (Hỗ trợ cả BigInt)
 
   const downloadTicketQR = (ticket: ApiTicket) => {
     const canvasId = getTicketQrCanvasId(ticket);
@@ -139,8 +161,54 @@ export const MyTickets: React.FC = () => {
     document.body.removeChild(link);
   };
 
+  const resolveActiveListingIdByTicket = async (ticket: ApiTicket) => {
+    const ticketId = ticket._id;
+
+    if (!ticketId) return null;
+
+    let page = 1;
+    const limit = 100;
+    let totalPages = 1;
+
+    while (page <= totalPages) {
+      const payload = await getListings({ status: "active", page, limit });
+      const matchedListing = payload.docs.find((listing) => {
+        if (!listing.ticketId) return false;
+
+        if (typeof listing.ticketId === "string") {
+          return listing.ticketId === ticketId;
+        }
+
+        return listing.ticketId._id === ticketId;
+      });
+
+      if (matchedListing?._id) {
+        return matchedListing._id;
+      }
+
+      totalPages = payload.totalPages || 1;
+      page += 1;
+    }
+
+    return null;
+  };
+  console.log("Tickets:", tickets);
   return (
     <div className="space-y-6">
+      {listingPopup && (
+        <div className="fixed top-4 right-4 z-[60]">
+          <div
+            className={`min-w-[260px] max-w-[340px] rounded-lg border px-4 py-3 text-sm shadow-lg ${
+              listingPopup.type === "success"
+                ? "bg-emerald-900/95 border-emerald-600 text-emerald-100"
+                : "bg-red-900/95 border-red-600 text-red-100"
+            }`}
+          >
+            {listingPopup.message}
+          </div>
+        </div>
+      )}
+
       <div>
         <h1 className="text-3xl font-bold text-white mb-2">My NFT Tickets</h1>
         <p className="text-slate-400">Your digital tickets stored as NFTs</p>
@@ -263,16 +331,24 @@ export const MyTickets: React.FC = () => {
                   <Button
                     variant="outline"
                     size="sm"
-                    className="border-slate-700 hover:bg-slate-800"
-                    onClick={() => setSelectedTicket(ticket)}
+                    className="border-slate-700 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={Boolean(ticket.isListed)}
+                    onClick={() => {
+                      if (ticket.isListed) return;
+                      setSelectedTicket(ticket);
+                    }}
                   >
                     <QrCode className="w-4 h-4" />
                   </Button>
                   <Button
                     variant="outline"
                     size="sm"
-                    className="border-slate-700 hover:bg-slate-800"
-                    onClick={() => downloadTicketQR(ticket)}
+                    className="border-slate-700 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={Boolean(ticket.isListed)}
+                    onClick={() => {
+                      if (ticket.isListed) return;
+                      downloadTicketQR(ticket);
+                    }}
                   >
                     <Download className="w-4 h-4" />
                   </Button>
@@ -286,14 +362,23 @@ export const MyTickets: React.FC = () => {
                 </div>
 
                 <Button
-                  className="w-full mt-3 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white"
+                  className={`w-full mt-3 text-white ${
+                    ticket.isListed
+                      ? "bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700"
+                      : "bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700"
+                  }`}
                   onClick={() => {
+                    if (ticket.isListed) {
+                      setCancelTicket(ticket);
+                      return;
+                    }
+
                     setListingTicket(ticket);
                     setListingError(null);
                     setListingPrice("");
                   }}
                 >
-                  List on Marketplace
+                  {ticket.isListed ? "Cancel Listing" : "List on Marketplace"}
                 </Button>
               </CardContent>
             </Card>
@@ -367,6 +452,10 @@ export const MyTickets: React.FC = () => {
 
                   if (!listingPrice || Number(listingPrice) <= 0) {
                     setListingError("Price must be greater than 0");
+                    showListingPopup(
+                      "error",
+                      "Listing failed: price must be greater than 0.",
+                    );
                     return;
                   }
 
@@ -380,10 +469,20 @@ export const MyTickets: React.FC = () => {
                         Date.now() + 7 * 24 * 60 * 60 * 1000,
                       ).toISOString(),
                     });
+                    showListingPopup("success", "Ticket listed successfully.");
+                    setTickets((prevTickets) =>
+                      prevTickets.map((ticket) =>
+                        ticket._id === listingTicket._id
+                          ? { ...ticket, isListed: true }
+                          : ticket,
+                      ),
+                    );
                     setListingTicket(null);
                     setListingPrice("");
                   } catch (err: any) {
-                    setListingError(err.message || "Failed to list ticket");
+                    const message = err?.message || "Failed to list ticket";
+                    setListingError(message);
+                    showListingPopup("error", `Listing failed: ${message}`);
                   } finally {
                     setListingLoading(false);
                   }
@@ -400,6 +499,66 @@ export const MyTickets: React.FC = () => {
                 }}
               >
                 Cancel
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+      {cancelTicket && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+          <div className="bg-slate-900 p-6 rounded-xl border border-slate-700 w-[340px]">
+            <h3 className="text-white mb-2 font-semibold">Cancel Listing</h3>
+            <p className="text-slate-300 text-sm mb-4">
+              Are you sure you want to cancel listing for ticket #
+              {cancelTicket.tokenId}?
+            </p>
+
+            <div className="flex gap-2">
+              <Button
+                className="flex-1 bg-red-600 hover:bg-red-700 text-white"
+                disabled={cancelLoading}
+                onClick={async () => {
+                  try {
+                    setCancelLoading(true);
+
+                    const listingId =
+                      await resolveActiveListingIdByTicket(cancelTicket);
+
+                    if (!listingId) {
+                      throw new Error("Listing not found");
+                    }
+
+                    await cancelListing(listingId);
+
+                    setTickets((prevTickets) =>
+                      prevTickets.map((ticket) =>
+                        ticket._id === cancelTicket._id
+                          ? { ...ticket, isListed: false }
+                          : ticket,
+                      ),
+                    );
+                    showListingPopup(
+                      "success",
+                      `Cancelled listing for ticket #${cancelTicket.tokenId}.`,
+                    );
+                    setCancelTicket(null);
+                  } catch (err: any) {
+                    const message = err?.message || "Failed to cancel listing";
+                    showListingPopup("error", `Cancel failed: ${message}`);
+                  } finally {
+                    setCancelLoading(false);
+                  }
+                }}
+              >
+                {cancelLoading ? "Cancelling..." : "Confirm"}
+              </Button>
+              <Button
+                variant="outline"
+                className="flex-1"
+                disabled={cancelLoading}
+                onClick={() => setCancelTicket(null)}
+              >
+                Close
               </Button>
             </div>
           </div>

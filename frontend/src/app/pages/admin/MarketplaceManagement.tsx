@@ -11,8 +11,11 @@ import { Button } from "../../components/ui/button";
 import {
   getListings,
   getMarketplaceStats,
+  getMarketplaceHistory,
   type ApiListing,
   type MarketplaceStats,
+  type TransactionHistory,
+  type GetHistoryParams,
 } from "../../services/listings.service";
 import { formatEther } from "ethers";
 
@@ -29,6 +32,8 @@ export const MarketplaceManagement: React.FC = () => {
   });
   const [activeListings, setActiveListings] = useState<ApiListing[]>([]);
   const [activeListingsCount, setActiveListingsCount] = useState(0);
+  const [historyData, setHistoryData] = useState<TransactionHistory[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   useEffect(() => {
     const fetchMarketplaceData = async () => {
@@ -56,6 +61,30 @@ export const MarketplaceManagement: React.FC = () => {
     };
 
     fetchMarketplaceData();
+  }, []);
+
+  useEffect(() => {
+    const fetchHistory = async () => {
+      try {
+        setHistoryLoading(true);
+        const params: GetHistoryParams = {
+          page: 1,
+          limit: 10,
+          sort: "soldAt",
+          order: "desc",
+        };
+        const result = await getMarketplaceHistory(params);
+        setHistoryData(result.docs || []);
+      } catch (err) {
+        console.error(
+          err instanceof Error ? err.message : "Failed to load history",
+        );
+      } finally {
+        setHistoryLoading(false);
+      }
+    };
+
+    fetchHistory();
   }, []);
 
   const formatWeiToEth = (weiValue: string) => {
@@ -98,40 +127,24 @@ export const MarketplaceManagement: React.FC = () => {
     [activeListingsCount, marketplaceStats],
   );
 
-  const recentSales = [
-    {
-      event: "Crypto Music Festival 2026",
-      tier: "VIP",
-      price: "2.5 ETH",
-      buyer: "0x742d...bEb5",
-      seller: "0x8ba1...DBA72",
-      time: "5 min ago",
-    },
-    {
-      event: "Web3 Summit 2026",
-      tier: "General",
-      price: "1.2 ETH",
-      buyer: "0xDC25...695E",
-      seller: "0x1234...5678",
-      time: "12 min ago",
-    },
-    {
-      event: "NFT Art Gallery Opening",
-      tier: "Premium",
-      price: "0.8 ETH",
-      buyer: "0x9876...4321",
-      seller: "0x5555...6666",
-      time: "23 min ago",
-    },
-    {
-      event: "Blockchain Workshop",
-      tier: "Standard",
-      price: "0.5 ETH",
-      buyer: "0xaaaa...bbbb",
-      seller: "0xcccc...dddd",
-      time: "1 hour ago",
-    },
-  ];
+  const formatTime = (date: string | null | undefined) => {
+    if (!date) return "N/A";
+    try {
+      const time = new Date(date).getTime();
+      const now = new Date().getTime();
+      const diff = now - time;
+      const minutes = Math.floor(diff / 60000);
+      const hours = Math.floor(diff / 3600000);
+      const days = Math.floor(diff / 86400000);
+
+      if (minutes < 1) return "Just now";
+      if (minutes < 60) return `${minutes}m ago`;
+      if (hours < 24) return `${hours}h ago`;
+      return `${days}d ago`;
+    } catch {
+      return "N/A";
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -256,32 +269,52 @@ export const MarketplaceManagement: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {recentSales.map((sale, index) => (
+                {historyLoading && (
+                  <tr>
+                    <td
+                      colSpan={6}
+                      className="py-4 px-4 text-center text-slate-400"
+                    >
+                      Loading transaction history...
+                    </td>
+                  </tr>
+                )}
+                {!historyLoading && historyData.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={6}
+                      className="py-4 px-4 text-center text-slate-400"
+                    >
+                      No transactions found.
+                    </td>
+                  </tr>
+                )}
+                {historyData.map((sale) => (
                   <tr
-                    key={index}
+                    key={sale.listingId}
                     className="border-b border-slate-800/50 hover:bg-slate-800/30"
                   >
                     <td className="py-4 px-4 text-sm text-white">
-                      {sale.event}
+                      {sale.event || "Unknown Event"}
                     </td>
                     <td className="py-4 px-4 text-sm text-slate-400">
-                      {sale.tier}
+                      {sale.tier || "N/A"}
                     </td>
                     <td className="py-4 px-4 text-sm text-purple-400 font-medium">
-                      {sale.price}
+                      {formatWeiToEth(sale.price)}
                     </td>
                     <td className="py-4 px-4">
                       <code className="text-xs text-slate-300 bg-slate-800 px-2 py-1 rounded">
-                        {sale.buyer}
+                        {sale.buyer ? `${sale.buyer.slice(0, 10)}...` : "N/A"}
                       </code>
                     </td>
                     <td className="py-4 px-4">
                       <code className="text-xs text-slate-300 bg-slate-800 px-2 py-1 rounded">
-                        {sale.seller}
+                        {sale.seller ? `${sale.seller.slice(0, 10)}...` : "N/A"}
                       </code>
                     </td>
                     <td className="py-4 px-4 text-sm text-slate-500 text-right">
-                      {sale.time}
+                      {formatTime(sale.time)}
                     </td>
                   </tr>
                 ))}

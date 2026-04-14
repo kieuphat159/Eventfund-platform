@@ -185,7 +185,7 @@ export const Marketplace: React.FC = () => {
                       <Slider
                         min={0.01}
                         max={10}
-                        step={0.1}
+                        step={0.01}
                         value={priceRange}
                         onValueChange={setPriceRange} // kéo mượt
                         onValueCommit={(value) => setAppliedPriceRange(value)} // thả chuột mới call
