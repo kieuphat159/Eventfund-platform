@@ -72,6 +72,32 @@ export async function getEvents(query = {}, repos = {}) {
   return await repository.findEvents(dbQuery, options);
 }
 
+export async function assignVerifier(eventId, verifier, user) {
+  if (!verifier) {
+    throw new BadRequestError("Verifier wallet is required");
+  }
+
+  const event = await Event.findById(eventId);
+
+  if (!event) {
+    throw new NotFoundError("Event not found");
+  }
+
+  const normalizedVerifier = verifier.toLowerCase();
+
+  if (!event.verifiers) {
+    event.verifiers = [];
+  }
+
+  if (!event.verifiers.includes(normalizedVerifier)) {
+    event.verifiers.push(normalizedVerifier);
+  }
+
+  await event.save();
+
+  return event;
+}
+
 /**
  * Get event by ID with stats
  * @param {string} eventId - Event ID
@@ -213,9 +239,9 @@ export async function getEventStats(eventId, repos = {}) {
   const fundingProgress =
     toBigInt(event.fundingGoal) > toBigInt("0")
       ? Number(
-          (toBigInt(event.currentFunding) * toBigInt("100")) /
-            toBigInt(event.fundingGoal),
-        )
+        (toBigInt(event.currentFunding) * toBigInt("100")) /
+        toBigInt(event.fundingGoal),
+      )
       : 0;
 
   // Calculate ticket availability
@@ -330,7 +356,7 @@ async function rebuildSharePercentagesAndFunding(eventId) {
     currentFunding: totalFunding.toString(),
     status:
       compareBigInt(totalFunding, event.fundingGoal) >= 0 &&
-      event.status === "funding"
+        event.status === "funding"
         ? "funded"
         : event.status,
   };

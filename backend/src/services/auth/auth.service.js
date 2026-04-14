@@ -38,11 +38,11 @@ class AuthService {
       decoded = decodeJwt(idToken);
       email = decoded.email;
     } catch {
-      throw new BadRequestError("idToken không hợp lệ");
+      throw new BadRequestError("idToken is not a valid JWT");
     }
 
     if (!email) {
-      throw new BadRequestError("idToken không chứa email");
+      throw new BadRequestError("idToken does not contain an email");
     }
 
     let user = await User.findOne({ email: email.toLowerCase() });

@@ -51,6 +51,14 @@ const eventSchema = new mongoose.Schema(
       default: "draft",
     },
 
+    verifiers: [
+      {
+        type: String, // walletAddress
+        lowercase: true,
+        trim: true,
+      }
+    ],
+
     startDate: {
       type: Date,
       required: true,
@@ -115,6 +123,8 @@ const eventSchema = new mongoose.Schema(
       enum: ["holding", "released", "refunded"],
       default: "holding",
     },
+
+
 
     totalRevenue: { type: String, default: "0" },
     revenueDistributedAt: Date,

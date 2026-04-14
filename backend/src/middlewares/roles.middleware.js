@@ -1,4 +1,5 @@
 import { UnauthorizedError, ForbiddenError } from '../utils/customErrors.js';
+import { ROLES } from '../constants/roles.js'; 
 
 /**
  * Role-based access control middleware
@@ -33,6 +34,8 @@ export function requireRole(...roles) {
   };
 }
 
+export const requireOrganizer = requireRole('admin');
+
 /**
 
 
@@ -41,16 +44,16 @@ export function requireRole(...roles) {
 
  * Used for self-service event CRUD; ownership is validated separately.
  */
-export const requireEventCreator = requireRole('user', 'admin');
+export const requireEventCreator = requireRole(ROLES.USER, ROLES.ADMIN);
 
 /**
  * Require verifier or admin role
  * Convenience helper for verifier-only endpoints
  */
-export const requireVerifier = requireRole('verifier', 'admin');
+export const requireVerifier = requireRole(ROLES.VERIFIER, ROLES.ADMIN);
 
 /**
  * Require admin role
  * Convenience helper for admin-only endpoints
  */
-export const requireAdmin = requireRole('admin');
+export const requireAdmin = requireRole(ROLES.ADMIN);

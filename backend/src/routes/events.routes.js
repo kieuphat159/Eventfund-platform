@@ -4,10 +4,12 @@ import { authenticate } from "../middlewares/auth.middleware.js";
 import { requireEventCreator } from "../middlewares/roles.middleware.js";
 import { validate } from "../middlewares/validate.middleware.js";
 import { eventSchemas } from "../validators/event.validator.js";
+import { requireAdmin } from "../middlewares/roles.middleware.js";
 import {
   uploadEventImages,
   validateMultipleImages,
 } from "../middlewares/image.middleware.js";
+
 
 const router = express.Router();
 const controller = new EventsController();
@@ -429,5 +431,13 @@ router.delete(
  *         description: Server error
  */
 router.get("/:id/stats", controller.getEventStats);
+
+// 🔥 NEW: assign verifier (admin only)
+router.post(
+  "/:id/assign-verifier",
+  authenticate,
+  requireAdmin,
+  controller.assignVerifier
+);
 
 export default router;

@@ -16,7 +16,7 @@ class TicketsController {
 
     res.status(200).json({
       success: true,
-      data: result
+      data: result,
     });
   });
 
@@ -27,7 +27,7 @@ class TicketsController {
 
     res.status(200).json({
       success: true,
-      data: ticket
+      data: ticket,
     });
   });
 
@@ -41,7 +41,7 @@ class TicketsController {
 
     res.status(200).json({
       success: true,
-      data: intent
+      data: intent,
     });
   });
 
@@ -52,7 +52,7 @@ class TicketsController {
 
     res.status(200).json({
       success: true,
-      data: result
+      data: result,
     });
   });
 
@@ -64,18 +64,23 @@ class TicketsController {
 
     res.status(200).json({
       success: true,
-      data: result
+      data: result,
     });
   });
 
   verifyTicket = asyncHandler(async (req, res) => {
     const { tokenId, walletAddress } = req.validated?.body || req.body;
 
-    const result = await this.ticketsService.verifyTicket(tokenId, walletAddress);
+    // NEW: truyền thêm verifier đang đăng nhập
+    const result = await this.ticketsService.verifyTicket(
+      tokenId,
+      walletAddress,
+      req.user.walletAddress
+    );
 
     res.status(200).json({
       success: true,
-      data: result
+      data: result,
     });
   });
 
@@ -87,7 +92,7 @@ class TicketsController {
 
     res.status(200).json({
       success: true,
-      data: ticket
+      data: ticket,
     });
   });
 
@@ -101,7 +106,7 @@ class TicketsController {
 
     res.status(200).json({
       success: true,
-      data: intent
+      data: intent,
     });
   });
 
@@ -112,7 +117,7 @@ class TicketsController {
 
     res.status(200).json({
       success: true,
-      data: result
+      data: result,
     });
   });
 
@@ -123,7 +128,7 @@ class TicketsController {
 
     res.status(200).json({
       success: true,
-      data: stats
+      data: stats,
     });
   });
 }
