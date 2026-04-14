@@ -103,6 +103,11 @@ const createEventSchema = Joi.object({
       "number.min": "Ticket usage threshold must be at least 0",
       "number.max": "Ticket usage threshold must not exceed 100",
     }),
+  // Optional on-chain execution mode for Fund.createEvent
+  syncOnChain: Joi.boolean().optional(),
+  organizerShareBps: Joi.number().integer().min(0).max(10000).optional(),
+  ticketPrice: bigIntString.optional(),
+  usedThreshold: Joi.number().integer().min(1).optional(),
 });
 
 // Schema for PATCH /events/:id

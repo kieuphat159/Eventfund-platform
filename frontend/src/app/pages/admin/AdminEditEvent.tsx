@@ -14,14 +14,10 @@ import {
 } from '../../services/events.service';
 
 const EVENT_STATUSES: EventStatus[] = [
-  'draft',
-  'funding',
   'funded',
   'ticketing',
-  'ongoing',
   'completed',
   'cancelled',
-  'failed',
 ];
 
 export const EditEvent: React.FC = () => {
@@ -41,6 +37,8 @@ export const EditEvent: React.FC = () => {
     endDate: '',
     venueName: '',
     venueAddress: '',
+    quantity: '1',
+    ticketType: '0',
   });
 
   useEffect(() => {
@@ -66,7 +64,9 @@ export const EditEvent: React.FC = () => {
           title: foundEvent.title || '',
           description: foundEvent.description || '',
           category: foundEvent.category || '',
-          status: foundEvent.status || 'draft',
+          status: EVENT_STATUSES.includes((foundEvent.status || 'funded') as EventStatus)
+            ? (foundEvent.status as EventStatus)
+            : 'funded',
           startDate: foundEvent.startDate
             ? new Date(foundEvent.startDate).toISOString().slice(0, 16)
             : '',
@@ -75,6 +75,8 @@ export const EditEvent: React.FC = () => {
             : '',
           venueName: foundEvent.venue?.name || '',
           venueAddress: foundEvent.venue?.address || '',
+          quantity: String(foundEvent.totalTickets && foundEvent.totalTickets > 0 ? foundEvent.totalTickets : 1),
+          ticketType: '0',
         });
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load event');
@@ -102,7 +104,19 @@ export const EditEvent: React.FC = () => {
       setSaving(true);
       setError('');
 
-      await updateAdminEventStatus(id, formData.status);
+      const quantity = Number(formData.quantity);
+      const ticketType = Number(formData.ticketType);
+
+      if (formData.status === 'ticketing') {
+        if (!Number.isInteger(quantity) || quantity <= 0) {
+          throw new Error('Quantity must be a positive integer for ticketing status');
+        }
+      }
+
+      await updateAdminEventStatus(id, formData.status, {
+        quantity: formData.status === 'ticketing' ? quantity : undefined,
+        ticketType: formData.status === 'ticketing' ? ticketType : undefined,
+      });
 
       navigate(`/admin/events/${id}`);
     } catch (err) {
@@ -206,6 +220,34 @@ export const EditEvent: React.FC = () => {
                 </Select>
               </div>
             </div>
+
+            {formData.status === 'ticketing' && (
+              <div className="grid md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label className="text-slate-300">Mint Quantity</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={formData.quantity}
+                    onChange={(e) => handleChange('quantity', e.target.value)}
+                    className="bg-slate-800 border-slate-700 text-white"
+                    placeholder="e.g. 10"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-slate-300">Ticket Type</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={formData.ticketType}
+                    onChange={(e) => handleChange('ticketType', e.target.value)}
+                    className="bg-slate-800 border-slate-700 text-white"
+                    placeholder="0"
+                  />
+                </div>
+              </div>
+            )}
 
             <div className="grid md:grid-cols-2 gap-4">
               <div className="space-y-2">

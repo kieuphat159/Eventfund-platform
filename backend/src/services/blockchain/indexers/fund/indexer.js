@@ -256,7 +256,18 @@ async function storeLogs(contractAddress, logs) {
 export async function syncFundLogsOnce() {
   const fund = getFund();
   const { confirmations, reorgBuffer, chunkSize } = readReorgPolicyFromEnv();
-  const startBlock = getNumberEnv("FUND_START_BLOCK", 0);
+  const latest = await provider.getBlockNumber();
+
+  const hasExplicitStartBlock =
+    process.env.FUND_START_BLOCK !== undefined &&
+    String(process.env.FUND_START_BLOCK).trim() !== "";
+
+  // Dev-friendly default: when FUND_START_BLOCK is not set, index from near-head
+  // so newly created events are ingested quickly instead of replaying full chain history.
+  const derivedNearHeadStart = Math.max(0, latest - confirmations - reorgBuffer - 1);
+  const startBlock = hasExplicitStartBlock
+    ? getNumberEnv("FUND_START_BLOCK", 0)
+    : derivedNearHeadStart;
 
   const contractAddress = await fund.getAddress();
   const contractAddressLower = contractAddress.toLowerCase();
@@ -274,15 +285,17 @@ export async function syncFundLogsOnce() {
     `[fund.indexer] current sync state lastProcessedBlock=${syncState.lastProcessedBlock}`,
   );
 
-  const latest = await provider.getBlockNumber();
-
   console.log(`[fund.indexer] latest block on chain: ${latest}`);
+
+  const effectiveLastProcessedBlock = hasExplicitStartBlock
+    ? syncState.lastProcessedBlock
+    : Math.max(syncState.lastProcessedBlock, startBlock);
 
   const plan = planReorgSafeSync({
     latestBlock: latest,
     confirmations,
     startBlock,
-    lastProcessedBlock: syncState.lastProcessedBlock,
+    lastProcessedBlock: effectiveLastProcessedBlock,
     reorgBuffer,
   });
 

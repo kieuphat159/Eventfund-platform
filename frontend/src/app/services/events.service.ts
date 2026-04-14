@@ -196,11 +196,29 @@ export async function updateEvent(
 
 export async function updateAdminEventStatus(
   eventId: string,
-  status: EventStatus
+  status: EventStatus,
+  options?: {
+    quantity?: number;
+    ticketType?: number;
+  }
 ): Promise<EventItem | null> {
+  const body: {
+    status: EventStatus;
+    quantity?: number;
+    ticketType?: number;
+  } = { status };
+
+  if (typeof options?.quantity === 'number') {
+    body.quantity = options.quantity;
+  }
+
+  if (typeof options?.ticketType === 'number') {
+    body.ticketType = options.ticketType;
+  }
+
   const response = await api.patch<CreateEventResponse>(
     `/admin/events/${eventId}/status`,
-    { status }
+    body
   );
   return response.data || null;
 }

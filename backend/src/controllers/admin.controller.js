@@ -53,10 +53,11 @@ class AdminController {
   });
 
   updateEventStatus = asyncHandler(async (req, res) => {
-    const { status } = req.validated?.body || req.body;
+    const body = req.validated?.body || req.body;
+    const { status } = body;
     const { id } = req.params;
 
-    const event = await this.adminService.updateEventStatus(id, status);
+    const event = await this.adminService.updateEventStatus(id, status, body);
 
     res.status(200).json({
       success: true,

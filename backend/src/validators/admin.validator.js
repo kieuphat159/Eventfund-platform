@@ -23,7 +23,10 @@ const updateUserRoleSchema = Joi.object({
 // Schema for PATCH /admin/events/:id/status
 const updateEventStatusSchema = Joi.object({
   status: Joi.string().valid(...eventStatusEnum).required(),
-  reason: Joi.string().min(1).optional()
+  reason: Joi.string().min(1).optional(),
+  syncOnChain: Joi.boolean().optional(),
+  ticketType: Joi.number().integer().min(0).max(255).optional(),
+  quantity: Joi.number().integer().min(1).optional()
 });
 
 export const adminSchemas = {
