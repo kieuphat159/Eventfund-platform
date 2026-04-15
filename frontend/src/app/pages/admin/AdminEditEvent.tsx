@@ -26,14 +26,10 @@ import {
 } from "../../services/events.service";
 
 const EVENT_STATUSES: EventStatus[] = [
-  "draft",
-  "funding",
-  "funded",
-  "ticketing",
-  "ongoing",
-  "completed",
-  "cancelled",
-  "failed",
+  'funded',
+  'ticketing',
+  'completed',
+  'cancelled',
 ];
 
 type TicketTierForm = {
@@ -52,16 +48,16 @@ export const AdminEditEvent: React.FC = () => {
   const [success, setSuccess] = useState("");
 
   const [formData, setFormData] = useState({
-    title: "",
-    description: "",
-    category: "",
-    status: "draft" as EventStatus,
-    startDate: "",
-    endDate: "",
-    fundingGoal: "",
-    minStakeRequired: "",
-    fundingDeadline: "",
-    venueAddress: "",
+    title: '',
+    description: '',
+    category: '',
+    status: 'draft' as EventStatus,
+    startDate: '',
+    endDate: '',
+    venueName: '',
+    venueAddress: '',
+    quantity: '1',
+    ticketType: '0',
   });
   const [ticketTiers, setTicketTiers] = useState<TicketTierForm[]>([
     { name: "", price: "", supply: "" },
@@ -93,28 +89,22 @@ export const AdminEditEvent: React.FC = () => {
         }
 
         setFormData({
-          title: foundEvent.title || "",
-          description: foundEvent.description || "",
-          category: foundEvent.category || "",
-          status: foundEvent.status || "draft",
+          title: foundEvent.title || '',
+          description: foundEvent.description || '',
+          category: foundEvent.category || '',
+          status: EVENT_STATUSES.includes((foundEvent.status || 'funded') as EventStatus)
+            ? (foundEvent.status as EventStatus)
+            : 'funded',
           startDate: foundEvent.startDate
             ? new Date(foundEvent.startDate).toISOString().slice(0, 16)
             : "",
           endDate: foundEvent.endDate
             ? new Date(foundEvent.endDate).toISOString().slice(0, 16)
-            : "",
-          fundingGoal:
-            foundEvent.fundingGoal != null
-              ? String(foundEvent.fundingGoal)
-              : "",
-          minStakeRequired:
-            foundEvent.minStakeRequired != null
-              ? String(foundEvent.minStakeRequired)
-              : "",
-          fundingDeadline: foundEvent.fundingDeadline
-            ? new Date(foundEvent.fundingDeadline).toISOString().slice(0, 16)
-            : "",
-          venueAddress: foundEvent.venue?.address || "",
+            : '',
+          venueName: foundEvent.venue?.name || '',
+          venueAddress: foundEvent.venue?.address || '',
+          quantity: String(foundEvent.totalTickets && foundEvent.totalTickets > 0 ? foundEvent.totalTickets : 1),
+          ticketType: '0',
         });
         setTicketTiers(
           foundEvent.ticketTiers?.length
@@ -181,15 +171,19 @@ export const AdminEditEvent: React.FC = () => {
       setError("");
       setSuccess("");
 
-      const normalizedTiers = ticketTiers
-        .filter(
-          (tier) => tier.name.trim() && tier.price !== "" && tier.supply !== "",
-        )
-        .map((tier) => ({
-          name: tier.name.trim(),
-          price: Number(tier.price),
-          totalSupply: Number(tier.supply),
-        }));
+      const quantity = Number(formData.quantity);
+      const ticketType = Number(formData.ticketType);
+
+      if (formData.status === 'ticketing') {
+        if (!Number.isInteger(quantity) || quantity <= 0) {
+          throw new Error('Quantity must be a positive integer for ticketing status');
+        }
+      }
+
+      await updateAdminEventStatus(id, formData.status, {
+        quantity: formData.status === 'ticketing' ? quantity : undefined,
+        ticketType: formData.status === 'ticketing' ? ticketType : undefined,
+      });
 
       if (!normalizedTiers.length) {
         setError("At least one valid ticket tier is required");
@@ -344,6 +338,34 @@ export const AdminEditEvent: React.FC = () => {
                 </Select>
               </div>
             </div>
+
+            {formData.status === 'ticketing' && (
+              <div className="grid md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label className="text-slate-300">Mint Quantity</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={formData.quantity}
+                    onChange={(e) => handleChange('quantity', e.target.value)}
+                    className="bg-slate-800 border-slate-700 text-white"
+                    placeholder="e.g. 10"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-slate-300">Ticket Type</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={formData.ticketType}
+                    onChange={(e) => handleChange('ticketType', e.target.value)}
+                    className="bg-slate-800 border-slate-700 text-white"
+                    placeholder="0"
+                  />
+                </div>
+              </div>
+            )}
 
             <div className="grid md:grid-cols-2 gap-4">
               <div className="space-y-2">

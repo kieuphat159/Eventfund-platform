@@ -1,7 +1,3 @@
-import { ChainLog } from "../../../models/ChainLog.js";
-import { TicketEvent } from "../../../models/TicketEvent.model.js";
-import { TicketStats } from "../../../models/TicketStats.model.js";
-
 import { provider } from "../core/provider.js";
 import { getTicket } from "../core/contracts/index.js";
 import {
@@ -17,9 +13,17 @@ import {
   readReorgPolicyFromEnv,
 } from "../sync/reorgPolicy.js";
 
+// ==================== REPOSITORIES ====================
+import ticketEventRepo from "../../../repositories/ticketEvent.repo.js";
+import ticketStatsRepo from "../../../repositories/ticketStats.repo.js";
+import chainLogRepo from "../../../repositories/chainLog.repo.js";
+
 const CONTRACT_NAME = "Ticket";
 const PROCESSOR_NAME = "TicketProcessor";
 
+// -------------------------
+// Helper utils
+// -------------------------
 function toStringId(value) {
   if (value === undefined || value === null) return undefined;
   return typeof value === "string" ? value : String(value);
@@ -30,26 +34,8 @@ function lowerAddress(value) {
   return String(value).toLowerCase();
 }
 
-function safeBigInt(value) {
-  if (value === undefined || value === null || value === "") return 0n;
-  try {
-    return BigInt(value);
-  } catch {
-    return 0n;
-  }
-}
-
-function toDateFromUnix(value) {
-  if (value === undefined || value === null || value === "") return undefined;
-  const n = Number(value);
-  if (!Number.isFinite(n) || n <= 0) return undefined;
-  return new Date(n * 1000);
-}
-
 /**
- * Hỗ trợ đọc arg theo cả 2 kiểu:
- * - args.eventId
- * - args["1"]
+ * Hỗ trợ đọc arg theo cả 2 kiểu: named hoặc positional
  */
 function getArg(args, name, index) {
   if (!args) return undefined;
@@ -76,22 +62,6 @@ function mapChainLogToTicketEventDoc(chainLog, contractAddressLower) {
   };
 
   switch (eventName) {
-    /**
-     * emit TicketMintedBatch(to, eventId, ticketIds, price, ticketType)
-     * named:
-     * - to
-     * - eventId
-     * - ticketIds
-     * - price
-     * - ticketType
-     *
-     * positional:
-     * 0: to
-     * 1: eventId
-     * 2: ticketIds
-     * 3: price
-     * 4: ticketType
-     */
     case "TicketMintedBatch": {
       const eventId = toStringId(getArg(args, "eventId", 1));
       const ticketIdsRaw = getArg(args, "ticketIds", 2);
@@ -111,20 +81,6 @@ function mapChainLogToTicketEventDoc(chainLog, contractAddressLower) {
       };
     }
 
-    /**
-     * emit TicketPurchased(tokenId, eventId, buyer, price)
-     * named:
-     * - tokenId
-     * - eventId
-     * - buyer
-     * - price
-     *
-     * positional:
-     * 0: tokenId
-     * 1: eventId
-     * 2: buyer
-     * 3: price
-     */
     case "TicketPurchased": {
       return {
         ...base,
@@ -135,18 +91,8 @@ function mapChainLogToTicketEventDoc(chainLog, contractAddressLower) {
       };
     }
 
-    /**
-     * emit TicketUsed(tokenId, eventId, owner, verifier, usedAt)
-     * positional:
-     * 0: tokenId
-     * 1: eventId
-     * 2: owner
-     * 3: verifier
-     * 4: usedAt
-     */
     case "TicketUsed": {
       const usedAtRaw = getArg(args, "usedAt", 4);
-
       return {
         ...base,
         eventId: toStringId(getArg(args, "eventId", 1)),
@@ -154,16 +100,10 @@ function mapChainLogToTicketEventDoc(chainLog, contractAddressLower) {
         owner: lowerAddress(getArg(args, "owner", 2)),
         verifier: lowerAddress(getArg(args, "verifier", 3)),
         usedAt: toStringId(usedAtRaw),
-        usedAtDate: toDateFromUnix(usedAtRaw),
+        // usedAtDate removed: not in TicketEvent schema; use usedAt (String) only
       };
     }
 
-    /**
-     * emit TicketExpired(tokenId, eventId)
-     * positional:
-     * 0: tokenId
-     * 1: eventId
-     */
     case "TicketExpired": {
       return {
         ...base,
@@ -172,14 +112,6 @@ function mapChainLogToTicketEventDoc(chainLog, contractAddressLower) {
       };
     }
 
-    /**
-     * emit TicketRefunded(tokenId, eventId, owner, refundAmount)
-     * positional:
-     * 0: tokenId
-     * 1: eventId
-     * 2: owner
-     * 3: refundAmount
-     */
     case "TicketRefunded": {
       return {
         ...base,
@@ -190,11 +122,6 @@ function mapChainLogToTicketEventDoc(chainLog, contractAddressLower) {
       };
     }
 
-    /**
-     * emit FundContractSet(fund)
-     * positional:
-     * 0: fund
-     */
     case "FundContractSet": {
       return {
         ...base,
@@ -202,13 +129,6 @@ function mapChainLogToTicketEventDoc(chainLog, contractAddressLower) {
       };
     }
 
-    /**
-     * ERC721 Transfer(from, to, tokenId)
-     * positional:
-     * 0: from
-     * 1: to
-     * 2: tokenId
-     */
     case "Transfer": {
       return {
         ...base,
@@ -223,92 +143,9 @@ function mapChainLogToTicketEventDoc(chainLog, contractAddressLower) {
   }
 }
 
-async function deleteDerivedEventsInRange(
-  contractAddressLower,
-  fromBlock,
-  toBlock,
-) {
-  await TicketEvent.deleteMany({
-    contractAddress: contractAddressLower,
-    blockNumber: { $gte: fromBlock, $lte: toBlock },
-  });
-}
-
-async function rebuildStatsForEventIds(contractAddressLower, eventIds) {
-  const uniqueEventIds = Array.from(
-    new Set(eventIds.map(toStringId).filter(Boolean)),
-  );
-
-  if (uniqueEventIds.length === 0) return;
-
-  for (const eventId of uniqueEventIds) {
-    const mintedDocs = await TicketEvent.find({
-      contractAddress: contractAddressLower,
-      eventId,
-      eventName: "TicketMintedBatch",
-    })
-      .select({ ticketIds: 1 })
-      .lean();
-
-    const totalMinted = mintedDocs.reduce(
-      (sum, d) => sum + (Array.isArray(d.ticketIds) ? d.ticketIds.length : 0),
-      0,
-    );
-
-    const totalSold = await TicketEvent.countDocuments({
-      contractAddress: contractAddressLower,
-      eventId,
-      eventName: "TicketPurchased",
-    });
-
-    const totalUsed = await TicketEvent.countDocuments({
-      contractAddress: contractAddressLower,
-      eventId,
-      eventName: "TicketUsed",
-    });
-
-    const totalExpired = await TicketEvent.countDocuments({
-      contractAddress: contractAddressLower,
-      eventId,
-      eventName: "TicketExpired",
-    });
-
-    const totalRefunded = await TicketEvent.countDocuments({
-      contractAddress: contractAddressLower,
-      eventId,
-      eventName: "TicketRefunded",
-    });
-
-    const purchasedDocs = await TicketEvent.find({
-      contractAddress: contractAddressLower,
-      eventId,
-      eventName: "TicketPurchased",
-    })
-      .select({ priceWei: 1 })
-      .lean();
-
-    const totalRevenueWei = purchasedDocs
-      .reduce((sum, d) => sum + safeBigInt(d.priceWei), 0n)
-      .toString();
-
-    await TicketStats.updateOne(
-      { contractAddress: contractAddressLower, eventId },
-      {
-        $set: {
-          totalMinted,
-          totalSold,
-          totalUsed,
-          totalExpired,
-          totalRefunded,
-          totalRevenueWei,
-          lastRebuiltAt: new Date(),
-        },
-      },
-      { upsert: true },
-    );
-  }
-}
-
+// -------------------------
+// MAIN PROCESSOR
+// -------------------------
 export async function processTicketLogsOnce() {
   const ticket = getTicket();
   const { confirmations, reorgBuffer, chunkSize } = readReorgPolicyFromEnv();
@@ -328,7 +165,6 @@ export async function processTicketLogsOnce() {
   });
 
   const latest = await provider.getBlockNumber();
-
   const plan = planReorgSafeSync({
     latestBlock: latest,
     confirmations,
@@ -350,34 +186,35 @@ export async function processTicketLogsOnce() {
   while (currentFrom <= target) {
     const currentTo = Math.min(target, currentFrom + chunkSize - 1);
 
-    await deleteDerivedEventsInRange(
+    const logs = await chainLogRepo.findLogs(
+      {
+        contractName: CONTRACT_NAME,
+        contractAddress: contractAddressLower,
+        blockNumber: { $gte: currentFrom, $lte: currentTo },
+        eventName: { $ne: null },
+      },
+      { sort: { blockNumber: 1, transactionIndex: 1, logIndex: 1 } }
+    );
+
+    const preDeleteEventIds = await ticketEventRepo.findEventIdsInRange(
       contractAddressLower,
       currentFrom,
-      currentTo,
+      currentTo
     );
 
-    const logs = await ChainLog.find({
-      contractName: CONTRACT_NAME,
-      contractAddress: contractAddressLower,
-      blockNumber: { $gte: currentFrom, $lte: currentTo },
-      eventName: { $ne: null },
-    })
-      .sort({ blockNumber: 1, transactionIndex: 1, logIndex: 1 })
-      .lean();
+    // Reorg-safe: xoa TicketEvent trong range truoc, insert lai tu ChainLog canonical
+    // Neu block bi reorg, indexer da xoa ChainLog do → insertMany chi insert canonical
+    await ticketEventRepo.deleteInRange(contractAddressLower, currentFrom, currentTo);
 
-    const docs = logs.map((l) =>
-      mapChainLogToTicketEventDoc(l, contractAddressLower),
-    );
+    const docs = logs.map(l => mapChainLogToTicketEventDoc(l, contractAddressLower));
+    const postInsertEventIds = [...new Set(docs.map(d => d.eventId).filter(Boolean))];
 
     if (docs.length > 0) {
-      await TicketEvent.insertMany(docs, { ordered: false });
-
-      const affectedEventIds = docs
-        .map((d) => d.eventId)
-        .filter(Boolean);
-
-      await rebuildStatsForEventIds(contractAddressLower, affectedEventIds);
+      await ticketEventRepo.insertMany(docs);
     }
+
+    const affectedEventIds = [...new Set([...preDeleteEventIds, ...postInsertEventIds])];
+    await ticketStatsRepo.rebuildForEventIds(contractAddressLower, affectedEventIds);
 
     await updateProgress({
       contractName: PROCESSOR_NAME,
@@ -400,7 +237,6 @@ export async function runTicketProcessorLoop() {
     getNumberEnv("CHAIN_SYNC_INTERVAL_MS", 10_000),
   );
 
-  // eslint-disable-next-line no-constant-condition
   while (true) {
     try {
       await processTicketLogsOnce();

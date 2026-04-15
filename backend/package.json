@@ -5,7 +5,7 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "dev": "nodemon src/server.js",
+    "dev": "concurrently \"nodemon src/server.js\" \"npm run indexer:fund\" \"npm run processor:fund\"",
     "start": "node src/server.js",
     "test": "cross-env NODE_ENV=test NODE_OPTIONS=--experimental-vm-modules jest --runInBand",
     "indexer:ticket": "node src/services/blockchain/indexers/ticket/run.js",

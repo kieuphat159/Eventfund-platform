@@ -46,6 +46,12 @@ const shareSchema = new mongoose.Schema(
       type: String,
       default: "0",
     },
+
+    // Idempotency: track txHashes da xu ly cho claimedReward $inc
+    processedRewardTxHashes: {
+      type: [String],
+      default: [],
+    },
   },
   {
     timestamps: true, // Tự động thêm createdAt và updatedAt

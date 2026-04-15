@@ -36,6 +36,17 @@ const eventSchema = new mongoose.Schema(
     organizerShareBps: { type: Number, default: 0 },
     fundingDeadline: Date,
 
+    // On-chain funding params (from EventCreated)
+    organizerShareBps: { type: Number, default: 0 },
+    ticketPrice: { type: Number, default: 0 },
+    maxTickets: { type: Number, default: 0 },
+    usedThreshold: { type: Number, default: 0 },
+
+    // Funding lifecycle timestamps
+    fundingFinalizedAt: { type: Date },
+    ticketingStartedAt: { type: Date },
+    completedAt: { type: Date },
+
     // ===== Event Info =====
     status: {
       type: String,
@@ -77,8 +88,8 @@ const eventSchema = new mongoose.Schema(
     // ===== Ticket Info =====
     totalTickets: {
       type: Number,
-      default: 0,
-      min: [1, 'Total tickets must be at least 1'],
+      default: 1,
+      min: [1, 'Total tickets cannot be negative'],
     },
     ticketsSold: { type: Number, default: 0 },
     totalTicketsUsed: { type: Number, default: 0 },
@@ -152,6 +163,40 @@ const eventSchema = new mongoose.Schema(
     lastContributionRefundAt: Date,
     stakeWithdrawnAt: Date,
     revenueDistributedAt: Date,
+
+    // Refund tracking
+    refundPool: { type: Number, default: 0 },
+    refundedAmount: { type: Number, default: 0 },
+    refundEnabledAt: { type: Date },
+    lastRefundedAt: { type: Date },
+    lastRefundPoolDepositAt: { type: Date },
+    extraRefundPoolDeposited: { type: Number, default: 0 },
+
+    // Escrow revenue tracking
+    escrowedRevenue: { type: Number, default: 0 },
+    lastTicketRevenueAt: { type: Date },
+    ticketRevenueDeposited: { type: Number, default: 0 },
+    lastRoyaltyRevenueAt: { type: Date },
+    royaltyRevenueDeposited: { type: Number, default: 0 },
+
+    // Contribution refund tracking
+    lastContributionRefundAt: { type: Date },
+
+    // Organizer stake withdrawal
+    organizerStakeWithdrawn: { type: Number, default: 0 },
+    stakeWithdrawnAt: { type: Date },
+
+    // Penalty tracking
+    totalPenaltyAmount: { type: Number, default: 0 },
+    lastPenaltyAt: { type: Date },
+
+    // Idempotency: track txHashes da xu ly cac delta $inc
+    // Moi phan tu: { txHash, field } de biet tx nao da duoc $inc vao field nao
+    processedTxHashes: {
+      type: [{ txHash: String, field: String }],
+      default: [],
+      _id: false,
+    },
   },
   {
     timestamps: true, // Auto tạo createdAt, updatedAt

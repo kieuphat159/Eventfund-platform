@@ -56,6 +56,10 @@ const contributionSchema = new mongoose.Schema({
     enum: ["pending", "confirmed", "refunded"],
     default: "pending",
   },
+
+  refundedAt: {
+    type: Date,
+  },
 });
 
 // ===== Indexes =====
