@@ -2,7 +2,12 @@ import { isValidObjectId } from "mongoose";
 import { ethers } from "ethers";
 import * as eventRepo from "../../repositories/event.repo.js";
 import * as shareRepo from "../../repositories/share.repo.js";
-import { compareBigInt, toBigInt } from "../../utils/bigint.js";
+import {
+  addBigInt,
+  compareBigInt,
+  toBigInt,
+  toStringBigInt,
+} from "../../utils/bigint.js";
 import {
   NotFoundError,
   ForbiddenError,
@@ -292,6 +297,32 @@ export async function getEvents(query = {}, repos = {}) {
   return await repository.findEvents(dbQuery, options);
 }
 
+export async function assignVerifier(eventId, verifier, user) {
+  if (!verifier) {
+    throw new BadRequestError("Verifier wallet is required");
+  }
+
+  const event = await Event.findById(eventId);
+
+  if (!event) {
+    throw new NotFoundError("Event not found");
+  }
+
+  const normalizedVerifier = verifier.toLowerCase();
+
+  if (!event.verifiers) {
+    event.verifiers = [];
+  }
+
+  if (!event.verifiers.includes(normalizedVerifier)) {
+    event.verifiers.push(normalizedVerifier);
+  }
+
+  await event.save();
+
+  return event;
+}
+
 /**
  * Get event by ID with stats
  * @param {string} eventId - Event ID
@@ -345,7 +376,6 @@ export async function updateEvent(eventId, updates, user, repos = {}) {
     "fundingGoal",
     "minStakeRequired",
     "fundingDeadline",
-    "status",
     "venue",
     "imageUrls",
     "metadataUri",
@@ -361,11 +391,24 @@ export async function updateEvent(eventId, updates, user, repos = {}) {
     }
   });
 
+  const nextStatus = resolveOwnerStatusTransition(event.status, updates.status);
+  if (nextStatus) {
+    sanitizedUpdates.status = nextStatus;
+  }
+
   // Prevent changing funding goal after funding starts
-  if (updates.fundingGoal && event.status !== "draft") {
+  if (
+    updates.fundingGoal !== undefined &&
+    event.status !== "draft" &&
+    String(updates.fundingGoal) !== String(event.fundingGoal)
+  ) {
     throw new BadRequestError(
       "Cannot change funding goal after funding starts",
     );
+  }
+
+  if (Object.keys(sanitizedUpdates).length === 0) {
+    throw new BadRequestError("No valid event fields were provided");
   }
 
   // Apply updates
@@ -432,9 +475,9 @@ export async function getEventStats(eventId, repos = {}) {
   const fundingProgress =
     toBigInt(event.fundingGoal) > toBigInt("0")
       ? Number(
-          (toBigInt(event.currentFunding) * toBigInt("100")) /
-            toBigInt(event.fundingGoal),
-        )
+        (toBigInt(event.currentFunding) * toBigInt("100")) /
+        toBigInt(event.fundingGoal),
+      )
       : 0;
 
   // Calculate ticket availability
@@ -507,17 +550,18 @@ async function rebuildSharePercentagesAndFunding(eventId) {
   const contributions = await Contribution.find({
     eventId: event._id,
     status: "confirmed",
+    type: "donator_contribution",
   }).lean();
 
-  const totalFunding = contributions.reduce((sum, contribution) => {
-    const amount = Number(contribution.amount) || 0;
-    return sum + amount;
-  }, 0);
+  const totalFunding = contributions.reduce(
+    (sum, contribution) => addBigInt(sum, contribution.amount || "0"),
+    "0",
+  );
 
   const holders = contributions.reduce((map, contribution) => {
     const holder = contribution.contributor?.toLowerCase();
     if (!holder) return map;
-    map[holder] = (map[holder] || 0) + (Number(contribution.amount) || 0);
+    map[holder] = addBigInt(map[holder] || "0", contribution.amount || "0");
     return map;
   }, {});
 
@@ -528,12 +572,15 @@ async function rebuildSharePercentagesAndFunding(eventId) {
         update: {
           $set: {
             contributionAmount,
-            sharePercentage:
-              totalFunding > 0 ? (contributionAmount / totalFunding) * 100 : 0,
+            sharePercentage: calculatePercentage(
+              contributionAmount,
+              totalFunding,
+            ),
           },
           $setOnInsert: {
-            claimedReward: 0,
-            pendingReward: 0,
+            claimedReward: "0",
+            pendingReward: "0",
+            mintedShares: "0",
           },
         },
         upsert: true,
@@ -546,10 +593,10 @@ async function rebuildSharePercentagesAndFunding(eventId) {
   }
 
   return {
-    currentFunding: totalFunding.toString(),
+    currentFunding: totalFunding,
     status:
       compareBigInt(totalFunding, event.fundingGoal) >= 0 &&
-      event.status === "funding"
+        event.status === "funding"
         ? "funded"
         : event.status,
   };
@@ -576,18 +623,15 @@ export async function investInEvent(eventId, amount, user, repos = {}) {
     throw new BadRequestError("Event is not open for investment");
   }
 
-  const amountNumber = Number(amount);
-  if (
-    !Number.isFinite(amountNumber) ||
-    amountNumber <= 0 ||
-    !Number.isInteger(amountNumber)
-  ) {
+  let normalizedAmount;
+  try {
+    normalizedAmount = toStringBigInt(amount);
+  } catch {
     throw new BadRequestError("Investment amount must be a positive integer");
   }
 
-  const minStake = Number(event.minStakeRequired || "0");
-  if (minStake > 0 && amountNumber < minStake) {
-    throw new BadRequestError(`Investment amount must be at least ${minStake}`);
+  if (compareBigInt(normalizedAmount, "0") <= 0) {
+    throw new BadRequestError("Investment amount must be a positive integer");
   }
 
   const existingShare = await shareRepository.findByEventAndHolder(
@@ -595,19 +639,28 @@ export async function investInEvent(eventId, amount, user, repos = {}) {
     user.walletAddress,
   );
 
+  const updatedContributionAmount = existingShare
+    ? addBigInt(existingShare.contributionAmount || "0", normalizedAmount)
+    : normalizedAmount;
+
   const sharePayload = {
     eventId,
     holder: user.walletAddress.toLowerCase(),
-    contributionAmount: amountNumber,
+    contributionAmount: updatedContributionAmount,
     sharePercentage: 0,
-    claimedReward: existingShare?.claimedReward ?? 0,
-    pendingReward: existingShare?.pendingReward ?? 0,
+    claimedReward: existingShare?.claimedReward ?? "0",
+    pendingReward: existingShare?.pendingReward ?? "0",
+    mintedShares: existingShare?.mintedShares ?? "0",
   };
 
   if (existingShare) {
     await Share.findOneAndUpdate(
       { eventId, holder: user.walletAddress.toLowerCase() },
-      { $inc: { contributionAmount: amountNumber } },
+      {
+        $set: {
+          contributionAmount: updatedContributionAmount,
+        },
+      },
       { new: true, runValidators: true, lean: true },
     );
   } else {
@@ -623,7 +676,7 @@ export async function investInEvent(eventId, amount, user, repos = {}) {
     eventId,
     contributor: user.walletAddress.toLowerCase(),
     type: "donator_contribution",
-    amount: amountNumber,
+    amount: normalizedAmount,
     sharePercentage: 0,
     txHash,
     status: "confirmed",

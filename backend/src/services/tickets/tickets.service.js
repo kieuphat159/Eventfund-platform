@@ -2,12 +2,16 @@ import mongoose from 'mongoose';
 import { ethers } from 'ethers';
 import * as ticketRepo from '../../repositories/ticket.repo.js';
 import * as eventRepo from '../../repositories/event.repo.js';
-import { NotFoundError, BadRequestError } from '../../utils/customErrors.js';
+import {
+  NotFoundError,
+  BadRequestError,
+  ForbiddenError,
+} from '../../utils/customErrors.js';
 import { getTicket, provider } from '../blockchain/index.js';
 
 const ONCHAIN_TICKET_STATUS = {
   MINTED: 0n,
-  SOLD: 1n
+  SOLD: 1n,
 };
 
 function normalizeTxHash(txHash) {
@@ -52,6 +56,27 @@ function ensureEventOpenForTicketing(event) {
   }
 }
 
+// Check verifier có được assign cho event không
+function ensureVerifierAssignedToEvent(event, verifierWallet) {
+  const normalizedVerifier = verifierWallet?.toLowerCase();
+
+  if (!normalizedVerifier) {
+    throw new ForbiddenError('Verifier wallet is required');
+  }
+
+  if (!Array.isArray(event?.verifiers) || event.verifiers.length === 0) {
+    throw new ForbiddenError('No verifier is assigned to this event');
+  }
+
+  const isAssigned = event.verifiers.some(
+    (wallet) => wallet?.toLowerCase() === normalizedVerifier
+  );
+
+  if (!isAssigned) {
+    throw new ForbiddenError('You are not assigned to this event');
+  }
+}
+
 async function findMintedTicketByEventId(eventId, repos = {}) {
   const ticketRepository = repos.ticketRepo || ticketRepo;
 
@@ -65,10 +90,6 @@ async function findMintedTicketByEventId(eventId, repos = {}) {
 
 /**
  * Build a primary-sale purchase intent for wallet signing
- * @param {Object} payload - Purchase request payload
- * @param {string} buyerWallet - Buyer wallet address
- * @param {Object} repos - Injected repositories (optional)
- * @returns {Promise<Object>} Encoded on-chain transaction payload
  */
 export async function createPurchaseIntent(payload = {}, buyerWallet, repos = {}) {
   const ticketRepository = repos.ticketRepo || ticketRepo;
@@ -106,6 +127,7 @@ export async function createPurchaseIntent(payload = {}, buyerWallet, repos = {}
   if (!event) {
     throw new NotFoundError('Event not found');
   }
+
   ensureEventOpenForTicketing(event);
 
   const ticketContract = getTicket();
@@ -115,7 +137,7 @@ export async function createPurchaseIntent(payload = {}, buyerWallet, repos = {}
     ticketContract.getTicketStatus(chainTokenId),
     ticketContract.getTicketPrice(chainTokenId),
     ticketContract.getAddress(),
-    provider.getNetwork()
+    provider.getNetwork(),
   ]);
 
   if (chainStatus !== ONCHAIN_TICKET_STATUS.MINTED) {
@@ -133,16 +155,13 @@ export async function createPurchaseIntent(payload = {}, buyerWallet, repos = {}
       data,
       value: chainPrice.toString(),
       chainId: network.chainId.toString(),
-      functionName: 'purchaseTicket'
-    }
+      functionName: 'purchaseTicket',
+    },
   };
 }
 
 /**
  * Confirm a primary-sale purchase transaction and sync DB
- * @param {Object} payload - Confirmation payload
- * @param {Object} repos - Injected repositories (optional)
- * @returns {Promise<Object>} Synced ticket information
  */
 export async function confirmPurchaseTransaction(payload = {}, repos = {}) {
   const ticketRepository = repos.ticketRepo || ticketRepo;
@@ -191,47 +210,43 @@ export async function confirmPurchaseTransaction(payload = {}, repos = {}) {
     throw new NotFoundError('Ticket not found in database');
   }
 
-  if (existingTicket.status === 'sold' && existingTicket.currentOwner?.toLowerCase() === buyerFromChain) {
+  if (
+    existingTicket.status === 'sold' &&
+    existingTicket.currentOwner?.toLowerCase() === buyerFromChain
+  ) {
     return {
       synced: false,
       alreadySynced: true,
       txHash: normalizeTxHash(txHash),
-      ticket: existingTicket
+      ticket: existingTicket,
     };
   }
 
   const block = receipt.blockNumber ? await provider.getBlock(receipt.blockNumber) : null;
   const soldAt = block ? new Date(Number(block.timestamp) * 1000) : new Date();
 
-  const updatedTicket = await ticketRepository.markAsSold(
-    purchasedTokenId,
-    {
-      buyer: buyerFromChain,
-      from: existingTicket.currentOwner,
-      soldAt,
-      soldTxHash: normalizeTxHash(txHash),
-      price: priceFromChain
-    }
-  );
+  const updatedTicket = await ticketRepository.markAsSold(purchasedTokenId, {
+    buyer: buyerFromChain,
+    from: existingTicket.currentOwner,
+    soldAt,
+    soldTxHash: normalizeTxHash(txHash),
+    price: priceFromChain,
+  });
 
   await eventRepository.incrementTicketCounters(existingTicket.eventId, {
-    ticketsSold: 1
+    ticketsSold: 1,
   });
 
   return {
     synced: true,
     alreadySynced: false,
     txHash: normalizeTxHash(txHash),
-    ticket: updatedTicket
+    ticket: updatedTicket,
   };
 }
 
 /**
  * Build ticket use intent for verifier wallet signing
- * @param {string} tokenId - Ticket token ID
- * @param {string} verifierWallet - Verifier wallet address
- * @param {Object} repos - Injected repositories (optional)
- * @returns {Promise<Object>} Encoded on-chain transaction payload
  */
 export async function createUseTicketIntent(tokenId, verifierWallet, repos = {}) {
   const ticketRepository = repos.ticketRepo || ticketRepo;
@@ -249,6 +264,9 @@ export async function createUseTicketIntent(tokenId, verifierWallet, repos = {})
   if (!event) {
     throw new NotFoundError('Event not found');
   }
+
+  ensureVerifierAssignedToEvent(event, verifierWallet);
+
   if (event.status !== 'ongoing') {
     throw new BadRequestError('Event must be ongoing for check-in');
   }
@@ -259,12 +277,12 @@ export async function createUseTicketIntent(tokenId, verifierWallet, repos = {})
   }
 
   const ticketContract = getTicket();
-  const chainTokenId = BigInt(token.tokenId);
+  const chainTokenId = BigInt(ticket.tokenId);
 
   const [chainStatus, contractAddress, network] = await Promise.all([
     ticketContract.getTicketStatus(chainTokenId),
     ticketContract.getAddress(),
-    provider.getNetwork()
+    provider.getNetwork(),
   ]);
 
   if (chainStatus !== ONCHAIN_TICKET_STATUS.SOLD) {
@@ -274,23 +292,20 @@ export async function createUseTicketIntent(tokenId, verifierWallet, repos = {})
   const data = ticketContract.interface.encodeFunctionData('markAsUsed', [chainTokenId]);
 
   return {
-    tokenId: token.tokenId,
+    tokenId: ticket.tokenId,
     verifier: verifierWallet.toLowerCase(),
     transaction: {
       to: contractAddress,
       data,
       value: '0',
       chainId: network.chainId.toString(),
-      functionName: 'markAsUsed'
-    }
+      functionName: 'markAsUsed',
+    },
   };
 }
 
 /**
  * Confirm a ticket check-in transaction and sync DB
- * @param {Object} payload - Confirmation payload
- * @param {Object} repos - Injected repositories (optional)
- * @returns {Promise<Object>} Synced ticket information
  */
 export async function confirmUseTicketTransaction(payload = {}, repos = {}) {
   const ticketRepository = repos.ticketRepo || ticketRepo;
@@ -338,12 +353,19 @@ export async function confirmUseTicketTransaction(payload = {}, repos = {}) {
     throw new NotFoundError('Ticket not found in database');
   }
 
+  const event = await eventRepository.findById(existingTicket.eventId);
+  if (!event) {
+    throw new NotFoundError('Event not found');
+  }
+
+  ensureVerifierAssignedToEvent(event, verifierWallet || verifierFromChain);
+
   if (existingTicket.status === 'used') {
     return {
       synced: false,
       alreadySynced: true,
       txHash: normalizeTxHash(txHash),
-      ticket: existingTicket
+      ticket: existingTicket,
     };
   }
 
@@ -359,32 +381,26 @@ export async function confirmUseTicketTransaction(payload = {}, repos = {}) {
     resolvedUsedAt = new Date();
   }
 
-  const updatedTicket = await ticketRepository.markAsUsedFromChain(
-    usedTokenId,
-    {
-      usedAt: resolvedUsedAt,
-      verifiedBy: verifierFromChain,
-      usedTxHash: normalizeTxHash(txHash)
-    }
-  );
+  const updatedTicket = await ticketRepository.markAsUsedFromChain(usedTokenId, {
+    usedAt: resolvedUsedAt,
+    verifiedBy: verifierFromChain,
+    usedTxHash: normalizeTxHash(txHash),
+  });
 
   await eventRepository.incrementTicketCounters(existingTicket.eventId, {
-    totalTicketsUsed: 1
+    totalTicketsUsed: 1,
   });
 
   return {
     synced: true,
     alreadySynced: false,
     txHash: normalizeTxHash(txHash),
-    ticket: updatedTicket
+    ticket: updatedTicket,
   };
 }
 
 /**
  * Get tickets with filters and pagination
- * @param {Object} query - Query parameters from request
- * @param {Object} repos - Injected repositories (optional)
- * @returns {Promise<Object>} Paginated tickets
  */
 export async function getTickets(query = {}, repos = {}) {
   const ticketRepository = repos.ticketRepo || ticketRepo;
@@ -394,14 +410,14 @@ export async function getTickets(query = {}, repos = {}) {
   const dbQuery = {
     ...(eventId && { eventId }),
     ...(status && { status }),
-    ...(owner && { currentOwner: owner.toLowerCase() })
+    ...(owner && { currentOwner: owner.toLowerCase() }),
   };
 
   const options = {
     page: page ? parseInt(page, 10) : 1,
     limit: Math.min(limit ? parseInt(limit, 10) : 20, 100),
     sort: sort || '-createdAt',
-    lean: true
+    lean: true,
   };
 
   return await ticketRepository.findTickets(dbQuery, options);
@@ -409,9 +425,6 @@ export async function getTickets(query = {}, repos = {}) {
 
 /**
  * Get ticket by token ID with transfer history
- * @param {string} tokenId - Token ID
- * @param {Object} repos - Injected repositories (optional)
- * @returns {Promise<Object|null>} Ticket or null
  */
 export async function getTicketById(tokenId, repos = {}) {
   const ticketRepository = repos.ticketRepo || ticketRepo;
@@ -427,10 +440,6 @@ export async function getTicketById(tokenId, repos = {}) {
 
 /**
  * Get all tickets for a wallet address
- * @param {string} walletAddress - Wallet address
- * @param {Object} query - Query parameters from request
- * @param {Object} repos - Injected repositories (optional)
- * @returns {Promise<Object>} Paginated tickets
  */
 export async function getUserTickets(walletAddress, query = {}, repos = {}) {
   const ticketRepository = repos.ticketRepo || ticketRepo;
@@ -442,7 +451,7 @@ export async function getUserTickets(walletAddress, query = {}, repos = {}) {
     limit: Math.min(limit ? parseInt(limit, 10) : 20, 100),
     sort: sort || '-createdAt',
     lean: true,
-    populate: 'eventId'
+    populate: 'eventId',
   };
 
   return await ticketRepository.findByOwner(walletAddress, options);
@@ -450,10 +459,6 @@ export async function getUserTickets(walletAddress, query = {}, repos = {}) {
 
 /**
  * Verify ticket ownership
- * @param {string} tokenId - Token ID
- * @param {string} walletAddress - Wallet address to verify
- * @param {Object} repos - Injected repositories (optional)
- * @returns {Promise<boolean>} True if owner matches
  */
 export async function verifyTicketOwnership(tokenId, walletAddress, repos = {}) {
   const ticketRepository = repos.ticketRepo || ticketRepo;
@@ -469,10 +474,6 @@ export async function verifyTicketOwnership(tokenId, walletAddress, repos = {}) 
 
 /**
  * Mark ticket as used during event check-in
- * @param {string} tokenId - Token ID
- * @param {string} verifierWallet - Verifier wallet address
- * @param {Object} repos - Injected repositories (optional)
- * @returns {Promise<Object>} Updated ticket
  */
 export async function markTicketAsUsed(tokenId, verifierWallet, repos = {}) {
   const ticketRepository = repos.ticketRepo || ticketRepo;
@@ -484,45 +485,40 @@ export async function markTicketAsUsed(tokenId, verifierWallet, repos = {}) {
     throw new NotFoundError('Ticket not found');
   }
 
-  // Check if already used (idempotent)
   if (ticket.status === 'used') {
     return ticket;
   }
 
-  // Validate ticket status
   if (ticket.status !== 'sold') {
     throw new BadRequestError('Ticket must be in sold status to be marked as used');
   }
 
-  // Get event and validate
   const event = await eventRepository.findById(ticket.eventId);
 
   if (!event) {
     throw new NotFoundError('Event not found');
   }
 
-  // Validate event status
+  ensureVerifierAssignedToEvent(event, verifierWallet);
+
   if (event.status !== 'ongoing') {
     throw new BadRequestError('Event must be in ongoing status');
   }
 
-  // Validate current time is within event dates
   const now = new Date();
   if (now < event.startDate || now > event.endDate) {
     throw new BadRequestError('Current time must be within event dates');
   }
 
-  // Update ticket using repository
   const usageData = {
     usedAt: now,
-    verifiedBy: verifierWallet.toLowerCase()
+    verifiedBy: verifierWallet.toLowerCase(),
   };
 
   const updatedTicket = await ticketRepository.markAsUsed(tokenId, usageData);
 
-  // Update event counter using repository
   await eventRepository.incrementTicketCounters(ticket.eventId, {
-    totalTicketsUsed: 1
+    totalTicketsUsed: 1,
   });
 
   return updatedTicket;
@@ -530,37 +526,28 @@ export async function markTicketAsUsed(tokenId, verifierWallet, repos = {}) {
 
 /**
  * Get ticket statistics for an event
- * @param {string} eventId - Event ID
- * @param {Object} repos - Injected repositories (optional)
- * @returns {Promise<Object>} Ticket stats
  */
 export async function getTicketStats(eventId, repos = {}) {
   const ticketRepository = repos.ticketRepo || ticketRepo;
 
-  // Convert eventId to ObjectId for aggregation
   const eventObjectId = new mongoose.Types.ObjectId(eventId);
-
   const stats = await ticketRepository.getTicketStatsByEvent(eventObjectId);
 
-  // Transform repository stats to match expected format
   return {
     totalTickets: stats.total || 0,
     soldTickets: stats.sold || 0,
     usedTickets: stats.used || 0,
     mintedTickets: stats.minted || 0,
-    availableTickets: stats.minted || 0
+    availableTickets: stats.minted || 0,
   };
 }
 
 /**
  * Verify ticket ownership and return ticket details
- * @param {string} tokenId - Token ID
- * @param {string} walletAddress - Wallet address to verify
- * @param {Object} repos - Injected repositories (optional)
- * @returns {Promise<Object>} Verification result with ticket details
  */
-export async function verifyTicket(tokenId, walletAddress, repos = {}) {
+export async function verifyTicket(tokenId, walletAddress, verifierWallet, repos = {}) {
   const ticketRepository = repos.ticketRepo || ticketRepo;
+  const eventRepository = repos.eventRepo || eventRepo;
 
   const ticket = await ticketRepository.findByTokenId(tokenId, { lean: false });
 
@@ -568,10 +555,26 @@ export async function verifyTicket(tokenId, walletAddress, repos = {}) {
     throw new NotFoundError('Ticket not found');
   }
 
+  const event = await eventRepository.findById(ticket.eventId);
+  if (!event) {
+    throw new NotFoundError('Event not found');
+  }
+
+  ensureVerifierAssignedToEvent(event, verifierWallet);
+
+  if (event.status !== 'ongoing') {
+    throw new BadRequestError('Event must be ongoing for ticket verification');
+  }
+
+  const now = new Date();
+  if (now < event.startDate || now > event.endDate) {
+    throw new BadRequestError('Current time must be within event dates');
+  }
+
   const isOwner = ticket.currentOwner.toLowerCase() === walletAddress.toLowerCase();
 
   return {
     isOwner,
-    ticket
+    ticket,
   };
 }

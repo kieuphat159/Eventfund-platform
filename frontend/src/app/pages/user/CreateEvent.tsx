@@ -344,7 +344,7 @@ export const CreateEvent: React.FC = () => {
     <div className="max-w-4xl mx-auto space-y-6">
       <div>
         <h1 className="text-3xl font-bold text-white mb-2">Create Event</h1>
-        <p className="text-slate-400">Set up a new event with NFT tickets</p>
+        <p className="text-slate-400">Create a draft event and send it to admin review before funding opens</p>
       </div>
 
       {!!error && (
@@ -363,7 +363,7 @@ export const CreateEvent: React.FC = () => {
         <CardHeader>
           <CardTitle className="text-white">Event Details</CardTitle>
           <CardDescription className="text-slate-400">
-            Basic information about your event
+            Basic information for the draft that admin will review
           </CardDescription>
         </CardHeader>
 
@@ -749,7 +749,7 @@ export const CreateEvent: React.FC = () => {
         <CardHeader>
           <CardTitle className="text-white">Investment Options</CardTitle>
           <CardDescription className="text-slate-400">
-            Optional funding configuration for the current event creation flow
+            Optional funding configuration. Event funding only opens after admin approval.
           </CardDescription>
         </CardHeader>
 
@@ -812,7 +812,7 @@ export const CreateEvent: React.FC = () => {
 
             <div>
               <Label htmlFor="min-stake-required" className="text-slate-300">
-                Min Stake Required
+                Minimum Organizer Stake
               </Label>
               <Input
                 id="min-stake-required"
@@ -875,8 +875,8 @@ export const CreateEvent: React.FC = () => {
           </div>
 
           <p className="text-xs text-slate-500">
-            The backend currently expects large numeric values as strings, for
-            example in wei.
+            Funding fields are stored as integer strings in wei. This value is
+            the event creator's required locked stake, not the donor minimum.
           </p>
         </CardContent>
       </Card>
@@ -888,7 +888,7 @@ export const CreateEvent: React.FC = () => {
           onClick={handleSubmit}
           className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white px-8 disabled:opacity-50"
         >
-          {submitting ? 'Creating...' : 'Create Event'}
+          {submitting ? 'Submitting...' : 'Submit for Admin Review'}
         </Button>
       </div>
     </div>

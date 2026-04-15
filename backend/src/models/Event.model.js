@@ -40,6 +40,7 @@ const eventSchema = new mongoose.Schema(
     minStakeRequired: { type: String, default: "0" },
     fundingGoal: { type: String, default: "0" },
     currentFunding: { type: String, default: "0" },
+    organizerShareBps: { type: Number, default: 0 },
     fundingDeadline: Date,
 
     // On-chain funding params (from EventCreated)
@@ -69,6 +70,14 @@ const eventSchema = new mongoose.Schema(
       default: "draft",
     },
 
+    verifiers: [
+      {
+        type: String, // walletAddress
+        lowercase: true,
+        trim: true,
+      }
+    ],
+
     startDate: {
       type: Date,
       required: true,
@@ -84,7 +93,6 @@ const eventSchema = new mongoose.Schema(
       },
     },
     venue: {
-      name: String,
       address: String,
     },
 
@@ -132,17 +140,45 @@ const eventSchema = new mongoose.Schema(
       type: String,
       enum: [
         "holding",
+        "holding_revenue",
         "released",
-        "refunded",
         "refund_enabled",
         "refunding",
         "refund_pool_funded",
-        "holding_revenue",
+        "refunded",
       ],
       default: "holding",
     },
 
+
+
     totalRevenue: { type: String, default: "0" },
+    escrowedRevenue: { type: String, default: "0" },
+    platformFee: { type: String, default: "0" },
+    organizerShare: { type: String, default: "0" },
+    donatorPool: { type: String, default: "0" },
+    refundedAmount: { type: String, default: "0" },
+    totalPenaltyAmount: { type: String, default: "0" },
+    ticketRevenueDeposited: { type: String, default: "0" },
+    royaltyRevenueDeposited: { type: String, default: "0" },
+    organizerStakeWithdrawn: { type: String, default: "0" },
+    revenueReleased: { type: Boolean, default: false },
+    refundsEnabled: { type: Boolean, default: false },
+    sharesFinalized: { type: Boolean, default: false },
+    totalShares: { type: String, default: "0" },
+    totalMinted: { type: Number, default: 0 },
+    refundPool: { type: String, default: "0" },
+    fundingFinalizedAt: Date,
+    ticketingStartedAt: Date,
+    completedAt: Date,
+    refundEnabledAt: Date,
+    lastRefundedAt: Date,
+    lastRefundPoolDepositAt: Date,
+    lastPenaltyAt: Date,
+    lastTicketRevenueAt: Date,
+    lastRoyaltyRevenueAt: Date,
+    lastContributionRefundAt: Date,
+    stakeWithdrawnAt: Date,
     revenueDistributedAt: Date,
 
     // Refund tracking

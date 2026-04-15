@@ -38,6 +38,8 @@ import { FraudMonitoring } from "./pages/admin/FraudMonitoring";
 import { FinanceDashboard } from "./pages/admin/FinanceDashboard";
 import { AnalyticsDashboard } from "./pages/admin/AnalyticsDashboard";
 import { PlatformSettings } from "./pages/admin/PlatformSettings";
+import { AdminEventDetail } from "./pages/admin/AdminEventDetail";
+import { AdminEditEvent } from "./pages/admin/AdminEditEvent";
 
 type AppRole = "user" | "verifier" | "admin" | "public" | null;
 
@@ -54,21 +56,13 @@ const FullScreenLoader: React.FC<{ text?: string }> = ({
   );
 };
 
-/**
- * Get current session from both context and localStorage
- */
 const useSession = () => {
   const { user, isLoading } = useAuth();
 
-  const savedRole = localStorage.getItem("userRole") as AppRole;
-  const savedAddress = localStorage.getItem("walletAddress");
-
-  const walletAddress = user?.walletAddress || savedAddress || null;
-
+  const walletAddress = user?.walletAddress || null;
   const currentRole: AppRole =
-    user?.role && user.role !== "public" ? (user.role as AppRole) : savedRole;
-
-  const isAuthenticated = !!walletAddress;
+    user?.role && user.role !== "public" ? (user.role as AppRole) : "public";
+  const isAuthenticated = !!walletAddress && currentRole !== "public";
 
   return {
     user,
@@ -79,25 +73,17 @@ const useSession = () => {
   };
 };
 
-/**
- * Return the default route by role
- */
 const getDefaultRouteByRole = (
   isAuthenticated: boolean,
   role: AppRole,
 ): string => {
   if (!isAuthenticated) return "/login";
-
   if (role === "admin") return "/admin/dashboard";
   if (role === "verifier") return "/app/verifier/dashboard";
   if (role === "user") return "/app/dashboard";
-
   return "/login";
 };
 
-/**
- * Generic route guard
- */
 const ProtectedRoute: React.FC<{
   children: React.ReactNode;
   allowRoles?: Array<"user" | "verifier" | "admin">;
@@ -109,14 +95,10 @@ const ProtectedRoute: React.FC<{
   }
 
   if (!isAuthenticated) {
-    console.log("[Guard] Not logged in, redirecting to /login");
     return <Navigate to="/login" replace />;
   }
 
   if (!currentRole || currentRole === "public") {
-    console.log(
-      "[Guard] Wallet exists but role is invalid, redirecting to /login",
-    );
     return <Navigate to="/login" replace />;
   }
 
@@ -124,9 +106,6 @@ const ProtectedRoute: React.FC<{
     allowRoles &&
     !allowRoles.includes(currentRole as "user" | "verifier" | "admin")
   ) {
-    console.log(
-      "[Guard] Insufficient permissions, redirecting to allowed route",
-    );
     return (
       <Navigate
         to={getDefaultRouteByRole(isAuthenticated, currentRole)}
@@ -138,9 +117,6 @@ const ProtectedRoute: React.FC<{
   return <>{children}</>;
 };
 
-/**
- * Prevent logged-in users from staying on the login page
- */
 const LoginRedirect: React.FC = () => {
   const { isLoading, isAuthenticated, currentRole } = useSession();
 
@@ -165,7 +141,6 @@ const AppRoutes: React.FC = () => {
 
   return (
     <Routes>
-      {/* 1. ADMIN ROUTES */}
       <Route
         path="/admin"
         element={
@@ -178,6 +153,8 @@ const AppRoutes: React.FC = () => {
         <Route path="dashboard" element={<AdminDashboard />} />
         <Route path="users" element={<UserManagement />} />
         <Route path="events" element={<EventManagement />} />
+        <Route path="events/:id" element={<AdminEventDetail />} />
+        <Route path="events/edit/:id" element={<AdminEditEvent />} />
         <Route path="marketplace" element={<MarketplaceManagement />} />
         <Route path="fraud" element={<FraudMonitoring />} />
         <Route path="finance" element={<FinanceDashboard />} />
@@ -185,7 +162,6 @@ const AppRoutes: React.FC = () => {
         <Route path="settings" element={<PlatformSettings />} />
       </Route>
 
-      {/* 2. USER & VERIFIER ROUTES */}
       <Route
         path="/app"
         element={
@@ -196,7 +172,6 @@ const AppRoutes: React.FC = () => {
       >
         <Route index element={<Navigate to="/app/dashboard" replace />} />
 
-        {/* Shared dashboard for regular users */}
         <Route
           path="dashboard"
           element={
@@ -206,7 +181,6 @@ const AppRoutes: React.FC = () => {
           }
         />
 
-        {/* Verifier specific */}
         <Route
           path="verifier/dashboard"
           element={
@@ -227,7 +201,6 @@ const AppRoutes: React.FC = () => {
         <Route path="account/settings" element={<Settings />} />
       </Route>
 
-      {/* 3. PUBLIC ROUTES */}
       <Route path="/" element={<PublicLayout />}>
         <Route index element={<Home />} />
         <Route path="explore" element={<Explore />} />
@@ -255,7 +228,6 @@ const AppRoutes: React.FC = () => {
         />
       </Route>
 
-      {/* 4. Catch-all: redirect by role */}
       <Route
         path="*"
         element={

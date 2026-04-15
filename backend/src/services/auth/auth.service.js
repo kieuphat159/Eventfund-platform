@@ -4,9 +4,7 @@ import {
 } from "../../utils/customErrors.js";
 import User from "../../models/User.model.js";
 import { decodeJwt } from "jose";
-/**
- * AuthService - Handles authentication business logic
- */
+
 class AuthService {
   constructor(nonceService, siweService, jwtService) {
     this.nonceService = nonceService;
@@ -14,23 +12,14 @@ class AuthService {
     this.jwtService = jwtService;
   }
 
-  /**
-   * Generate nonce for wallet address
-   */
   async generateNonce(walletAddress) {
     return await this.nonceService.generateNonce(walletAddress);
   }
 
-  /**
-   * Get nonce for wallet address
-   */
   async getNonce(walletAddress) {
     return await this.nonceService.getNonce(walletAddress);
   }
 
-  /**
-   * Create SIWE message
-   */
   createSIWEMessage(walletAddress, nonce, domain, uri, chainId) {
     return this.siweService.createSIWEMessage(
       walletAddress,
@@ -41,48 +30,65 @@ class AuthService {
     );
   }
 
-  /**
-   * Login with Web3Auth ID token
-   */
-  async loginWithIdToken(idToken, walletAddress) {
-    const decoded = jwt.decode(idToken);
-    if (!decoded) {
-      throw new BadRequestError('Invalid ID Token format');
+  async loginWithIdToken(idToken, eoaAddress, smartAccountAddress) {
+    let decoded;
+    let email;
+
+    try {
+      decoded = decodeJwt(idToken);
+      email = decoded.email;
+    } catch {
+      throw new BadRequestError("idToken is not a valid JWT");
     }
 
-    // find or create user with walletAddress
-    let user = await User.findOne({ walletAddress: walletAddress.toLowerCase() });
+    if (!email) {
+      throw new BadRequestError("idToken does not contain an email");
+    }
+
+    let user = await User.findOne({ email: email.toLowerCase() });
+
     if (!user) {
-      user = await User.create({
-        walletAddress: walletAddress.toLowerCase(),
-        email: decoded.email,
-        username: decoded.name || 'User',
-        avatarUrl: decoded.profileImage,
-        role: 'user'
+      user = new User({
+        email: email.toLowerCase(),
+        walletAddress: eoaAddress.toLowerCase(),
+        smartAccountAddress: smartAccountAddress?.toLowerCase(),
+        role: "user",
+        username: decoded.name || email.split("@")[0],
+        avatarUrl: decoded.picture || "",
+        nonce: "social_login",
+        nonceExpiresAt: new Date(Date.now() + 1000 * 60 * 60),
       });
+    } else {
+      user.walletAddress = eoaAddress.toLowerCase();
+
+      if (smartAccountAddress) {
+        user.smartAccountAddress = smartAccountAddress.toLowerCase();
+      }
+
+      if (!user.username && decoded.name) {
+        user.username = decoded.name;
+      }
+
+      if (!user.avatarUrl && decoded.picture) {
+        user.avatarUrl = decoded.picture;
+      }
     }
 
-    // Generate session JWT token
+    await user.save();
+
     const token = this.jwtService.generateToken(user.walletAddress, user.role);
 
     return {
       token,
+      walletAddress: user.walletAddress,
       user: {
-        walletAddress: user.walletAddress,
         email: user.email,
         username: user.username,
-        avatarUrl: user.avatarUrl,
-        role: user.role
-      }
+      },
     };
   }
 
-  /**
-   * Verify signature and authenticate user
-   * Consolidates the entire authentication flow
-   */
   async verifyAndAuthenticate(message, signature) {
-    // Parse SIWE message
     const parseResult = this.siweService.parseSIWEMessage(message);
     if (!parseResult.valid) {
       throw new BadRequestError(
@@ -92,13 +98,11 @@ class AuthService {
 
     const { address: walletAddress, nonce } = parseResult.parsed;
 
-    // Verify signature
     const verifyResult = await this.siweService.verifySIWE(message, signature);
     if (!verifyResult.valid) {
       throw new UnauthorizedError(verifyResult.error || "Invalid signature");
     }
 
-    // Validate nonce
     const nonceResult = await this.nonceService.validateNonce(
       walletAddress,
       nonce,
@@ -107,10 +111,8 @@ class AuthService {
       throw new UnauthorizedError(nonceResult.error || "Invalid nonce");
     }
 
-    // Invalidate used nonce
     await this.nonceService.invalidateNonce(walletAddress);
 
-    // Generate JWT token
     const token = this.jwtService.generateToken(
       nonceResult.user.walletAddress,
       nonceResult.user.role,
@@ -120,65 +122,10 @@ class AuthService {
       token,
       user: {
         walletAddress: nonceResult.user.walletAddress,
-        role: nonceResult.user.role,
-      },
-    };
-  }
-  /**
-   * Đăng nhập bằng Gmail (Web3Auth)
-   * idToken: Token từ Gmail
-   * smartAccountAddress: Địa chỉ ví AA từ Frontend gửi lên
-   */
-  // Tìm hàm loginWithIdToken và thay bằng đoạn này:
-  async loginWithIdToken(idToken, eoaAddress, smartAccountAddress) {
-    let email;
-    try {
-      const decoded = decodeJwt(idToken);
-      email = decoded.email;
-    } catch (err) {
-      throw new BadRequestError("idToken không hợp lệ");
-    }
-
-    if (!email) throw new BadRequestError("idToken không chứa email");
-
-    // Tìm user theo email
-    let user = await User.findOne({ email: email.toLowerCase() });
-
-    if (!user) {
-      // TẠO MỚI: Lưu tách biệt Chìa khóa (EOA) và Két sắt (AA)
-      user = new User({
-        email: email.toLowerCase(),
-        walletAddress: eoaAddress.toLowerCase(), // 0xF21...
-        smartAccountAddress: smartAccountAddress.toLowerCase(), // 0xdbb...
-        role: "user",
-        username: email.split("@")[0],
-        nonce: "social_login",
-        nonceExpiresAt: new Date(Date.now() + 1000 * 60 * 60),
-      });
-    } else {
-      // CẬP NHẬT: Đảm bảo cả 2 địa chỉ đều được lưu đúng
-      user.walletAddress = eoaAddress.toLowerCase();
-      user.smartAccountAddress = smartAccountAddress.toLowerCase();
-    }
-    await user.save();
-
-    // QUAN TRỌNG: Tạo Token dựa trên walletAddress (EOA)
-    const token = this.jwtService.generateToken(user.walletAddress, user.role);
-
-    return {
-      token,
-      walletAddress: user.walletAddress,
-      user: {
-        email: user.email,
-        role: user.role,
-        username: user.username,
       },
     };
   }
 
-  /**
-   * Refresh JWT token
-   */
   refreshToken(token) {
     const result = this.jwtService.refreshToken(token);
     if (!result.valid) {

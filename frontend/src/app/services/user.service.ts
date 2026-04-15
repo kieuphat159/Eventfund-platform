@@ -28,10 +28,10 @@ export interface UserInvestment {
     endDate?: string;
     description?: string;
   };
-  contributionAmount: number;
+  contributionAmount: string;
   sharePercentage: number;
-  claimedReward: number;
-  pendingReward: number;
+  claimedReward: string;
+  pendingReward: string;
   shareTokenId?: string;
   createdAt: string;
 }

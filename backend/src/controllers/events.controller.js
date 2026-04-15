@@ -5,11 +5,11 @@ import * as eventsService from "../services/events/events.service.js";
  * EventsController - Handles event management endpoints
  *
  * Endpoints:
- * - POST /events - Create new event (organizer role required)
+ * - POST /events - Create new draft event (authenticated user required)
  * - GET /events - List events with filters and pagination (public)
  * - GET /events/:id - Get single event (public)
- * - PATCH /events/:id - Update event (organizer role, ownership required)
- * - DELETE /events/:id - Delete draft event (organizer role, ownership required)
+ * - PATCH /events/:id - Update event content (ownership required)
+ * - DELETE /events/:id - Delete draft event (ownership required)
  * - GET /events/:id/stats - Get event statistics (public)
  */
 class EventsController {
@@ -137,6 +137,22 @@ class EventsController {
     res.status(200).json({
       success: true,
       message: "Image deleted successfully",
+      data: event,
+    });
+  });
+
+  // 🔥 NEW: assign verifier
+  assignVerifier = asyncHandler(async (req, res) => {
+    const { verifier } = req.body;
+
+    const event = await this.eventsService.assignVerifier(
+      req.params.id,
+      verifier,
+      req.user
+    );
+
+    res.status(200).json({
+      success: true,
       data: event,
     });
   });
