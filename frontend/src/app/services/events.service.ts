@@ -78,6 +78,7 @@ export interface CreateEventPayload {
   title: string;
   description: string;
   category: string;
+  organizerAddress?: string;
   startDate: string;
   endDate: string;
   venue: {
@@ -87,6 +88,10 @@ export interface CreateEventPayload {
   fundingGoal: string;
   fundingDeadline: string;
   totalTickets: number;
+  ticketPrice?: string;
+  organizerStake?: string;
+  organizerShareBps?: number;
+  usedThreshold?: number;
 
   minStakeRequired?: string;
   ticketTiers?: EventTicketTier[];
@@ -116,6 +121,11 @@ export interface CreateEventResponse {
   success: boolean;
   data?: EventItem;
   message?: string;
+}
+
+export interface EventBlockchainConfig {
+  fundAddress: string;
+  chainId: string;
 }
 
 function normalizeEvents(data?: PaginatedEventsData | EventItem[]): EventItem[] {
@@ -184,6 +194,18 @@ export async function createEvent(payload: CreateEventPayload): Promise<EventIte
     console.error('createEvent failed:', error);
     throw error;
   }
+}
+
+export async function getEventBlockchainConfig(): Promise<EventBlockchainConfig> {
+  const response = await api.get<{ success: boolean; data?: EventBlockchainConfig; message?: string }>(
+    '/events/blockchain-config'
+  );
+
+  if (!response.data?.fundAddress || !response.data?.chainId) {
+    throw new Error(response.message || 'Failed to load blockchain config');
+  }
+
+  return response.data;
 }
 
 export async function updateEvent(
