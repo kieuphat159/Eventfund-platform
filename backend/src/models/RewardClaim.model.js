@@ -5,7 +5,6 @@ const rewardClaimSchema = new mongoose.Schema({
   distributionId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "RevenueDistribution",
-    required: true,
   },
 
   eventId: {
@@ -23,18 +22,21 @@ const rewardClaimSchema = new mongoose.Schema({
 
   sharePercentage: {
     type: Number,
-    required: true,
+    default: 0,
   },
 
   rewardAmount: {
-    type: Number,
+    type: String,
     required: true,
+    default: "0",
   },
 
   txHash: {
     type: String,
     trim: true,
     lowercase: true,
+    unique: true,
+    sparse: true,
   },
 
   claimedAt: {

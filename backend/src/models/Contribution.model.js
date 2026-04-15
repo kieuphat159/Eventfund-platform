@@ -21,8 +21,9 @@ const contributionSchema = new mongoose.Schema({
   },
 
   amount: {
-    type: Number,
+    type: String,
     required: true,
+    default: "0",
   },
 
   sharePercentage: {
@@ -54,6 +55,10 @@ const contributionSchema = new mongoose.Schema({
     type: String,
     enum: ["pending", "confirmed", "refunded"],
     default: "pending",
+  },
+
+  refundedAt: {
+    type: Date,
   },
 });
 

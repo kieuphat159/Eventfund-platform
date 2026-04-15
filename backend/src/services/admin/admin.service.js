@@ -2,9 +2,13 @@ import * as userRepo from '../../repositories/user.repo.js';
 import * as eventRepo from '../../repositories/event.repo.js';
 import * as ticketRepo from '../../repositories/ticket.repo.js';
 import * as listingRepo from '../../repositories/listing.repo.js';
+import * as shareRepo from '../../repositories/share.repo.js';
 import mongoose from 'mongoose';
+import { ethers } from 'ethers';
 import UploadService from '../upload/upload.service.js';
 import { NotFoundError, BadRequestError } from '../../utils/customErrors.js';
+import { getFund, provider } from '../blockchain/index.js';
+import { persistLogsFromReceipt } from '../blockchain/core/receiptChainLog.js';
 
 // Default upload service instance (lazy initialization for future use)
 let defaultUploadService = null;
@@ -13,6 +17,47 @@ function getDefaultUploadService() {
     defaultUploadService = new UploadService();
   }
   return defaultUploadService;
+}
+
+function getBackendSigner() {
+  const privateKey = process.env.BACKEND_SIGNER_PRIVATE_KEY;
+  if (!privateKey) {
+    throw new BadRequestError('Missing BACKEND_SIGNER_PRIVATE_KEY for on-chain execution');
+  }
+
+  return new ethers.Wallet(privateKey, provider);
+}
+
+function mapFundStatusToAppStatus(statusCode) {
+  const map = {
+    0: 'draft',
+    1: 'funding',
+    2: 'funded',
+    3: 'ticketing',
+    4: 'completed',
+    5: 'cancelled'
+  };
+
+  return map[Number(statusCode)] || 'failed';
+}
+
+async function parseFundEventsFromReceipt(receipt) {
+  const fund = getFund();
+  const fundAddress = (await fund.getAddress()).toLowerCase();
+  const parsedEvents = [];
+
+  for (const log of receipt.logs || []) {
+    if (!log?.address || log.address.toLowerCase() !== fundAddress) continue;
+
+    try {
+      const parsed = fund.interface.parseLog(log);
+      parsedEvents.push(parsed);
+    } catch {
+      // Ignore unrelated logs.
+    }
+  }
+
+  return parsedEvents;
 }
 
 /**
@@ -158,13 +203,98 @@ export async function getEvents(query = {}, repos = {}) {
 }
 
 /**
+ * Get a single event with admin-facing investment summary
+ * @param {string} eventId - Event ID
+ * @param {Object} repos - Injected repositories (for testing)
+ * @returns {Promise<Object>} Event with lightweight admin summary
+ */
+export async function getEventById(eventId, repos = {}) {
+  const eventRepository = repos.eventRepo || eventRepo;
+  const shareRepository = repos.shareRepo || shareRepo;
+
+  const event = await eventRepository.findById(eventId);
+
+  if (!event) {
+    throw new NotFoundError('Event not found');
+  }
+
+  const investorCount = await shareRepository.countShares({ eventId });
+
+  return {
+    ...event,
+    adminSummary: {
+      investorCount,
+    },
+  };
+}
+
+/**
+ * Update an event as admin
+ * @param {string} eventId - Event ID
+ * @param {Object} updates - Event update payload
+ * @param {Object} repos - Injected repositories (for testing)
+ * @returns {Promise<Object>} Updated event
+ */
+export async function updateEvent(eventId, updates, repos = {}) {
+  const eventRepository = repos.eventRepo || eventRepo;
+
+  const event = await eventRepository.findById(eventId);
+
+  if (!event) {
+    throw new NotFoundError('Event not found');
+  }
+
+  const allowedFields = [
+    'title',
+    'description',
+    'category',
+    'startDate',
+    'endDate',
+    'fundingGoal',
+    'minStakeRequired',
+    'fundingDeadline',
+    'status',
+    'venue',
+    'imageUrls',
+    'metadataUri',
+    'totalTickets',
+    'ticketTiers',
+    'ticketUsageThreshold',
+  ];
+
+  const sanitizedUpdates = {};
+  allowedFields.forEach((field) => {
+    if (updates[field] !== undefined) {
+      sanitizedUpdates[field] = updates[field];
+    }
+  });
+
+  if (Object.keys(sanitizedUpdates).length === 0) {
+    throw new BadRequestError('No valid event fields were provided');
+  }
+
+  return await eventRepository.updateById(eventId, sanitizedUpdates);
+}
+
+/**
  * Force update event status
  * @param {string} eventId - Event ID
  * @param {string} newStatus - New status
  * @param {Object} repos - Injected repositories (for testing)
  * @returns {Promise<Object>} Updated event
  */
-export async function updateEventStatus(eventId, newStatus, repos = {}) {
+export async function updateEventStatus(eventId, newStatus, options = {}, repos = {}) {
+  // Backward compatibility: old signature was (eventId, newStatus, repos)
+  if (
+    options &&
+    typeof options === 'object' &&
+    (options.eventRepo || options.userRepo || options.ticketRepo || options.listingRepo) &&
+    Object.keys(repos || {}).length === 0
+  ) {
+    repos = options;
+    options = {};
+  }
+
   const eventRepository = repos.eventRepo || eventRepo;
 
   const event = await eventRepository.findById(eventId);
@@ -177,7 +307,136 @@ export async function updateEventStatus(eventId, newStatus, repos = {}) {
     throw new BadRequestError('Cannot change status of a completed event');
   }
 
-  return await eventRepository.updateById(eventId, { status: newStatus });
+  if (!event.contractEventId) {
+    throw new BadRequestError('Event does not have contractEventId for on-chain transition');
+  }
+
+  const signer = getBackendSigner();
+  const fundWithSigner = getFund().connect(signer);
+  const chainEventId = BigInt(event.contractEventId);
+
+  let tx;
+  let resolvedStatus = newStatus;
+
+  if (newStatus === 'funded' || newStatus === 'cancelled') {
+    tx = await fundWithSigner.finalizeFunding(chainEventId);
+  } else if (newStatus === 'ticketing') {
+    const ticketType = Number(options.ticketType ?? 0);
+    const quantity = Number(options.quantity ?? 0);
+
+    if (!Number.isInteger(quantity) || quantity <= 0) {
+      throw new BadRequestError('quantity is required and must be a positive integer for ticketing transition');
+    }
+
+    tx = await fundWithSigner.startTicketing(
+      chainEventId,
+      ticketType,
+      BigInt(quantity)
+    );
+  } else if (newStatus === 'completed') {
+    tx = await fundWithSigner.setCompletedIfThresholdMet(chainEventId);
+  } else {
+    throw new BadRequestError(
+      `Status ${newStatus} has no direct on-chain transition in Fund contract`
+    );
+  }
+
+  const receipt = await tx.wait();
+  if (!receipt || Number(receipt.status) !== 1) {
+    throw new BadRequestError('On-chain status transition failed');
+  }
+
+  await persistLogsFromReceipt({
+    receipt,
+    contract: getFund(),
+    contractName: 'Fund',
+    contractAddress: await getFund().getAddress(),
+  });
+
+  if (newStatus === 'funded' || newStatus === 'cancelled') {
+    const parsedEvents = await parseFundEventsFromReceipt(receipt);
+    const finalized = parsedEvents.find((evt) => evt?.name === 'FundingFinalized');
+    if (!finalized) {
+      throw new BadRequestError('FundingFinalized event not found in transaction receipt');
+    }
+    resolvedStatus = mapFundStatusToAppStatus(finalized.args?.statusAfterFinalize);
+  }
+
+  return await eventRepository.updateById(eventId, { status: resolvedStatus });
+}
+
+/**
+ * Get investments for a single event
+ * @param {string} eventId - Event ID
+ * @param {Object} query - Pagination query
+ * @param {Object} repos - Injected repositories (for testing)
+ * @returns {Promise<Object>} Paginated investments with summary
+ */
+export async function getEventInvestments(eventId, query = {}, repos = {}) {
+  const eventRepository = repos.eventRepo || eventRepo;
+  const shareRepository = repos.shareRepo || shareRepo;
+
+  const event = await eventRepository.findById(eventId);
+
+  if (!event) {
+    throw new NotFoundError('Event not found');
+  }
+
+  const {
+    page = 1,
+    limit = 20,
+    sort = '-contributionAmount',
+  } = query;
+
+  const investments = await shareRepository.findByEvent(
+    eventId,
+    {
+      page: parseInt(page, 10),
+      limit: Math.min(parseInt(limit, 10), 100),
+      sort,
+      lean: true,
+    },
+  );
+
+  const confirmedContributions = await Contribution.find({
+    eventId,
+    status: 'confirmed',
+    type: 'donator_contribution',
+  })
+    .select('amount')
+    .lean();
+
+  const totalInvested = confirmedContributions.reduce(
+    (sum, contribution) => addBigInt(sum, contribution.amount || '0'),
+    '0',
+  );
+
+  const docs = Array.isArray(investments.docs) ? investments.docs : [];
+  const largestInvestment = docs.reduce(
+    (max, share) =>
+      compareBigInt(share.contributionAmount || '0', max) > 0
+        ? share.contributionAmount || '0'
+        : max,
+    '0',
+  );
+
+  return {
+    ...investments,
+    event: {
+      _id: event._id,
+      title: event.title,
+      status: event.status,
+      fundingGoal: event.fundingGoal,
+      currentFunding: event.currentFunding,
+    },
+    summary: {
+      totalInvestors: investments.totalDocs || docs.length,
+      totalInvested,
+      averageInvestment: calculateAverage(totalInvested, docs.length),
+      largestInvestment,
+      contributionCount: confirmedContributions.length,
+    },
+  };
 }
 
 /**

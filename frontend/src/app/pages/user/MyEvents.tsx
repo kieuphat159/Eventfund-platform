@@ -1,11 +1,25 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { Calendar, MapPin, Users, Plus, Edit, Trash2 } from 'lucide-react';
-import { Card, CardContent } from '../../components/ui/card';
-import { Button } from '../../components/ui/button';
-import { StatusBadge } from '../../components/StatusBadge';
-import { deleteEvent, getEvents, type EventItem } from '../../services/events.service';
-import { useAuth } from '../../contexts/AuthContext';
+import React, { useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import {
+  Calendar,
+  MapPin,
+  Users,
+  Plus,
+  Edit,
+  Trash2,
+  CircleDollarSign,
+  Ticket,
+  ArrowUpRight,
+} from "lucide-react";
+import { Card, CardContent } from "../../components/ui/card";
+import { Button } from "../../components/ui/button";
+import { StatusBadge } from "../../components/StatusBadge";
+import {
+  deleteEvent,
+  getMyEvents,
+  type EventItem,
+} from "../../services/events.service";
+import { useAuth } from "../../contexts/AuthContext";
 
 export const MyEvents: React.FC = () => {
   const navigate = useNavigate();
@@ -13,17 +27,23 @@ export const MyEvents: React.FC = () => {
 
   const [events, setEvents] = useState<EventItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [deletingId, setDeletingId] = useState<string>('');
+  const [error, setError] = useState("");
+  const [deletingId, setDeletingId] = useState<string>("");
 
   const fetchEvents = async () => {
+    if (!user?.walletAddress) {
+      setEvents([]);
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
-      setError('');
-      const data = await getEvents();
+      setError("");
+      const data = await getMyEvents(user.walletAddress);
       setEvents(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load events');
+      setError(err instanceof Error ? err.message : "Failed to load events");
     } finally {
       setLoading(false);
     }
@@ -31,24 +51,14 @@ export const MyEvents: React.FC = () => {
 
   useEffect(() => {
     fetchEvents();
-  }, []);
-
-  const myEvents = useMemo(() => {
-    const wallet = user?.walletAddress?.toLowerCase?.() || '';
-    if (!wallet) return events;
-
-    return events.filter((event) => {
-      const organizer = (event.organizer || event.organizerWallet || '').toLowerCase();
-      return organizer === wallet;
-    });
-  }, [events, user]);
+  }, [user?.walletAddress]);
 
   const handleDelete = async (event: EventItem) => {
     const eventId = event._id || event.id;
     if (!eventId) return;
 
     const ok = window.confirm(
-      `Bạn có chắc muốn xoá sự kiện "${event.title || 'Untitled event'}" không?\n\nChỉ nên xoá draft vì backend đang giới hạn xoá draft only.`
+      `Bạn có chắc muốn xoá sự kiện "${event.title || "Untitled event"}" không?\n\nChỉ nên xoá draft vì backend đang giới hạn xoá draft only.`,
     );
     if (!ok) return;
 
@@ -57,17 +67,32 @@ export const MyEvents: React.FC = () => {
       await deleteEvent(eventId);
       setEvents((prev) => prev.filter((e) => (e._id || e.id) !== eventId));
     } catch (err: any) {
-      alert(err?.response?.data?.message || err?.message || 'Xoá sự kiện thất bại');
+      alert(
+        err?.response?.data?.message || err?.message || "Xoá sự kiện thất bại",
+      );
     } finally {
-      setDeletingId('');
+      setDeletingId("");
     }
   };
 
   const stats = [
-    { label: 'Total Events', value: myEvents.length.toString() },
-    { label: 'Draft', value: myEvents.filter((e) => e.status === 'draft').length.toString() },
-    { label: 'Total Tickets Sold', value: myEvents.reduce((sum, e) => sum + (e.ticketsSold || 0), 0).toString() },
-    { label: 'Revenue', value: '-' },
+    { label: "Total Events", value: events.length.toString() },
+    {
+      label: "Draft",
+      value: events.filter((e) => e.status === "draft").length.toString(),
+    },
+    {
+      label: "Total Tickets Sold",
+      value: events
+        .reduce((sum, e) => sum + (e.ticketsSold || 0), 0)
+        .toString(),
+    },
+    {
+      label: "Funding Raised",
+      value: events
+        .reduce((sum, e) => sum + Number(e.currentFunding || 0), 0)
+        .toString(),
+    },
   ];
 
   if (loading) return <div className="text-white">Loading your events...</div>;
@@ -77,11 +102,13 @@ export const MyEvents: React.FC = () => {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-white mb-2">My Events</h1>
+          <h1 className="text-3xl font-semibold tracking-tight text-white mb-2">
+            My Events
+          </h1>
           <p className="text-slate-400">Events you've created and organized</p>
         </div>
         <Button
-          className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white"
+          className="bg-gradient-to-r from-cyan-600 to-emerald-600 hover:from-cyan-500 hover:to-emerald-500 text-white"
           asChild
         >
           <Link to="/app/events/create">
@@ -93,7 +120,10 @@ export const MyEvents: React.FC = () => {
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         {stats.map((stat, index) => (
-          <Card key={index} className="bg-slate-900 border-slate-800">
+          <Card
+            key={index}
+            className="bg-slate-900/90 border-slate-800 hover:border-cyan-400/40 transition-colors"
+          >
             <CardContent className="p-6">
               <p className="text-sm text-slate-400 mb-1">{stat.label}</p>
               <p className="text-2xl font-bold text-white">{stat.value}</p>
@@ -103,38 +133,45 @@ export const MyEvents: React.FC = () => {
       </div>
 
       <div className="space-y-4">
-        {myEvents.length > 0 ? (
-          myEvents.map((event) => {
-            const eventId = event._id || event.id || '';
+        {events.length > 0 ? (
+          events.map((event) => {
+            const eventId = event._id || event.id || "";
             const totalTickets =
-              typeof event.totalTickets === 'number'
+              typeof event.totalTickets === "number"
                 ? event.totalTickets
-                : (event.ticketTiers || []).reduce((sum, tier) => sum + (tier.totalSupply || 0), 0);
+                : (event.ticketTiers || []).reduce(
+                    (sum, tier) => sum + (tier.totalSupply || 0),
+                    0,
+                  );
 
-            const canDelete = (event.status || 'draft') === 'draft';
+            const canDelete = (event.status || "draft") === "draft";
 
             return (
               <Card
                 key={eventId}
-                className="bg-slate-900 border-slate-800 hover:border-purple-500/50 transition-all"
+                className="bg-slate-900/90 border-slate-800 hover:border-cyan-400/40 transition-colors"
               >
                 <CardContent className="p-6">
                   <div className="flex items-start justify-between mb-4">
                     <div className="flex-1">
                       <div className="flex items-center space-x-3 mb-2">
                         <h3 className="text-xl font-semibold text-white">
-                          {event.title || 'Untitled event'}
+                          {event.title || "Untitled event"}
                         </h3>
-                        <StatusBadge status={(event.status as any) || 'draft'} />
+                        <StatusBadge
+                          status={(event.status as any) || "draft"}
+                        />
                       </div>
-                      <p className="text-slate-400">{event.description || 'No description'}</p>
+                      <p className="text-slate-400">
+                        {event.description || "No description"}
+                      </p>
                     </div>
 
                     <div className="flex space-x-2">
                       <Button
                         variant="outline"
                         size="icon"
-                        className="border-slate-700 hover:bg-slate-800"
+                        className="border-slate-700 hover:bg-slate-800 text-slate-200"
                         onClick={() => navigate(`/app/events/edit/${eventId}`)}
                         disabled={!eventId}
                       >
@@ -146,8 +183,14 @@ export const MyEvents: React.FC = () => {
                         size="icon"
                         className="border-red-600 hover:bg-red-900/20 text-red-400 disabled:opacity-50"
                         onClick={() => handleDelete(event)}
-                        disabled={!eventId || !canDelete || deletingId === eventId}
-                        title={canDelete ? 'Delete event' : 'Only draft events can be deleted'}
+                        disabled={
+                          !eventId || !canDelete || deletingId === eventId
+                        }
+                        title={
+                          canDelete
+                            ? "Delete event"
+                            : "Only draft events can be deleted"
+                        }
                       >
                         <Trash2 className="w-4 h-4" />
                       </Button>
@@ -159,18 +202,21 @@ export const MyEvents: React.FC = () => {
                       <Calendar className="w-4 h-4" />
                       <span>
                         {event.startDate
-                          ? new Date(event.startDate).toLocaleDateString('en-US', {
-                              month: 'long',
-                              day: 'numeric',
-                              year: 'numeric',
-                            })
-                          : 'No date'}
+                          ? new Date(event.startDate).toLocaleDateString(
+                              "en-US",
+                              {
+                                month: "long",
+                                day: "numeric",
+                                year: "numeric",
+                              },
+                            )
+                          : "No date"}
                       </span>
                     </div>
 
                     <div className="flex items-center space-x-2 text-slate-400">
                       <MapPin className="w-4 h-4" />
-                      <span>{event.venue?.address || 'Unknown location'}</span>
+                      <span>{event.venue?.address || "Unknown location"}</span>
                     </div>
 
                     <div className="flex items-center space-x-2 text-slate-400">
@@ -179,12 +225,41 @@ export const MyEvents: React.FC = () => {
                     </div>
                   </div>
 
+                  <div className="grid sm:grid-cols-2 gap-3 mb-4">
+                    <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-3">
+                      <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-500 mb-1">
+                        <Ticket className="w-3.5 h-3.5 text-cyan-300" />
+                        Tickets sold
+                      </div>
+                      <p className="text-lg font-semibold text-white">
+                        {event.ticketsSold || 0}
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-3">
+                      <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-500 mb-1">
+                        <CircleDollarSign className="w-3.5 h-3.5 text-emerald-300" />
+                        Funding raised
+                      </div>
+                      <p className="text-lg font-semibold text-white">
+                        {Number(event.currentFunding || 0).toLocaleString()} wei
+                      </p>
+                    </div>
+                  </div>
+
                   {(event.ticketTiers || []).length > 0 && (
                     <div className="grid md:grid-cols-3 gap-4 pt-4 border-t border-slate-800">
                       {event.ticketTiers!.map((tier, index) => (
-                        <div key={index} className="bg-slate-800/50 rounded-lg p-3">
-                          <p className="text-sm text-slate-400 mb-1">{tier.name}</p>
-                          <p className="text-lg font-semibold text-white">{tier.price} ETH</p>
+                        <div
+                          key={index}
+                          className="bg-slate-800/50 rounded-lg p-3"
+                        >
+                          <p className="text-sm text-slate-400 mb-1">
+                            {tier.name}
+                          </p>
+                          <p className="text-lg font-semibold text-white">
+                            {tier.price} ETH
+                          </p>
                           <p className="text-xs text-slate-500 mt-1">
                             {tier.totalSupply || 0} available
                           </p>
@@ -195,7 +270,10 @@ export const MyEvents: React.FC = () => {
 
                   <div className="mt-4 pt-4 border-t border-slate-800 flex items-center justify-between">
                     <div className="text-sm text-slate-500">
-                      Created: {event.createdAt ? new Date(event.createdAt).toLocaleDateString() : 'Unknown'}
+                      Created:{" "}
+                      {event.createdAt
+                        ? new Date(event.createdAt).toLocaleDateString()
+                        : "Unknown"}
                     </div>
 
                     <div className="flex gap-2">
@@ -213,7 +291,10 @@ export const MyEvents: React.FC = () => {
                         className="border-slate-700 hover:bg-slate-800 text-white"
                         asChild
                       >
-                        <Link to={`/events/${eventId}`}>View Dashboard</Link>
+                        <Link to={`/events/${eventId}`}>
+                          <ArrowUpRight className="w-4 h-4 mr-1" />
+                          View Dashboard
+                        </Link>
                       </Button>
                     </div>
                   </div>
@@ -225,10 +306,14 @@ export const MyEvents: React.FC = () => {
           <Card className="bg-slate-900 border-slate-800">
             <CardContent className="p-12 text-center">
               <Calendar className="w-16 h-16 text-slate-700 mx-auto mb-4" />
-              <h3 className="text-xl font-semibold text-white mb-2">No events yet</h3>
-              <p className="text-slate-400 mb-6">Create your first event to get started</p>
+              <h3 className="text-xl font-semibold text-white mb-2">
+                No events yet
+              </h3>
+              <p className="text-slate-400 mb-6">
+                Create your first event to get started
+              </p>
               <Button
-                className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white"
+                className="bg-gradient-to-r from-cyan-600 to-emerald-600 hover:from-cyan-500 hover:to-emerald-500 text-white"
                 asChild
               >
                 <Link to="/app/events/create">

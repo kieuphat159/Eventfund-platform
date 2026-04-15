@@ -119,18 +119,13 @@ export async function findBySeller(sellerAddress, options = {}, models = {}) {
 export async function updateStatus(listingId, status, additionalData = {}, models = {}) {
   const Listing = models.Listing || DefaultListing;
 
-  const updates = {
-    status,
-    ...additionalData,
-  };
-
   const listing = await Listing.findByIdAndUpdate(
     listingId,
-    updates,
-    { new: true, runValidators: true }
+    { $set: { status, ...additionalData } },
+    { new: true, runValidators: true, lean: true }
   );
 
-  return listing ? listing.toObject() : null;
+  return listing ?? null;
 }
 
 /**
@@ -230,3 +225,90 @@ export async function getListingStats(models = {}) {
     sold
   };
 }
+
+/**
+ * Upsert Listing khi tạo mới (ListingCreated event)
+ */
+export async function upsertListingCreated(event, models = {}) {
+  const Listing = models.Listing || DefaultListing;
+
+  return await Listing.findOneAndUpdate(
+    { contractListingId: event.contractListingId },
+    {
+      $set: {
+        contractListingId: event.contractListingId,
+        tokenId: event.tokenId,
+        ticketId: event.ticketId,
+        eventId: event.eventId,
+        seller: event.seller,
+        price: event.price,
+        maxPrice: event.maxPrice,
+        status: event.status,
+        listedAt: new Date(),
+        txHash: event.transactionHash,
+      },
+      // Clear sale fields khi re-process ListingCreated (reorg rollback)
+      $unset: {
+        soldTo: "",
+        soldAt: "",
+        soldTxHash: "",
+        buyer: "",
+      },
+      $setOnInsert: {
+        createdAt: new Date(),
+      },
+    },
+    { upsert: true, new: true, runValidators: true, lean: true }
+  );
+}
+
+/**
+ * Upsert Listing khi bán (ListingSold event)
+ */
+export async function upsertListingSold(event, models = {}) {
+  const Listing = models.Listing || DefaultListing;
+
+  return await Listing.findOneAndUpdate(
+    { contractListingId: event.contractListingId },
+    {
+      $set: {
+        tokenId: event.tokenId,
+        ticketId: event.ticketId,
+        eventId: event.eventId,
+        soldTo: event.buyer,
+        seller: event.seller,
+        price: event.price,
+        status: "sold",
+        soldAt: new Date(),
+        soldTxHash: event.transactionHash,
+      },
+    },
+    { upsert: true, new: true, runValidators: true, lean: true }
+  );
+}
+
+/**
+ * Update Listing khi huỷ (ListingCancelled event)
+ */
+export async function updateListingCancelled(contractListingId, models = {}) {
+  const Listing = models.Listing || DefaultListing;
+
+  return await Listing.updateOne(
+    { contractListingId },
+    {
+      $set: {
+        status: "cancelled",
+      },
+    }
+  );
+}
+
+/**
+ * Xoa Listing theo contractListingId (dung khi reorg xoa hoan toan listing)
+ */
+export async function deleteByContractListingId(contractListingId, models = {}) {
+  const Listing = models.Listing || DefaultListing;
+  return await Listing.deleteOne({ contractListingId });
+}
+
+export default { createListing, findById, findListings, findBySeller, updateStatus, deleteById, getMarketplaceStats, countListings, getListingStats, upsertListingCreated, upsertListingSold, updateListingCancelled, deleteByContractListingId };

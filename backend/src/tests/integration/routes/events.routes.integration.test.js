@@ -255,8 +255,7 @@ describe('Events Routes - E2E Integration Tests', () => {
             price: 1,
             totalSupply: 111
           }
-        ],
-        status: 'draft'
+        ]
       };
 
       const response = await request(app)
@@ -478,6 +477,89 @@ describe('Events Routes - E2E Integration Tests', () => {
         errorMsg.includes('funding') ||
         errorMsg.includes('goal') ||
         errorMsg.includes('cannot')
+      ).toBe(true);
+    });
+
+    test('should reject changing event status without admin review', async () => {
+      const event = await Event.create({
+        ...validEventData,
+        organizer: organizerUser.walletAddress.toLowerCase(),
+        status: 'draft'
+      });
+
+      const response = await request(app)
+        .patch(`/api/events/${event._id}`)
+        .set('Authorization', `Bearer ${organizerToken}`)
+        .send({ status: 'funding' })
+        .expect(400);
+
+      expect(response.body.success).toBe(false);
+      const errorMsg = response.body.error.message.toLowerCase();
+      expect(
+        errorMsg.includes('admin') ||
+        errorMsg.includes('review') ||
+        errorMsg.includes('status')
+      ).toBe(true);
+    });
+
+    test('should allow owner to advance status from ticketing to ongoing', async () => {
+      const event = await Event.create({
+        ...validEventData,
+        organizer: organizerUser.walletAddress.toLowerCase(),
+        status: 'ticketing'
+      });
+
+      const response = await request(app)
+        .patch(`/api/events/${event._id}`)
+        .set('Authorization', `Bearer ${organizerToken}`)
+        .send({ status: 'ongoing' })
+        .expect(200);
+
+      expect(response.body.success).toBe(true);
+      expect(response.body.data.status).toBe('ongoing');
+    });
+
+    test('should reject owner moving status backward after ticketing', async () => {
+      const event = await Event.create({
+        ...validEventData,
+        organizer: organizerUser.walletAddress.toLowerCase(),
+        status: 'ongoing'
+      });
+
+      const response = await request(app)
+        .patch(`/api/events/${event._id}`)
+        .set('Authorization', `Bearer ${organizerToken}`)
+        .send({ status: 'ticketing' })
+        .expect(400);
+
+      expect(response.body.success).toBe(false);
+      const errorMsg = response.body.error.message.toLowerCase();
+      expect(
+        errorMsg.includes('advance') ||
+        errorMsg.includes('ticketing') ||
+        errorMsg.includes('ongoing')
+      ).toBe(true);
+    });
+
+    test('should reject owner opening ticketing from funded status', async () => {
+      const event = await Event.create({
+        ...validEventData,
+        organizer: organizerUser.walletAddress.toLowerCase(),
+        status: 'funded'
+      });
+
+      const response = await request(app)
+        .patch(`/api/events/${event._id}`)
+        .set('Authorization', `Bearer ${organizerToken}`)
+        .send({ status: 'ticketing' })
+        .expect(400);
+
+      expect(response.body.success).toBe(false);
+      const errorMsg = response.body.error.message.toLowerCase();
+      expect(
+        errorMsg.includes('advance') ||
+        errorMsg.includes('ticketing') ||
+        errorMsg.includes('ongoing')
       ).toBe(true);
     });
   });

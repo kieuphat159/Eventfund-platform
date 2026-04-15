@@ -13,6 +13,12 @@ import {
   InvestmentDetail as InvestmentDetailType,
 } from "../../services/investment.service";
 import { Button } from "@/app/components/ui/button";
+import {
+  addIntegerValues,
+  calculatePercentage,
+  formatIntegerWithUnit,
+  subtractIntegerValues,
+} from "../../lib/utils";
 
 export const InvestmentDetail: React.FC = () => {
   const { id } = useParams();
@@ -75,12 +81,19 @@ export const InvestmentDetail: React.FC = () => {
     );
   }
 
-  const totalReturns = investment.claimedReward + investment.pendingReward;
-  const profitLoss = totalReturns - investment.contributionAmount;
-  const roi =
-    investment.contributionAmount > 0
-      ? ((totalReturns / investment.contributionAmount) * 100).toFixed(1)
-      : "0.0";
+  const totalReturns = addIntegerValues(
+    investment.claimedReward,
+    investment.pendingReward,
+  );
+  const profitLoss = subtractIntegerValues(
+    totalReturns,
+    investment.contributionAmount,
+  );
+  const roi = calculatePercentage(
+    totalReturns,
+    investment.contributionAmount,
+    1,
+  ).toFixed(1);
 
   return (
     <div className="space-y-6">
@@ -135,7 +148,7 @@ export const InvestmentDetail: React.FC = () => {
                   Contribution amount
                 </p>
                 <p className="text-white text-lg font-semibold">
-                  {investment.contributionAmount.toFixed(4)} ETH
+                  {formatIntegerWithUnit(investment.contributionAmount, "wei")}
                 </p>
               </div>
               <div>
@@ -178,19 +191,25 @@ export const InvestmentDetail: React.FC = () => {
               <div>
                 <p className="text-sm text-slate-400 mb-1">Claimed rewards</p>
                 <p className="text-green-400 text-lg font-semibold">
-                  {investment.claimedReward.toFixed(4)} ETH
+                  {formatIntegerWithUnit(investment.claimedReward, "wei")}
                 </p>
               </div>
               <div>
                 <p className="text-sm text-slate-400 mb-1">Pending rewards</p>
                 <p className="text-yellow-400 text-lg font-semibold">
-                  {investment.pendingReward.toFixed(4)} ETH
+                  {formatIntegerWithUnit(investment.pendingReward, "wei")}
                 </p>
               </div>
               <div>
                 <p className="text-sm text-slate-400 mb-1">Total returns</p>
                 <p className="text-white text-lg font-bold">
-                  {totalReturns.toFixed(4)} ETH
+                  {formatIntegerWithUnit(totalReturns, "wei")}
+                </p>
+              </div>
+              <div>
+                <p className="text-sm text-slate-400 mb-1">Profit / loss</p>
+                <p className="text-white text-lg font-semibold">
+                  {formatIntegerWithUnit(profitLoss, "wei")}
                 </p>
               </div>
             </div>
@@ -216,7 +235,7 @@ export const InvestmentDetail: React.FC = () => {
                 <div className="flex items-center gap-3 text-white">
                   <Award className="w-5 h-5 text-green-400" />
                   <span className="text-3xl font-bold">
-                    {investment.claimedReward.toFixed(4)} ETH
+                    {formatIntegerWithUnit(investment.claimedReward, "wei")}
                   </span>
                 </div>
               </CardContent>
@@ -229,7 +248,7 @@ export const InvestmentDetail: React.FC = () => {
                 <div className="flex items-center gap-3 text-white">
                   <DollarSign className="w-5 h-5 text-yellow-400" />
                   <span className="text-3xl font-bold">
-                    {investment.pendingReward.toFixed(4)} ETH
+                    {formatIntegerWithUnit(investment.pendingReward, "wei")}
                   </span>
                 </div>
               </CardContent>

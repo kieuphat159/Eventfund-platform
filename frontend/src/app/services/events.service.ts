@@ -1,7 +1,6 @@
 import { api } from '../lib/api';
 
 export interface EventVenue {
-  name?: string;
   address?: string;
 }
 
@@ -37,11 +36,13 @@ export interface EventItem {
 
   organizer?: string;
   organizerWallet?: string;
+  organizerStake?: string | number;
 
   venue?: EventVenue;
   imageUrls?: string[];
 
   fundingGoal?: string | number;
+  currentFunding?: string | number;
   minStakeRequired?: string | number;
   fundingDeadline?: string;
 
@@ -51,6 +52,9 @@ export interface EventItem {
   ticketUsageThreshold?: number;
 
   ticketTiers?: EventTicketTier[];
+  adminSummary?: {
+    investorCount?: number;
+  };
 }
 
 export interface PaginatedEventsData {
@@ -81,7 +85,6 @@ export interface CreateEventPayload {
   startDate: string;
   endDate: string;
   venue: {
-    name?: string;
     address: string;
   };
   fundingGoal: string;
@@ -100,7 +103,6 @@ export interface UpdateEventPayload {
   startDate?: string;
   endDate?: string;
   venue?: {
-    name?: string;
     address?: string;
   };
   fundingGoal?: string;
@@ -118,6 +120,41 @@ export interface CreateEventResponse {
   message?: string;
 }
 
+export interface EventInvestmentItem {
+  _id: string;
+  eventId: string;
+  holder: string;
+  contributionAmount: string;
+  sharePercentage: number;
+  claimedReward: string;
+  pendingReward: string;
+  shareTokenId?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface AdminEventInvestmentsData {
+  docs: EventInvestmentItem[];
+  totalDocs?: number;
+  totalPages?: number;
+  page?: number;
+  limit?: number;
+  event?: Pick<EventItem, '_id' | 'title' | 'status' | 'fundingGoal' | 'currentFunding'>;
+  summary?: {
+    totalInvestors?: number;
+    totalInvested?: string;
+    averageInvestment?: string;
+    largestInvestment?: string;
+    contributionCount?: number;
+  };
+}
+
+interface AdminEventInvestmentsResponse {
+  success: boolean;
+  data?: AdminEventInvestmentsData;
+  message?: string;
+}
+
 function normalizeEvents(data?: PaginatedEventsData | EventItem[]): EventItem[] {
   if (!data) return [];
   if (Array.isArray(data)) return data;
@@ -129,6 +166,7 @@ function normalizeEvents(data?: PaginatedEventsData | EventItem[]): EventItem[] 
 export async function getEvents(params?: {
   status?: EventStatus;
   category?: string;
+  organizer?: string;
   page?: number;
   limit?: number;
   search?: string;
@@ -137,6 +175,7 @@ export async function getEvents(params?: {
 
   if (params?.status) query.set('status', params.status);
   if (params?.category) query.set('category', params.category);
+  if (params?.organizer) query.set('organizer', params.organizer);
   if (params?.page) query.set('page', String(params.page));
   if (params?.limit) query.set('limit', String(params.limit));
   if (params?.search) query.set('search', params.search);
@@ -152,8 +191,15 @@ export async function getEventById(eventId: string): Promise<EventItem | null> {
   return payload.data || null;
 }
 
+export async function getMyEvents(walletAddress: string): Promise<EventItem[]> {
+  if (!walletAddress) return [];
+  return getEvents({ organizer: walletAddress });
+}
+
 export async function getAdminEvents(params?: {
   status?: EventStatus;
+  category?: string;
+  organizer?: string;
   page?: number;
   limit?: number;
   search?: string;
@@ -162,6 +208,8 @@ export async function getAdminEvents(params?: {
     const query = new URLSearchParams();
 
     if (params?.status) query.set('status', params.status);
+    if (params?.category) query.set('category', params.category);
+    if (params?.organizer) query.set('organizer', params.organizer);
     if (params?.page) query.set('page', String(params.page));
     if (params?.limit) query.set('limit', String(params.limit));
     if (params?.search) query.set('search', params.search);
@@ -174,6 +222,11 @@ export async function getAdminEvents(params?: {
     const payload = await api.get<EventsResponse>('/events');
     return normalizeEvents(payload.data);
   }
+}
+
+export async function getAdminEventById(eventId: string): Promise<EventItem | null> {
+  const payload = await api.get<EventDetailResponse>(`/admin/events/${eventId}`);
+  return payload.data || null;
 }
 
 export async function createEvent(payload: CreateEventPayload): Promise<EventItem | null> {
@@ -194,13 +247,39 @@ export async function updateEvent(
   return response.data || null;
 }
 
+export async function updateAdminEvent(
+  eventId: string,
+  payload: UpdateEventPayload
+): Promise<EventItem | null> {
+  const response = await api.patch<CreateEventResponse>(`/admin/events/${eventId}`, payload);
+  return response.data || null;
+}
+
 export async function updateAdminEventStatus(
   eventId: string,
-  status: EventStatus
+  status: EventStatus,
+  options?: {
+    quantity?: number;
+    ticketType?: number;
+  }
 ): Promise<EventItem | null> {
+  const body: {
+    status: EventStatus;
+    quantity?: number;
+    ticketType?: number;
+  } = { status };
+
+  if (typeof options?.quantity === 'number') {
+    body.quantity = options.quantity;
+  }
+
+  if (typeof options?.ticketType === 'number') {
+    body.ticketType = options.ticketType;
+  }
+
   const response = await api.patch<CreateEventResponse>(
     `/admin/events/${eventId}/status`,
-    { status }
+    body
   );
   return response.data || null;
 }
@@ -212,6 +291,28 @@ export async function deleteEvent(eventId: string): Promise<boolean> {
 
 export async function getEventStats(eventId: string) {
   return api.get(`/events/${eventId}/stats`);
+}
+
+export async function getAdminEventInvestments(
+  eventId: string,
+  params?: {
+    page?: number;
+    limit?: number;
+    sort?: 'createdAt' | '-createdAt' | 'contributionAmount' | '-contributionAmount';
+  }
+): Promise<AdminEventInvestmentsData | null> {
+  const query = new URLSearchParams();
+
+  if (params?.page) query.set('page', String(params.page));
+  if (params?.limit) query.set('limit', String(params.limit));
+  if (params?.sort) query.set('sort', params.sort);
+
+  const url = query.toString()
+    ? `/admin/events/${eventId}/investments?${query.toString()}`
+    : `/admin/events/${eventId}/investments`;
+
+  const response = await api.get<AdminEventInvestmentsResponse>(url);
+  return response.data || null;
 }
 
 export async function deleteEventImage(eventId: string, imageUrl: string): Promise<boolean> {
