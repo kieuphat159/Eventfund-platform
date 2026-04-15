@@ -9,6 +9,7 @@ import {
   BadRequestError,
 } from "../../utils/customErrors.js";
 import UploadService from "../upload/upload.service.js";
+import { uploadEventMetadataToIpfs } from "../upload/ipfs.service.js";
 import Contribution from "../../models/Contribution.model.js";
 import Share from "../../models/Share.model.js";
 import { getFund, provider } from "../blockchain/index.js";
@@ -26,12 +27,38 @@ function getDefaultUploadService() {
 function getBackendSigner() {
   const privateKey = process.env.BACKEND_SIGNER_PRIVATE_KEY;
   if (!privateKey) {
-    throw new BadRequestError(
-      "Missing BACKEND_SIGNER_PRIVATE_KEY for on-chain execution",
-    );
+    throw new BadRequestError("Missing BACKEND_SIGNER_PRIVATE_KEY for relayer event creation");
   }
 
   return new ethers.Wallet(privateKey, provider);
+}
+
+function getUserSigningAddress(user, requestedAddress = null) {
+  const eoa = user?.walletAddress?.toLowerCase();
+  const smart = user?.smartAccountAddress?.toLowerCase();
+
+  if (requestedAddress) {
+    const normalizedRequested = String(requestedAddress).toLowerCase();
+    if (normalizedRequested === eoa || normalizedRequested === smart) {
+      return normalizedRequested;
+    }
+
+    throw new BadRequestError("organizerAddress must match authenticated wallet");
+  }
+
+  // Default to EOA, fallback to smart account when EOA is unavailable.
+  const candidate = eoa || smart;
+  if (!candidate) {
+    throw new BadRequestError("Authenticated user wallet is required");
+  }
+  return candidate;
+}
+
+function isEventOwnedByUser(event, user) {
+  const owner = event.organizer?.toLowerCase();
+  const eoa = user.walletAddress?.toLowerCase();
+  const smart = user.smartAccountAddress?.toLowerCase();
+  return owner && (owner === eoa || owner === smart);
 }
 
 function asBigInt(value, fieldName) {
@@ -42,27 +69,29 @@ function asBigInt(value, fieldName) {
   }
 }
 
-async function parseFundEventsFromReceipt(receipt) {
-  const fund = getFund();
-  const fundAddress = (await fund.getAddress()).toLowerCase();
-  const parsedEvents = [];
-
-  for (const log of receipt.logs || []) {
-    if (!log?.address || log.address.toLowerCase() !== fundAddress) continue;
-
-    try {
-      const parsed = fund.interface.parseLog(log);
-      parsedEvents.push(parsed);
-    } catch {
-      // Ignore unrelated/decode-failed logs.
-    }
+function resolveDraftTicketPriceNumber(eventData) {
+  if (eventData.ticketPrice !== undefined && eventData.ticketPrice !== null) {
+    return Number(eventData.ticketPrice);
   }
 
-  return parsedEvents;
+  const firstTierPrice = eventData.ticketTiers?.[0]?.price;
+  if (firstTierPrice === undefined || firstTierPrice === null) return 0;
+
+  return Number(firstTierPrice);
 }
 
+function resolveDefaultMinStakeRequired(fundingGoal, minStakeRequired) {
+  if (minStakeRequired !== undefined && minStakeRequired !== null) {
+    return asBigInt(minStakeRequired, "minStakeRequired");
+  }
+
+  // Default organizer stake requirement = 10% funding goal when not provided.
+  return fundingGoal / 10n;
+}
+
+
 /**
- * Create a new event in draft status
+ * Create a new event in draft status (off-chain only)
  * @param {Object} eventData - Event data
  * @param {Object} user - User object with walletAddress and role
  * @param {Object} repos - Injected repositories (for testing)
@@ -70,27 +99,24 @@ async function parseFundEventsFromReceipt(receipt) {
  */
 export async function createEvent(eventData, user, repos = {}) {
   const repository = repos.eventRepo || eventRepo;
-  const signer = getBackendSigner();
-  if (signer.address.toLowerCase() !== user.walletAddress.toLowerCase()) {
-    throw new BadRequestError(
-      "Caller wallet must match backend signer address for on-chain event creation",
-    );
+  const fundingGoal = asBigInt(eventData.fundingGoal, "fundingGoal");
+  if (fundingGoal <= 0n) {
+    throw new BadRequestError("fundingGoal must be greater than 0");
   }
 
-  const fundWithSigner = getFund().connect(signer);
-
-  const fundingGoal = asBigInt(eventData.fundingGoal, "fundingGoal");
-  const fundingDeadline = Math.floor(
-    new Date(eventData.fundingDeadline).getTime() / 1000,
-  );
-  if (!Number.isFinite(fundingDeadline) || fundingDeadline <= 0) {
+  const fundingDeadlineDate = new Date(eventData.fundingDeadline);
+  if (!Number.isFinite(fundingDeadlineDate.getTime())) {
     throw new BadRequestError("fundingDeadline must be a valid ISO datetime");
   }
 
-  const minStakeRequired = asBigInt(
+  const minStakeRequired = resolveDefaultMinStakeRequired(
+    fundingGoal,
     eventData.minStakeRequired,
-    "minStakeRequired",
   );
+  if (minStakeRequired <= 0n) {
+    throw new BadRequestError("minStakeRequired must be greater than 0");
+  }
+
   const organizerStake = eventData.organizerStake
     ? asBigInt(eventData.organizerStake, "organizerStake")
     : minStakeRequired;
@@ -100,67 +126,140 @@ export async function createEvent(eventData, user, repos = {}) {
   }
 
   const organizerShareBps = Number(eventData.organizerShareBps ?? 7000);
-  const ticketPrice = asBigInt(eventData.ticketPrice, "ticketPrice");
+  const ticketPrice = resolveDraftTicketPriceNumber(eventData);
+  if (!Number.isFinite(ticketPrice) || !Number.isInteger(ticketPrice) || ticketPrice <= 0) {
+    throw new BadRequestError(
+      "ticketPrice is required and must be a positive integer (or provide ticketTiers[0].price)",
+    );
+  }
+
   const maxTickets = BigInt(eventData.totalTickets);
+  if (maxTickets <= 0n) {
+    throw new BadRequestError("totalTickets must be greater than 0");
+  }
+
   const usedThreshold = BigInt(eventData.usedThreshold ?? eventData.totalTickets);
 
-  const tx = await fundWithSigner.createEvent(
-    fundingGoal,
-    BigInt(fundingDeadline),
-    minStakeRequired,
-    BigInt(organizerShareBps),
-    ticketPrice,
-    maxTickets,
-    usedThreshold,
-    { value: organizerStake },
-  );
-
-  const receipt = await tx.wait();
-  if (!receipt || Number(receipt.status) !== 1) {
-    throw new BadRequestError("On-chain createEvent transaction failed");
+  if (usedThreshold <= 0n || usedThreshold > maxTickets) {
+    throw new BadRequestError("usedThreshold must be between 1 and totalTickets");
   }
 
-  await persistLogsFromReceipt({
-    receipt,
-    contract: getFund(),
-    contractName: "Fund",
-    contractAddress: await getFund().getAddress(),
-  });
-
-  const parsedEvents = await parseFundEventsFromReceipt(receipt);
-  const eventCreated = parsedEvents.find((evt) => evt?.name === "EventCreated");
-  if (!eventCreated) {
-    throw new BadRequestError("EventCreated not found in transaction receipt");
-  }
-
-  const contractEventId = String(eventCreated.args?.eventId ?? "");
-  if (!contractEventId) {
-    throw new BadRequestError("Invalid eventId emitted from EventCreated");
-  }
+  const metadataUri =
+    eventData.metadataUri ||
+    (await uploadEventMetadataToIpfs({
+      title: eventData.title,
+      description: eventData.description,
+      category: eventData.category,
+      venue: eventData.venue,
+      startDate: eventData.startDate,
+      endDate: eventData.endDate,
+      imageUrls: eventData.imageUrls || [],
+      ticketTiers: eventData.ticketTiers || [],
+      fundingGoal: fundingGoal.toString(),
+      minStakeRequired: minStakeRequired.toString(),
+      organizerStake: organizerStake.toString(),
+      fundingDeadline: fundingDeadlineDate.toISOString(),
+      totalTickets: Number(maxTickets),
+      usedThreshold: Number(usedThreshold),
+      ticketPrice,
+    }));
 
   const event = await repository.createEvent({
     ...eventData,
-    syncOnChain: undefined,
     organizerShareBps,
-    ticketPrice: Number(ticketPrice),
+    ticketPrice,
     usedThreshold: Number(usedThreshold),
-    contractEventId,
-    organizer: user.walletAddress.toLowerCase(),
+    organizer: getUserSigningAddress(user, eventData.organizerAddress),
     status: "funding",
     organizerStake: organizerStake.toString(),
     minStakeRequired: minStakeRequired.toString(),
+    fundingGoal: fundingGoal.toString(),
+    fundingDeadline: fundingDeadlineDate,
     maxTickets: Number(maxTickets),
     currentFunding: "0",
     ticketsSold: 0,
     totalTicketsUsed: 0,
+    metadataUri,
   });
 
-  return {
-    ...event,
-    onChain: {
-      txHash: tx.hash.toLowerCase(),
+  try {
+    const fundReadOnly = getFund();
+    const fundAddress = await fundReadOnly.getAddress();
+    const backendSigner = getBackendSigner();
+    const fundWithSigner = fundReadOnly.connect(backendSigner);
+
+    const tx = await fundWithSigner.createEvent(
+      fundingGoal,
+      BigInt(Math.floor(fundingDeadlineDate.getTime() / 1000)),
+      minStakeRequired,
+      BigInt(organizerShareBps),
+      BigInt(ticketPrice),
+      maxTickets,
+      usedThreshold,
+      {
+        value: organizerStake,
+      },
+    );
+
+    const receipt = await tx.wait();
+    if (!receipt) {
+      throw new BadRequestError("Relayer transaction receipt was not available");
+    }
+
+    await persistLogsFromReceipt({
+      receipt,
+      contract: fundReadOnly,
+      contractName: "Fund",
+      contractAddress: fundAddress,
+    });
+
+    let contractEventId = null;
+    let onChainOrganizer = null;
+    for (const log of receipt.logs || []) {
+      if (!log?.address || log.address.toLowerCase() !== fundAddress.toLowerCase()) continue;
+
+      try {
+        const parsed = fundReadOnly.interface.parseLog({ topics: log.topics, data: log.data });
+        if (parsed?.name === "EventCreated") {
+          contractEventId = String(parsed.args?.eventId);
+          onChainOrganizer = String(parsed.args?.organizer || backendSigner.address).toLowerCase();
+          break;
+        }
+      } catch {
+        // Ignore non-Fund logs.
+      }
+    }
+
+    if (!contractEventId) {
+      throw new BadRequestError("Relayer tx mined but EventCreated was not found in receipt");
+    }
+
+    const updated = await repository.updateById(event._id, {
       contractEventId,
-    },
+      onChainOrganizer,
+      status: "funding",
+    });
+
+    return updated || event;
+  } catch (error) {
+    await repository.deleteById(event._id);
+    throw error;
+  }
+}
+
+/**
+ * Get blockchain config required for frontend direct contract interaction
+ */
+export async function getEventBlockchainConfig() {
+  const fund = getFund();
+  const [fundAddress, network] = await Promise.all([
+    fund.getAddress(),
+    provider.getNetwork(),
+  ]);
+
+  return {
+    fundAddress: fundAddress.toLowerCase(),
+    chainId: network.chainId.toString(),
   };
 }
 
@@ -232,8 +331,7 @@ export async function updateEvent(eventId, updates, user, repos = {}) {
     throw new NotFoundError("Event not found");
   }
 
-  // Check authorization
-  if (event.organizer.toLowerCase() !== user.walletAddress.toLowerCase()) {
+  if (!isEventOwnedByUser(event, user)) {
     throw new ForbiddenError("Not authorized to update this event");
   }
 
@@ -294,7 +392,7 @@ export async function deleteEvent(eventId, user, repos = {}, uploadSvc = null) {
   }
 
   // Check authorization
-  if (event.organizer.toLowerCase() !== user.walletAddress.toLowerCase()) {
+  if (!isEventOwnedByUser(event, user)) {
     throw new ForbiddenError("Not authorized to delete this event");
   }
 
@@ -571,7 +669,7 @@ export async function deleteEventImage(
   }
 
   // Check authorization
-  if (event.organizer.toLowerCase() !== user.walletAddress.toLowerCase()) {
+  if (!isEventOwnedByUser(event, user)) {
     throw new ForbiddenError("Not authorized to modify this event");
   }
 

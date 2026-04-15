@@ -28,6 +28,13 @@ const eventSchema = new mongoose.Schema(
       trim: true,
     },
 
+    // Actual organizer recorded on-chain when using backend relayer.
+    onChainOrganizer: {
+      type: String,
+      lowercase: true,
+      trim: true,
+    },
+
     // ===== Funding Info =====
     organizerStake: { type: String, default: "0" },
     minStakeRequired: { type: String, default: "0" },
