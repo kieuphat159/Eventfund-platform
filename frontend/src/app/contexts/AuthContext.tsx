@@ -12,8 +12,9 @@ import {
   useIdentityToken,
   useWeb3Auth,
 } from "@web3auth/modal/react";
-import { User, UserRole } from "../types/roles";
+import { User } from "../types/roles";
 import { getWalletAddresses } from "../services/walletService";
+import { userService } from "../services/user.service";
 
 const RAW_API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000";
 const API_ORIGIN = RAW_API_BASE.replace(/\/+$/, "").replace(/\/api$/, "");
@@ -24,6 +25,7 @@ interface AuthContextType {
   disconnectWallet: () => Promise<void>;
   isLoading: boolean;
   error: string | null;
+  refreshProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -32,7 +34,10 @@ const AuthContext = createContext<AuthContextType>({
   disconnectWallet: async () => {},
   isLoading: false,
   error: null,
+  refreshProfile: async () => {},
 });
+
+
 
 async function loginToBackend(
   idToken: string,
@@ -44,35 +49,28 @@ async function loginToBackend(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       idToken,
-      walletAddress: eoaAddress, // EOA (0xF21...)
-      smartAccountAddress: smartAccountAddress, // Smart Account (0xdbb...)
+      walletAddress: eoaAddress,
+      smartAccountAddress,
     }),
   });
 
   const json = await res.json();
   if (!res.ok || !json.success) throw new Error(json.message || "Login failed");
 
-  const {
-    token,
-    walletAddress: returnedAddress,
-    user: backendUser,
-  } = json.data;
+  const { token, walletAddress: returnedAddress } = json.data;
 
-  // Persist auth data in localStorage
   localStorage.setItem("jwtToken", token);
   localStorage.setItem("walletAddress", returnedAddress);
   localStorage.setItem("smartAccountAddress", smartAccountAddress);
-  localStorage.setItem("userRole", backendUser?.role ?? "user");
-  localStorage.setItem("userEmail", backendUser?.email ?? "");
 
-  return { returnedAddress, backendUser };
+  return { returnedAddress };
 }
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
   const [user, setUser] = useState<User | null>({ role: "public" });
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const { connect, isConnected } = useWeb3AuthConnect();
@@ -80,59 +78,104 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   const { getIdentityToken } = useIdentityToken();
   const { web3Auth } = useWeb3Auth();
 
-  useEffect(() => {
-    const token = localStorage.getItem("jwtToken");
-    const walletAddress = localStorage.getItem("walletAddress");
-    if (token && walletAddress) {
-      setUser({
-        walletAddress,
-        smartAccountAddress: localStorage.getItem("smartAccountAddress") ?? undefined,
-        role: (localStorage.getItem("userRole") as UserRole) ?? "user",
-        email: localStorage.getItem("userEmail") ?? undefined,
-      });
-    }
+  const clearAuth = useCallback(() => {
+    localStorage.removeItem("jwtToken");
+    localStorage.removeItem("walletAddress");
+    localStorage.removeItem("smartAccountAddress");
+    setUser({ role: "public" });
   }, []);
+
+  const refreshProfile = useCallback(async () => {
+    const token = localStorage.getItem("jwtToken");
+    if (!token) {
+      setUser({ role: "public" });
+      return;
+    }
+
+    try {
+      const profile = await userService.getProfile();
+
+      setUser({
+        walletAddress: profile.walletAddress,
+        smartAccountAddress:
+          localStorage.getItem("smartAccountAddress") ?? undefined,
+        role: profile.role,
+        email: profile.email,
+        name: profile.username,
+      });
+    } catch (err) {
+      clearAuth();
+      throw err;
+    }
+  }, [clearAuth]);
+
+  useEffect(() => {
+    const bootstrap = async () => {
+      try {
+        const token = localStorage.getItem("jwtToken");
+        const walletAddress = localStorage.getItem("walletAddress");
+
+        if (!token || !walletAddress) {
+          setUser({ role: "public" });
+          return;
+        }
+
+        await refreshProfile();
+      } catch {
+        clearAuth();
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    bootstrap();
+  }, [refreshProfile, clearAuth]);
 
   const connectWallet = useCallback(async () => {
     setIsLoading(true);
+    setError(null);
+
     try {
       await connect();
+
       const activeProvider = web3Auth?.provider;
       if (!activeProvider) throw new Error("Provider not ready");
 
-      // Web3Auth native AA: addresses[0] = Smart Account, addresses[1] = EOA
-      const { smartAccountAddress, eoaAddress } = await getWalletAddresses(activeProvider as any);
-
-      const idToken = await getIdentityToken();
-      const { returnedAddress, backendUser } = await loginToBackend(
-        idToken!,
-        smartAccountAddress,
-        eoaAddress,
+      const { smartAccountAddress, eoaAddress } = await getWalletAddresses(
+        activeProvider as any,
       );
 
-      setUser({
-        walletAddress: returnedAddress,
-        smartAccountAddress,
-        role: backendUser?.role ?? "user",
-        email: backendUser?.email ?? undefined,
-      });
+      const idToken = await getIdentityToken();
+      if (!idToken) throw new Error("Identity token not available");
+
+      await loginToBackend(idToken, smartAccountAddress, eoaAddress);
+      await refreshProfile();
     } catch (err: any) {
-      setError(err.message);
-      localStorage.clear();
+      setError(err.message || "Login failed");
+      clearAuth();
     } finally {
       setIsLoading(false);
     }
-  }, [connect, getIdentityToken, web3Auth]);
+  }, [connect, getIdentityToken, web3Auth, refreshProfile, clearAuth]);
 
   const disconnectWallet = useCallback(async () => {
-    if (isConnected) await disconnect();
-    localStorage.clear();
-    setUser({ role: "public" });
-  }, [disconnect, isConnected]);
+    try {
+      if (isConnected) await disconnect();
+    } finally {
+      clearAuth();
+    }
+  }, [disconnect, isConnected, clearAuth]);
 
   return (
     <AuthContext.Provider
-      value={{ user, connectWallet, disconnectWallet, isLoading, error }}
+      value={{
+        user,
+        connectWallet,
+        disconnectWallet,
+        isLoading,
+        error,
+        refreshProfile,
+      }}
     >
       {children}
     </AuthContext.Provider>

@@ -28,6 +28,13 @@ const eventSchema = new mongoose.Schema(
       trim: true,
     },
 
+    // Actual organizer recorded on-chain when using backend relayer.
+    onChainOrganizer: {
+      type: String,
+      lowercase: true,
+      trim: true,
+    },
+
     // ===== Funding Info =====
     organizerStake: { type: String, default: "0" },
     minStakeRequired: { type: String, default: "0" },
@@ -62,6 +69,14 @@ const eventSchema = new mongoose.Schema(
       ],
       default: "draft",
     },
+
+    verifiers: [
+      {
+        type: String, // walletAddress
+        lowercase: true,
+        trim: true,
+      }
+    ],
 
     startDate: {
       type: Date,
@@ -134,6 +149,8 @@ const eventSchema = new mongoose.Schema(
       ],
       default: "holding",
     },
+
+
 
     totalRevenue: { type: String, default: "0" },
     escrowedRevenue: { type: String, default: "0" },

@@ -1,7 +1,8 @@
 import Joi from 'joi';
+import { USER_ROLE_ENUM } from '../constants/roles.js';
 
 // User role enum
-const userRoleEnum = ['user', 'organizer', 'verifier', 'admin'];
+const userRoleEnum = USER_ROLE_ENUM;
 
 // Event status enum
 const eventStatusEnum = [

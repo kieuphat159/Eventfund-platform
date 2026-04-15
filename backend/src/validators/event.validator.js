@@ -59,6 +59,7 @@ const createEventSchema = Joi.object({
     "any.required": "Description is required",
   }),
   category: Joi.string().optional(),
+  organizerAddress: ethereumAddress.optional(),
   organizerStake: bigIntString.optional(),
   fundingGoal: bigIntString.required().messages({
     "string.empty": "Funding goal is required",

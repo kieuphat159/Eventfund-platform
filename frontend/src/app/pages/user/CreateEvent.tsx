@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Calendar, MapPin, Upload, Plus, Trash2 } from 'lucide-react';
 import {
@@ -12,7 +12,9 @@ import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Textarea } from '../../components/ui/textarea';
 import { Label } from '../../components/ui/label';
-import { createEvent } from '../../services/events.service';
+import {
+  createEvent,
+} from '../../services/events.service';
 
 type TicketTierForm = {
   name: string;
@@ -30,6 +32,7 @@ const createEmptyTier = (): TicketTierForm => ({
 
 export const CreateEvent: React.FC = () => {
   const navigate = useNavigate();
+  const submitInFlightRef = useRef(false);
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -40,7 +43,8 @@ export const CreateEvent: React.FC = () => {
 
   const [fundingGoal, setFundingGoal] = useState('');
   const [minStakeRequired, setMinStakeRequired] = useState('');
-  const [investmentEnabled, setInvestmentEnabled] = useState(false);
+  const [organizerStake, setOrganizerStake] = useState('');
+  const [investmentEnabled, setInvestmentEnabled] = useState(true);
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -60,7 +64,8 @@ export const CreateEvent: React.FC = () => {
     setCategory('');
     setFundingGoal('');
     setMinStakeRequired('');
-    setInvestmentEnabled(false);
+    setOrganizerStake('');
+    setInvestmentEnabled(true);
     setTicketTiers([{ name: 'General', price: '', supply: '' }]);
     setFieldErrors({});
     setError('');
@@ -113,7 +118,7 @@ export const CreateEvent: React.FC = () => {
         : 'border-slate-700'
     }`;
 
-  const validateForm = (mode: 'draft' | 'review') => {
+  const validateForm = () => {
     const errors: FieldErrors = {};
 
     if (!title.trim()) {
@@ -133,33 +138,67 @@ export const CreateEvent: React.FC = () => {
       errors.dateTime = 'Event date and time are invalid.';
     }
 
-    if (mode === 'review') {
-      if (!description.trim()) {
-        errors.description = 'Event description is required.';
-      }
+    if (!investmentEnabled) {
+      errors.investmentEnabled =
+        'Investment must be enabled for the on-chain event funding flow.';
+    }
 
-      if (!location.trim()) {
-        errors.location = 'Location is required.';
-      }
+    if (!fundingGoal.trim()) {
+      errors.fundingGoal = 'Funding goal is required.';
+    } else if (!/^\d+$/.test(fundingGoal.trim()) || BigInt(fundingGoal.trim()) <= 0n) {
+      errors.fundingGoal = 'Funding goal must be a positive integer string.';
+    }
 
-      if (!category) {
-        errors.category = 'Category is required.';
-      }
+    if (
+      minStakeRequired.trim() &&
+      (!/^\d+$/.test(minStakeRequired.trim()) || BigInt(minStakeRequired.trim()) <= 0n)
+    ) {
+      errors.minStakeRequired =
+        'Min stake required must be a positive integer string.';
+    }
 
-      if (investmentEnabled && !fundingGoal.trim()) {
-        errors.fundingGoal =
-          'Funding goal is required when investment is enabled.';
-      }
+    if (
+      organizerStake.trim() &&
+      (!/^\d+$/.test(organizerStake.trim()) || BigInt(organizerStake.trim()) <= 0n)
+    ) {
+      errors.organizerStake =
+        'Organizer stake must be a positive integer string.';
+    }
 
-      if (start) {
-        const fundingDeadline = new Date(
-          start.getTime() - 7 * 24 * 60 * 60 * 1000
-        );
+    if (
+      minStakeRequired.trim() &&
+      organizerStake.trim() &&
+      /^\d+$/.test(minStakeRequired.trim()) &&
+      /^\d+$/.test(organizerStake.trim()) &&
+      BigInt(organizerStake.trim()) < BigInt(minStakeRequired.trim())
+    ) {
+      errors.organizerStake = 'Organizer stake must be >= min stake required.';
+    }
 
-        if (fundingDeadline <= new Date()) {
-          errors.fundingDeadline =
-            'The event must be scheduled at least 7 days from now to create a valid funding deadline.';
-        }
+    if (!investmentEnabled) {
+      errors.investmentEnabled = 'Enable investment before creating event.';
+    }
+
+    if (!description.trim()) {
+      errors.description = 'Event description is required.';
+    }
+
+    if (!location.trim()) {
+      errors.location = 'Location is required.';
+    }
+
+    if (!category) {
+      errors.category = 'Category is required.';
+    }
+
+    if (start) {
+      const fundingDeadline = new Date(
+        start.getTime() - 7 * 24 * 60 * 60 * 1000
+      );
+
+      if (fundingDeadline <= new Date()) {
+        errors.fundingDeadline =
+          'The event must be scheduled at least 7 days from now to create a valid funding deadline.';
       }
     }
 
@@ -191,8 +230,12 @@ export const CreateEvent: React.FC = () => {
 
       if (tier.price.trim() === '') {
         errors[`tier-${index}-price`] = `Tier ${tierNumber} price is required.`;
-      } else if (Number.isNaN(Number(tier.price)) || Number(tier.price) < 0) {
-        errors[`tier-${index}-price`] = `Tier ${tierNumber} price must be greater than or equal to 0.`;
+      } else if (
+        Number.isNaN(Number(tier.price)) ||
+        !Number.isInteger(Number(tier.price)) ||
+        Number(tier.price) <= 0
+      ) {
+        errors[`tier-${index}-price`] = `Tier ${tierNumber} price must be a positive integer.`;
       }
 
       if (tier.supply.trim() === '') {
@@ -208,13 +251,19 @@ export const CreateEvent: React.FC = () => {
     return errors;
   };
 
-  const submitEvent = async (mode: 'draft' | 'review') => {
+  const submitEvent = async () => {
+    if (submitInFlightRef.current) {
+      return;
+    }
+
+    submitInFlightRef.current = true;
+
     try {
       setError('');
       setSuccess('');
       setFieldErrors({});
 
-      const errors = validateForm(mode);
+      const errors = validateForm();
 
       if (Object.keys(errors).length > 0) {
         setFieldErrors(errors);
@@ -256,12 +305,12 @@ export const CreateEvent: React.FC = () => {
         category: category || 'conference',
         startDate: start.toISOString(),
         endDate: end.toISOString(),
-        fundingGoal: investmentEnabled ? fundingGoal.trim() || '0' : '0',
-        minStakeRequired: investmentEnabled
-          ? minStakeRequired.trim() || '0'
-          : '0',
+        fundingGoal: fundingGoal.trim(),
+        minStakeRequired: minStakeRequired.trim() || undefined,
+        organizerStake: organizerStake.trim() || undefined,
         fundingDeadline: fundingDeadline.toISOString(),
         totalTickets,
+        ticketPrice: String(normalizedTiers[0].price),
         venue: {
           address: location.trim() || 'TBA',
         },
@@ -269,20 +318,11 @@ export const CreateEvent: React.FC = () => {
       });
 
       if (!created) {
-        setError(
-          mode === 'draft'
-            ? 'Failed to save draft.'
-            : 'Failed to create event.'
-        );
+        setError('Failed to create event.');
         return;
       }
 
-      if (mode === 'draft') {
-        setSuccess('Draft saved successfully.');
-        resetForm();
-        return;
-      }
-
+      setSuccess('Event created successfully via backend relayer.');
       navigate('/app/events/my-events');
     } catch (err: any) {
       setError(
@@ -292,15 +332,12 @@ export const CreateEvent: React.FC = () => {
       );
     } finally {
       setSubmitting(false);
+      submitInFlightRef.current = false;
     }
   };
 
   const handleSubmit = async () => {
-    await submitEvent('review');
-  };
-
-  const handleSaveDraft = async () => {
-    await submitEvent('draft');
+    await submitEvent();
   };
 
   return (
@@ -780,11 +817,60 @@ export const CreateEvent: React.FC = () => {
               <Input
                 id="min-stake-required"
                 value={minStakeRequired}
-                onChange={(e) => setMinStakeRequired(e.target.value)}
+                onChange={(e) => {
+                  setMinStakeRequired(e.target.value);
+                  setFieldErrors((prev) => {
+                    const next = { ...prev };
+                    delete next.minStakeRequired;
+                    delete next.organizerStake;
+                    return next;
+                  });
+                }}
                 placeholder="1000000000000000000"
-                className="mt-1.5 bg-slate-800 border-slate-700 text-white"
+                className={`mt-1.5 bg-slate-800 text-white ${
+                  fieldErrors.minStakeRequired || fieldErrors.organizerStake
+                    ? 'border-red-500 focus-visible:ring-red-500'
+                    : 'border-slate-700'
+                }`}
                 disabled={!investmentEnabled}
               />
+              {fieldErrors.minStakeRequired && (
+                <p className="mt-1 text-sm text-red-400">
+                  {fieldErrors.minStakeRequired}
+                </p>
+              )}
+            </div>
+
+            <div>
+              <Label htmlFor="organizer-stake" className="text-slate-300">
+                Organizer Stake (optional, defaults to min stake)
+              </Label>
+              <Input
+                id="organizer-stake"
+                value={organizerStake}
+                onChange={(e) => {
+                  setOrganizerStake(e.target.value);
+                  if (fieldErrors.organizerStake) {
+                    setFieldErrors((prev) => {
+                      const next = { ...prev };
+                      delete next.organizerStake;
+                      return next;
+                    });
+                  }
+                }}
+                placeholder="1000000000000000000"
+                className={`mt-1.5 bg-slate-800 text-white ${
+                  fieldErrors.organizerStake
+                    ? 'border-red-500 focus-visible:ring-red-500'
+                    : 'border-slate-700'
+                }`}
+                disabled={!investmentEnabled}
+              />
+              {fieldErrors.organizerStake && (
+                <p className="mt-1 text-sm text-red-400">
+                  {fieldErrors.organizerStake}
+                </p>
+              )}
             </div>
           </div>
 
@@ -796,16 +882,6 @@ export const CreateEvent: React.FC = () => {
       </Card>
 
       <div className="flex items-center justify-between pt-4">
-        <Button
-          type="button"
-          variant="outline"
-          className="border-slate-700 hover:bg-slate-800 text-white"
-          onClick={handleSaveDraft}
-          disabled={submitting}
-        >
-          {submitting ? 'Saving...' : 'Save as Draft'}
-        </Button>
-
         <Button
           type="button"
           disabled={submitting}
