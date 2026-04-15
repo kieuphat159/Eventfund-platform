@@ -140,6 +140,22 @@ class EventsController {
       data: event,
     });
   });
+
+  // 🔥 NEW: assign verifier
+  assignVerifier = asyncHandler(async (req, res) => {
+    const { verifier } = req.body;
+
+    const event = await this.eventsService.assignVerifier(
+      req.params.id,
+      verifier,
+      req.user
+    );
+
+    res.status(200).json({
+      success: true,
+      data: event,
+    });
+  });
 }
 
 export default EventsController;

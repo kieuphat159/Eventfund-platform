@@ -1,7 +1,7 @@
 import express from 'express';
 import TicketsController from '../controllers/tickets.controller.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
-import { requireRole } from '../middlewares/roles.middleware.js';
+import { requireVerifier } from '../middlewares/roles.middleware.js';
 import { validate } from '../middlewares/validate.middleware.js';
 import { ticketSchemas } from '../validators/ticket.validator.js';
 
@@ -63,20 +63,24 @@ const ticketsController = new TicketsController();
  *       500:
  *         description: Server error
  */
-router.get('/', validate({ query: ticketSchemas.queryTickets }), (req, res, next) => ticketsController.getTickets(req, res, next));
-
-router.post(
-	'/purchase-intent',
-	authenticate,
-	validate({ body: ticketSchemas.purchaseIntent }),
-	(req, res, next) => ticketsController.createPurchaseIntent(req, res, next)
+router.get(
+  '/',
+  validate({ query: ticketSchemas.queryTickets }),
+  (req, res, next) => ticketsController.getTickets(req, res, next)
 );
 
 router.post(
-	'/purchase/confirm',
-	authenticate,
-	validate({ body: ticketSchemas.confirmPurchase }),
-	(req, res, next) => ticketsController.confirmPurchaseTransaction(req, res, next)
+  '/purchase-intent',
+  authenticate,
+  validate({ body: ticketSchemas.purchaseIntent }),
+  (req, res, next) => ticketsController.createPurchaseIntent(req, res, next)
+);
+
+router.post(
+  '/purchase/confirm',
+  authenticate,
+  validate({ body: ticketSchemas.confirmPurchase }),
+  (req, res, next) => ticketsController.confirmPurchaseTransaction(req, res, next)
 );
 
 /**
@@ -100,7 +104,11 @@ router.post(
  *       500:
  *         description: Server error
  */
-router.get('/:tokenId', validate({ params: ticketSchemas.tokenIdParams }), (req, res, next) => ticketsController.getTicketById(req, res, next));
+router.get(
+  '/:tokenId',
+  validate({ params: ticketSchemas.tokenIdParams }),
+  (req, res, next) => ticketsController.getTicketById(req, res, next)
+);
 
 /**
  * @swagger
@@ -134,7 +142,14 @@ router.get('/:tokenId', validate({ params: ticketSchemas.tokenIdParams }), (req,
  *       500:
  *         description: Server error
  */
-router.get('/user/:walletAddress', validate({ params: ticketSchemas.walletAddressParams, query: ticketSchemas.userTicketsQuery }), (req, res, next) => ticketsController.getUserTickets(req, res, next));
+router.get(
+  '/user/:walletAddress',
+  validate({
+    params: ticketSchemas.walletAddressParams,
+    query: ticketSchemas.userTicketsQuery,
+  }),
+  (req, res, next) => ticketsController.getUserTickets(req, res, next)
+);
 
 /**
  * @swagger
@@ -172,7 +187,13 @@ router.get('/user/:walletAddress', validate({ params: ticketSchemas.walletAddres
  *       500:
  *         description: Server error
  */
-router.post('/verify', authenticate, requireRole('verifier', 'admin'), validate({ body: ticketSchemas.verifyTicket }), (req, res, next) => ticketsController.verifyTicket(req, res, next));
+router.post(
+  '/verify',
+  authenticate,
+  requireVerifier,
+  validate({ body: ticketSchemas.verifyTicket }),
+  (req, res, next) => ticketsController.verifyTicket(req, res, next)
+);
 
 /**
  * @swagger
@@ -203,22 +224,31 @@ router.post('/verify', authenticate, requireRole('verifier', 'admin'), validate(
  *       500:
  *         description: Server error
  */
-router.post('/:tokenId/use', authenticate, requireRole('verifier', 'admin'), validate({ params: ticketSchemas.tokenIdParams, body: ticketSchemas.useTicket }), (req, res, next) => ticketsController.markTicketAsUsed(req, res, next));
-
 router.post(
-	'/:tokenId/use-intent',
-	authenticate,
-	requireRole('verifier', 'admin'),
-	validate({ params: ticketSchemas.tokenIdParams }),
-	(req, res, next) => ticketsController.createUseTicketIntent(req, res, next)
+  '/:tokenId/use',
+  authenticate,
+  requireVerifier,
+  validate({
+    params: ticketSchemas.tokenIdParams,
+    body: ticketSchemas.useTicket,
+  }),
+  (req, res, next) => ticketsController.markTicketAsUsed(req, res, next)
 );
 
 router.post(
-	'/use/confirm',
-	authenticate,
-	requireRole('verifier', 'admin'),
-	validate({ body: ticketSchemas.confirmUseTicket }),
-	(req, res, next) => ticketsController.confirmUseTicketTransaction(req, res, next)
+  '/:tokenId/use-intent',
+  authenticate,
+  requireVerifier,
+  validate({ params: ticketSchemas.tokenIdParams }),
+  (req, res, next) => ticketsController.createUseTicketIntent(req, res, next)
+);
+
+router.post(
+  '/use/confirm',
+  authenticate,
+  requireVerifier,
+  validate({ body: ticketSchemas.confirmUseTicket }),
+  (req, res, next) => ticketsController.confirmUseTicketTransaction(req, res, next)
 );
 
 /**
@@ -240,6 +270,10 @@ router.post(
  *       500:
  *         description: Server error
  */
-router.get('/event/:eventId/stats', validate({ params: ticketSchemas.eventIdParams }), (req, res, next) => ticketsController.getTicketStats(req, res, next));
+router.get(
+  '/event/:eventId/stats',
+  validate({ params: ticketSchemas.eventIdParams }),
+  (req, res, next) => ticketsController.getTicketStats(req, res, next)
+);
 
 export default router;

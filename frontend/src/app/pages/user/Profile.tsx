@@ -4,9 +4,7 @@ import {
   Mail,
   MapPin,
   Calendar,
-  Edit,
   Camera,
-  ShieldCheck,
   Loader2,
 } from "lucide-react";
 import {
@@ -28,54 +26,56 @@ import {
 } from "../../services/user.service";
 
 export const Profile: React.FC = () => {
-  const { user: authUser } = useAuth();
+  const { user: authUser, refreshProfile } = useAuth();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [stats, setStats] = useState<UserStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Load real data from backend
   useEffect(() => {
     const loadInitialData = async () => {
       if (!authUser?.walletAddress) {
-        console.log("Profile: Missing authUser.walletAddress");
+        setIsLoading(false);
         return;
       }
+
       try {
         setIsLoading(true);
-        console.log("Fetching profile API with wallet:", authUser.walletAddress);
 
         const [profileData, statsData] = await Promise.all([
           userService.getProfile(),
           userService.getFullStats(authUser.walletAddress),
         ]);
 
-        console.log("Profile data loaded:", profileData);
         setProfile(profileData);
         setStats(statsData);
       } catch (error: any) {
-        console.error("Failed to fetch profile data:", error.message, error.data);
-        // Keep logging backend response details (401, 404, 500) for debugging.
+        console.error("Failed to fetch profile data:", error?.message, error?.data);
       } finally {
         setIsLoading(false);
       }
     };
+
     loadInitialData();
   }, [authUser]);
 
-  // Save profile updates
   const handleSave = async () => {
     if (!profile) return;
+
     try {
       setIsSaving(true);
+
       const updated = await userService.updateProfile({
         username: profile.username,
         bio: profile.bio,
         location: profile.location,
       });
+
       setProfile(updated);
+      await refreshProfile();
       alert("Profile updated successfully!");
     } catch (error) {
+      console.error("Save profile error:", error);
       alert("An error occurred while saving changes.");
     } finally {
       setIsSaving(false);
@@ -100,7 +100,6 @@ export const Profile: React.FC = () => {
         </p>
       </div>
 
-      {/* Profile Header */}
       <Card className="bg-slate-900 border-slate-800">
         <CardContent className="p-8">
           <div className="flex flex-col md:flex-row items-center md:items-start space-y-6 md:space-y-0 md:space-x-6">
@@ -129,28 +128,19 @@ export const Profile: React.FC = () => {
                   </h2>
                   <div className="flex items-center gap-2">
                     <code className="text-sm text-blue-400 bg-blue-500/10 px-3 py-1 rounded border border-blue-500/20">
-                      {profile?.walletAddress.slice(0, 6)}...
-                      {profile?.walletAddress.slice(-4)}
+                      {profile?.walletAddress?.slice(0, 6)}...
+                      {profile?.walletAddress?.slice(-4)}
                     </code>
-                    <span
-                      className={`flex items-center text-[10px] uppercase font-bold px-2 py-0.5 rounded border ${
-                        profile?.role === "admin"
-                          ? "bg-red-500/10 text-red-400 border-red-500/20"
-                          : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-                      }`}
-                    >
-                      <ShieldCheck className="w-3 h-3 mr-1" /> {profile?.role}
-                    </span>
                   </div>
                 </div>
               </div>
 
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {[
-                  { label: "Events Created", value: stats?.eventsCreated },
-                  { label: "Tickets Owned", value: stats?.ticketsOwned },
-                  { label: "Investments", value: stats?.totalInvestments },
-                  { label: "Member Since", value: stats?.memberSince },
+                  { label: "Events Created", value: stats?.eventsCreated ?? 0 },
+                  { label: "Tickets Owned", value: stats?.ticketsOwned ?? 0 },
+                  { label: "Investments", value: stats?.totalInvestments ?? "0 ETH" },
+                  { label: "Member Since", value: stats?.memberSince ?? "N/A" },
                 ].map((s, i) => (
                   <div
                     key={i}
@@ -168,7 +158,6 @@ export const Profile: React.FC = () => {
         </CardContent>
       </Card>
 
-      {/* Edit Form */}
       <Card className="bg-slate-900 border-slate-800">
         <CardHeader>
           <CardTitle className="text-white">Personal Information</CardTitle>
@@ -183,11 +172,12 @@ export const Profile: React.FC = () => {
               <Input
                 value={profile?.username || ""}
                 onChange={(e) =>
-                  setProfile((p) => (p ? { ...p, name: e.target.value } : null))
+                  setProfile((p) => (p ? { ...p, username: e.target.value } : null))
                 }
                 className="bg-slate-800/50 border-slate-700 text-white"
               />
             </div>
+
             <div className="space-y-2">
               <Label className="text-slate-300">Email (Read-only)</Label>
               <div className="relative">
@@ -228,6 +218,7 @@ export const Profile: React.FC = () => {
                 />
               </div>
             </div>
+
             <div className="space-y-2">
               <Label className="text-slate-300">Member Since</Label>
               <div className="relative">
@@ -243,7 +234,6 @@ export const Profile: React.FC = () => {
         </CardContent>
       </Card>
 
-      {/* Action Buttons */}
       <div className="flex items-center justify-end space-x-4 pt-4">
         <Button variant="ghost" className="text-slate-400 hover:text-white">
           Cancel

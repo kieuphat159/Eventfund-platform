@@ -8,11 +8,20 @@ export const LoginPage: React.FC = () => {
   const { connectWallet, isLoading, error, user } = useAuth();
   const navigate = useNavigate();
 
-  // Redirect right away if user is already authenticated
   useEffect(() => {
-    if (user && user.role !== "public") {
-      navigate("/app/dashboard");
+    if (!user || user.role === "public") return;
+
+    if (user.role === "admin") {
+      navigate("/admin/dashboard", { replace: true });
+      return;
     }
+
+    if (user.role === "verifier") {
+      navigate("/app/verifier/dashboard", { replace: true });
+      return;
+    }
+
+    navigate("/app/dashboard", { replace: true });
   }, [user, navigate]);
 
   const handleLogin = async () => {
