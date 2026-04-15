@@ -38,6 +38,8 @@ import { FraudMonitoring } from "./pages/admin/FraudMonitoring";
 import { FinanceDashboard } from "./pages/admin/FinanceDashboard";
 import { AnalyticsDashboard } from "./pages/admin/AnalyticsDashboard";
 import { PlatformSettings } from "./pages/admin/PlatformSettings";
+import { AdminEventDetail } from "./pages/admin/AdminEventDetail";
+import { AdminEditEvent } from "./pages/admin/AdminEditEvent";
 
 type AppRole = "user" | "verifier" | "admin" | "public" | null;
 
@@ -178,6 +180,8 @@ const AppRoutes: React.FC = () => {
         <Route path="dashboard" element={<AdminDashboard />} />
         <Route path="users" element={<UserManagement />} />
         <Route path="events" element={<EventManagement />} />
+        <Route path="events/:id" element={<AdminEventDetail />} />
+        <Route path="events/edit/:id" element={<AdminEditEvent />} />
         <Route path="marketplace" element={<MarketplaceManagement />} />
         <Route path="fraud" element={<FraudMonitoring />} />
         <Route path="finance" element={<FinanceDashboard />} />

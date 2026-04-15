@@ -5,11 +5,11 @@ import * as eventsService from "../services/events/events.service.js";
  * EventsController - Handles event management endpoints
  *
  * Endpoints:
- * - POST /events - Create new event (organizer role required)
+ * - POST /events - Create new draft event (authenticated user required)
  * - GET /events - List events with filters and pagination (public)
  * - GET /events/:id - Get single event (public)
- * - PATCH /events/:id - Update event (organizer role, ownership required)
- * - DELETE /events/:id - Delete draft event (organizer role, ownership required)
+ * - PATCH /events/:id - Update event content (ownership required)
+ * - DELETE /events/:id - Delete draft event (ownership required)
  * - GET /events/:id/stats - Get event statistics (public)
  */
 class EventsController {

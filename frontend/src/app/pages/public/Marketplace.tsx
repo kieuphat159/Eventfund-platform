@@ -94,6 +94,17 @@ export const Marketplace: React.FC = () => {
     );
   }
 
+  const filteredListings = listings.filter((listing) => {
+    const eventTitle = listing.eventId?.title?.toLowerCase() || "";
+    const matchesSearch = eventTitle.includes(searchQuery.toLowerCase());
+
+    const ticketType = listing.ticketId?.ticketType;
+    const matchesTicketType =
+      selectedTicketType === "all" ? true : ticketType === selectedTicketType;
+
+    return matchesSearch && matchesTicketType;
+  });
+
   return (
     <div className="min-h-screen bg-slate-950 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -303,27 +314,30 @@ export const Marketplace: React.FC = () => {
 
         {/* Marketplace Grid */}
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {listings
-            .filter((listing) =>
-              listing.eventId.title
-                ?.toLowerCase()
-                .includes(searchQuery.toLowerCase()),
-            )
-            .filter((listing) =>
-              selectedTicketType === "all"
-                ? true
-                : listing.ticketId.ticketType === selectedTicketType,
-            )
-            .map((listing) => (
+          {filteredListings.map((listing) => {
+            const listingId = listing.id || listing._id;
+            const eventTitle = listing.eventId?.title || "Untitled event";
+            const eventImage = listing.eventId?.imageUrls?.[0] || "/placeholder.png";
+            const ticketType = listing.ticketId?.ticketType || "Unknown ticket type";
+            const seller = listing.seller || "Unknown seller";
+
+            let formattedPrice = "0";
+            try {
+              formattedPrice = ethers.formatEther(listing.price || "0");
+            } catch {
+              formattedPrice = "0";
+            }
+
+            return (
               <div
-                key={listing.id}
-                onClick={() => navigate(`/tickets/${listing.id}`)}
+                key={listingId}
+                onClick={() => navigate(`/tickets/${listingId}`)}
                 className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden hover:border-purple-500/50 transition-all hover:shadow-lg hover:shadow-purple-500/10 cursor-pointer"
               >
                 <div className="aspect-video overflow-hidden relative">
                   <ImageWithFallback
-                    src={listing.eventId.imageUrls[0] || "/placeholder.png"}
-                    alt={listing.eventId.title}
+                    src={eventImage}
+                    alt={eventTitle}
                     className="w-full h-full object-cover"
                   />
                   <div className="absolute top-3 right-3 bg-purple-600 text-white text-xs px-2 py-1 rounded-full flex items-center space-x-1">
@@ -333,24 +347,25 @@ export const Marketplace: React.FC = () => {
                 </div>
                 <div className="p-5">
                   <h3 className="text-lg font-semibold text-white mb-1">
-                    {listing.eventId.title}
+                    {eventTitle}
                   </h3>
                   <p className="text-sm text-slate-400 mb-4">
-                    {listing.ticketId.ticketType}
+                    {ticketType}
                   </p>
 
                   <div className="flex items-center justify-between mb-4">
                     <div>
                       <p className="text-xs text-slate-500 mb-1">Seller</p>
                       <p className="text-sm text-slate-300 font-mono">
-                        {listing.seller.slice(0, 10)}...
-                        {listing.seller.slice(-4)}
+                        {seller.length > 14
+                          ? `${seller.slice(0, 10)}...${seller.slice(-4)}`
+                          : seller}
                       </p>
                     </div>
                     <div className="text-right">
                       <p className="text-xs text-slate-500 mb-1">Price</p>
                       <p className="text-xl font-bold text-purple-400">
-                        {ethers.formatEther(listing.price)} ETH
+                        {formattedPrice} ETH
                       </p>
                     </div>
                   </div>
@@ -358,7 +373,7 @@ export const Marketplace: React.FC = () => {
                   <Button
                     onClick={(e) => {
                       e.stopPropagation();
-                      navigate(`/tickets/${listing.id}`);
+                      navigate(`/tickets/${listingId}`);
                     }}
                     className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white"
                   >
@@ -367,18 +382,19 @@ export const Marketplace: React.FC = () => {
                   </Button>
                 </div>
               </div>
-            ))}
+            );
+          })}
         </div>
 
         {/* Empty State Placeholder */}
-        {listings.length === 0 && (
+        {filteredListings.length === 0 && (
           <div className="text-center py-20">
             <ShoppingCart className="w-16 h-16 text-slate-700 mx-auto mb-4" />
             <h3 className="text-xl font-semibold text-white mb-2">
-              No listings available
+              No listings found
             </h3>
             <p className="text-slate-400">
-              Check back later for new ticket listings
+              Try adjusting your filters or check back later for new listings
             </p>
           </div>
         )}

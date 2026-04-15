@@ -47,7 +47,7 @@ export const Explore: React.FC = () => {
 
   const publicEvents = useMemo(() => {
     return events.filter((event) =>
-      ['funded', 'ticketing', 'ongoing', 'completed'].includes(event.status || '')
+      ['funding', 'funded', 'ticketing', 'ongoing', 'completed'].includes(event.status || '')
     );
   }, [events]);
 

@@ -84,7 +84,7 @@ router.get(
  * @swagger
  * /events:
  *   post:
- *     summary: Create new event (authenticated creator or admin)
+ *     summary: Create new event draft (authenticated user or admin)
  *     tags: [Events]
  *     security:
  *       - bearerAuth: []
@@ -168,7 +168,7 @@ router.get(
  *       401:
  *         description: Not authenticated
  *       403:
- *         description: Not authorized (requires organizer role)
+ *         description: Not authorized
  *       500:
  *         description: Server error
  */
@@ -210,7 +210,7 @@ router.get("/:id", controller.getEventById);
  * @swagger
  * /events/{id}:
  *   patch:
- *     summary: Update event (creator/admin, must own event unless admin)
+ *     summary: Update event content (creator/admin, must own event unless admin)
  *     tags: [Events]
  *     security:
  *       - bearerAuth: []
@@ -263,7 +263,7 @@ router.get("/:id", controller.getEventById);
  *       401:
  *         description: Not authenticated
  *       403:
- *         description: Not authorized (requires organizer role and ownership)
+ *         description: Not authorized (ownership required unless admin)
  *       404:
  *         description: Event not found
  *       500:
@@ -283,7 +283,7 @@ router.patch(
  * @swagger
  * /events/{id}:
  *   delete:
- *     summary: Delete event (creator/admin, must own event, draft only)
+ *     summary: Delete draft event (creator/admin, must own event, draft only)
  *     tags: [Events]
  *     security:
  *       - bearerAuth: []
@@ -303,7 +303,7 @@ router.patch(
  *       401:
  *         description: Not authenticated
  *       403:
- *         description: Not authorized (requires organizer role and ownership)
+ *         description: Not authorized (ownership required unless admin)
  *       404:
  *         description: Event not found
  *       500:
@@ -393,7 +393,7 @@ router.post(
  *       401:
  *         description: Not authenticated
  *       403:
- *         description: Not authorized (requires organizer role and ownership)
+ *         description: Not authorized (ownership required unless admin)
  *       404:
  *         description: Event or image not found
  *       500:

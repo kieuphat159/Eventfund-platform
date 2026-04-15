@@ -52,6 +52,29 @@ class AdminController {
     });
   });
 
+  getEventById = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    const event = await this.adminService.getEventById(id);
+
+    res.status(200).json({
+      success: true,
+      data: event
+    });
+  });
+
+  updateEvent = asyncHandler(async (req, res) => {
+    const updates = req.validated?.body || req.body;
+    const { id } = req.params;
+
+    const event = await this.adminService.updateEvent(id, updates);
+
+    res.status(200).json({
+      success: true,
+      data: event
+    });
+  });
+
   updateEventStatus = asyncHandler(async (req, res) => {
     const body = req.validated?.body || req.body;
     const { status } = body;
@@ -62,6 +85,18 @@ class AdminController {
     res.status(200).json({
       success: true,
       data: event
+    });
+  });
+
+  getEventInvestments = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const query = req.validated?.query || req.query;
+
+    const investments = await this.adminService.getEventInvestments(id, query);
+
+    res.status(200).json({
+      success: true,
+      data: investments
     });
   });
 
