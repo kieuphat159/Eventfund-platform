@@ -93,7 +93,6 @@ export default defineConfig({
   optimizeDeps: {
     include: [
       '@web3auth/modal',
-      '@web3auth/base',
       'viem',
       'permissionless',
       'readable-stream',

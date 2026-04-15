@@ -19,6 +19,7 @@ import {
 import { Button } from "../../components/ui/button";
 import { StatusBadge } from "../../components/StatusBadge";
 import { getAdminEvents, type EventItem } from "../../services/events.service";
+import { calculatePercentage, formatIntegerWithUnit } from "../../lib/utils";
 
 const EVENT_STATUSES = [
   "draft",
@@ -115,27 +116,32 @@ export const EventManagement: React.FC = () => {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold text-white mb-2">Event Management</h1>
-        <p className="text-slate-400">Monitor and manage all platform events</p>
+        <h1 className="text-3xl font-semibold tracking-tight text-white mb-2">
+          Event Management
+        </h1>
+        <p className="text-slate-300">Monitor and manage all platform events</p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         {stats.map((stat, index) => (
-          <Card key={index} className="bg-slate-900 border-slate-800">
+          <Card
+            key={index}
+            className="bg-slate-900/90 border-slate-700 hover:border-cyan-400/40 transition-colors"
+          >
             <CardContent className="p-6">
               <div
                 className={`w-12 h-12 bg-gradient-to-br ${stat.color} rounded-xl flex items-center justify-center mb-4`}
               >
                 <Calendar className="w-6 h-6 text-white" />
               </div>
-              <p className="text-sm text-slate-400 mb-1">{stat.label}</p>
+              <p className="text-sm text-slate-300 mb-1">{stat.label}</p>
               <p className="text-3xl font-bold text-white">{stat.value}</p>
             </CardContent>
           </Card>
         ))}
       </div>
 
-      <Card className="bg-slate-900 border-slate-800">
+      <Card className="bg-slate-900/90 border-slate-700">
         <CardContent className="p-6">
           <div className="grid md:grid-cols-3 gap-4">
             <div className="relative">
@@ -181,7 +187,7 @@ export const EventManagement: React.FC = () => {
         </CardContent>
       </Card>
 
-      <Card className="bg-slate-900 border-slate-800">
+      <Card className="bg-slate-900/90 border-slate-700">
         <CardHeader>
           <CardTitle className="text-white">All Events</CardTitle>
           <CardDescription className="text-slate-400">
@@ -196,11 +202,19 @@ export const EventManagement: React.FC = () => {
             ) : (
               filteredEvents.map((event) => {
                 const eventId = event._id || event.id;
+                const fundingProgress = Math.min(
+                  calculatePercentage(
+                    event.currentFunding,
+                    event.fundingGoal,
+                    1,
+                  ),
+                  100,
+                );
 
                 return (
                   <div
                     key={eventId}
-                    className="p-4 rounded-lg bg-slate-800/50 border border-slate-700 hover:border-slate-600 transition-all"
+                    className="p-5 rounded-xl bg-slate-800/60 border border-slate-700 hover:border-cyan-400/40 transition-colors"
                   >
                     <div className="flex items-start justify-between mb-3">
                       <div className="flex-1">
@@ -214,9 +228,32 @@ export const EventManagement: React.FC = () => {
                           />
                         </div>
 
-                        <p className="text-sm text-slate-400 mb-3">
+                        <p className="text-sm text-slate-300 mb-4">
                           {event.description || "No description"}
                         </p>
+                      </div>
+                    </div>
+
+                    <div className="rounded-lg border border-slate-700 bg-slate-900/60 p-3 mb-4">
+                      <div className="flex items-center justify-between text-xs text-slate-300 mb-2">
+                        <span>Funding progress</span>
+                        <span>{fundingProgress.toFixed(1)}%</span>
+                      </div>
+                      <div className="h-2 rounded-full bg-slate-700 overflow-hidden">
+                        <div
+                          className="h-full bg-gradient-to-r from-cyan-400 via-emerald-400 to-amber-300"
+                          style={{ width: `${fundingProgress}%` }}
+                        />
+                      </div>
+                      <div className="mt-2 grid md:grid-cols-2 gap-2 text-xs text-slate-400">
+                        <span>
+                          Raised:{" "}
+                          {formatIntegerWithUnit(event.currentFunding, "wei")}
+                        </span>
+                        <span>
+                          Goal:{" "}
+                          {formatIntegerWithUnit(event.fundingGoal, "wei")}
+                        </span>
                       </div>
                     </div>
 

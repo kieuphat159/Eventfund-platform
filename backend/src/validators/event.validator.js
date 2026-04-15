@@ -12,7 +12,6 @@ const bigIntString = Joi.string()
 
 // Venue schema
 const venueSchema = Joi.object({
-  name: Joi.string().trim().optional(),
   address: Joi.string().trim().required(),
 });
 

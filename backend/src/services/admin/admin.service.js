@@ -2,6 +2,7 @@ import * as userRepo from '../../repositories/user.repo.js';
 import * as eventRepo from '../../repositories/event.repo.js';
 import * as ticketRepo from '../../repositories/ticket.repo.js';
 import * as listingRepo from '../../repositories/listing.repo.js';
+import * as shareRepo from '../../repositories/share.repo.js';
 import mongoose from 'mongoose';
 import { ethers } from 'ethers';
 import UploadService from '../upload/upload.service.js';
@@ -202,6 +203,80 @@ export async function getEvents(query = {}, repos = {}) {
 }
 
 /**
+ * Get a single event with admin-facing investment summary
+ * @param {string} eventId - Event ID
+ * @param {Object} repos - Injected repositories (for testing)
+ * @returns {Promise<Object>} Event with lightweight admin summary
+ */
+export async function getEventById(eventId, repos = {}) {
+  const eventRepository = repos.eventRepo || eventRepo;
+  const shareRepository = repos.shareRepo || shareRepo;
+
+  const event = await eventRepository.findById(eventId);
+
+  if (!event) {
+    throw new NotFoundError('Event not found');
+  }
+
+  const investorCount = await shareRepository.countShares({ eventId });
+
+  return {
+    ...event,
+    adminSummary: {
+      investorCount,
+    },
+  };
+}
+
+/**
+ * Update an event as admin
+ * @param {string} eventId - Event ID
+ * @param {Object} updates - Event update payload
+ * @param {Object} repos - Injected repositories (for testing)
+ * @returns {Promise<Object>} Updated event
+ */
+export async function updateEvent(eventId, updates, repos = {}) {
+  const eventRepository = repos.eventRepo || eventRepo;
+
+  const event = await eventRepository.findById(eventId);
+
+  if (!event) {
+    throw new NotFoundError('Event not found');
+  }
+
+  const allowedFields = [
+    'title',
+    'description',
+    'category',
+    'startDate',
+    'endDate',
+    'fundingGoal',
+    'minStakeRequired',
+    'fundingDeadline',
+    'status',
+    'venue',
+    'imageUrls',
+    'metadataUri',
+    'totalTickets',
+    'ticketTiers',
+    'ticketUsageThreshold',
+  ];
+
+  const sanitizedUpdates = {};
+  allowedFields.forEach((field) => {
+    if (updates[field] !== undefined) {
+      sanitizedUpdates[field] = updates[field];
+    }
+  });
+
+  if (Object.keys(sanitizedUpdates).length === 0) {
+    throw new BadRequestError('No valid event fields were provided');
+  }
+
+  return await eventRepository.updateById(eventId, sanitizedUpdates);
+}
+
+/**
  * Force update event status
  * @param {string} eventId - Event ID
  * @param {string} newStatus - New status
@@ -288,6 +363,80 @@ export async function updateEventStatus(eventId, newStatus, options = {}, repos 
   }
 
   return await eventRepository.updateById(eventId, { status: resolvedStatus });
+}
+
+/**
+ * Get investments for a single event
+ * @param {string} eventId - Event ID
+ * @param {Object} query - Pagination query
+ * @param {Object} repos - Injected repositories (for testing)
+ * @returns {Promise<Object>} Paginated investments with summary
+ */
+export async function getEventInvestments(eventId, query = {}, repos = {}) {
+  const eventRepository = repos.eventRepo || eventRepo;
+  const shareRepository = repos.shareRepo || shareRepo;
+
+  const event = await eventRepository.findById(eventId);
+
+  if (!event) {
+    throw new NotFoundError('Event not found');
+  }
+
+  const {
+    page = 1,
+    limit = 20,
+    sort = '-contributionAmount',
+  } = query;
+
+  const investments = await shareRepository.findByEvent(
+    eventId,
+    {
+      page: parseInt(page, 10),
+      limit: Math.min(parseInt(limit, 10), 100),
+      sort,
+      lean: true,
+    },
+  );
+
+  const confirmedContributions = await Contribution.find({
+    eventId,
+    status: 'confirmed',
+    type: 'donator_contribution',
+  })
+    .select('amount')
+    .lean();
+
+  const totalInvested = confirmedContributions.reduce(
+    (sum, contribution) => addBigInt(sum, contribution.amount || '0'),
+    '0',
+  );
+
+  const docs = Array.isArray(investments.docs) ? investments.docs : [];
+  const largestInvestment = docs.reduce(
+    (max, share) =>
+      compareBigInt(share.contributionAmount || '0', max) > 0
+        ? share.contributionAmount || '0'
+        : max,
+    '0',
+  );
+
+  return {
+    ...investments,
+    event: {
+      _id: event._id,
+      title: event.title,
+      status: event.status,
+      fundingGoal: event.fundingGoal,
+      currentFunding: event.currentFunding,
+    },
+    summary: {
+      totalInvestors: investments.totalDocs || docs.length,
+      totalInvested,
+      averageInvestment: calculateAverage(totalInvested, docs.length),
+      largestInvestment,
+      contributionCount: confirmedContributions.length,
+    },
+  };
 }
 
 /**

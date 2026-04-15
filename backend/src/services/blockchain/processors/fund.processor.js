@@ -12,6 +12,7 @@ import {
   planReorgSafeSync,
   readReorgPolicyFromEnv,
 } from "../sync/reorgPolicy.js";
+import { addBigInt, compareBigInt, toBigInt } from "../../../utils/bigint.js";
 
 // ==================== REPOSITORIES ====================
 import eventRepo from "../../../repositories/event.repo.js";
@@ -36,11 +37,14 @@ const toNumberSafe = (v) => {
   return Number.isFinite(n) ? n : 0;
 };
 
+const toAmountString = (v) =>
+  v === undefined || v === null ? "0" : String(v);
+
 const lowerAddress = (v) => (v ? String(v).toLowerCase() : undefined);
 
 function getEventStatusLabel(statusValue) {
   const map = {
-    0: "draft", // Changed from "none" to match Event schema enum
+    0: "draft",
     1: "funding",
     2: "funded",
     3: "ticketing",
@@ -320,7 +324,7 @@ async function handleContributionMade(log, eventDoc) {
 async function handleSharesIssued(log, eventDoc) {
   const { args } = log;
   const holder = lowerAddress(args.donator);
-  const sharesMinted = toNumberSafe(args.sharesMinted);
+  const sharesMinted = toAmountString(args.sharesMinted);
 
   // mintedShares not incremented here; rebuildFundState is the source of truth
   await shareRepo.upsertSharesIssued(eventDoc._id, holder, sharesMinted);
@@ -523,7 +527,7 @@ async function handleRoyaltyDeposited(log, eventDoc) {
 async function handleContributionRefunded(log, eventDoc) {
   const { args, transactionHash } = log;
   const contributor = lowerAddress(args.donator);
-  const amount = toNumberSafe(args.amount);
+  const amount = toAmountString(args.amount);
 
   await contributionRepo.markDonatorContributionsAsRefunded(eventDoc._id, contributor);
 

@@ -9,13 +9,15 @@ const revenueDistributionSchema = new mongoose.Schema({
 
   // Revenue breakdown
   totalRevenue: {
-    type: Number,
+    type: String,
     required: true,
+    default: "0",
   },
 
   platformFee: {
-    type: Number, // Phí sàn (vd: 5%)
+    type: String, // Phí sàn (vd: 5%)
     required: true,
+    default: "0",
   },
 
   platformFeePercentage: {
@@ -24,8 +26,9 @@ const revenueDistributionSchema = new mongoose.Schema({
   },
 
   organizerShare: {
-    type: Number, // Phần của organizer
+    type: String, // Phần của organizer
     required: true,
+    default: "0",
   },
 
   organizerSharePercentage: {
@@ -34,8 +37,14 @@ const revenueDistributionSchema = new mongoose.Schema({
   },
 
   donatorPool: {
-    type: Number, // Pool chia cho donators
+    type: String, // Pool chia cho donators
     required: true,
+    default: "0",
+  },
+
+  accRewardPerShare: {
+    type: String,
+    default: "0",
   },
 
   // Accumulated reward per share snapshot at distribution time
