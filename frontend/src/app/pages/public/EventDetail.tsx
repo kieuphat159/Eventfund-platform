@@ -18,11 +18,13 @@ import { ImageWithFallback } from "../../components/figma/ImageWithFallback";
 import { useAuth } from "../../contexts/AuthContext";
 import { getEventById, type EventItem } from "../../services/events.service";
 import { investInEvent } from "../../services/investment.service";
-import { calculatePercentage, formatIntegerWithUnit } from "../../lib/utils";
+import { purchaseTicket } from "../../services/tickets.service";
+import { useWeb3Auth } from "@web3auth/modal/react";
 
 export const EventDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const { connectWallet, user } = useAuth();
+  const { web3Auth } = useWeb3Auth();
   const [event, setEvent] = useState<EventItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -30,6 +32,30 @@ export const EventDetail: React.FC = () => {
   const [investing, setInvesting] = useState(false);
   const [investError, setInvestError] = useState("");
   const [investSuccess, setInvestSuccess] = useState("");
+  const [buying, setBuying] = useState(false);
+  const [buyPopup, setBuyPopup] = useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(null);
+  const [purchaseConfirmTier, setPurchaseConfirmTier] = useState<string | null>(
+    null,
+  );
+
+  useEffect(() => {
+    if (!buyPopup) return;
+
+    const timeoutId = window.setTimeout(() => {
+      setBuyPopup(null);
+    }, 3000);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [buyPopup]);
+
+  const showBuyPopup = (type: "success" | "error", message: string) => {
+    setBuyPopup({ type, message });
+  };
 
   useEffect(() => {
     const fetchEvent = async () => {
@@ -126,48 +152,113 @@ export const EventDetail: React.FC = () => {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-slate-950 py-10 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-6xl mx-auto animate-pulse space-y-6">
-          <div className="h-12 w-2/3 rounded-xl bg-slate-800" />
-          <div className="h-[280px] rounded-2xl bg-slate-900" />
-          <div className="grid md:grid-cols-3 gap-4">
-            <div className="h-36 rounded-xl bg-slate-900" />
-            <div className="h-36 rounded-xl bg-slate-900" />
-            <div className="h-36 rounded-xl bg-slate-900" />
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const handlePurchaseTicket = async () => {
+    if (!event?._id) return;
 
-  if (error) {
-    return (
-      <div className="min-h-screen bg-slate-950 px-4 py-16">
-        <div className="mx-auto max-w-3xl rounded-2xl border border-red-500/40 bg-red-950/30 p-6 text-red-200">
-          {error}
-        </div>
-      </div>
-    );
-  }
+    if (!user?.walletAddress) {
+      try {
+        await connectWallet();
+        showBuyPopup(
+          "success",
+          "Wallet connected. Please click Purchase Ticket again to continue.",
+        );
+      } catch (err) {
+        showBuyPopup(
+          "error",
+          err instanceof Error ? err.message : "Failed to connect wallet",
+        );
+      }
+      return;
+    }
 
-  if (!event) {
-    return (
-      <div className="min-h-screen bg-slate-950 px-4 py-16">
-        <div className="mx-auto max-w-3xl rounded-2xl border border-slate-800 bg-slate-900/80 p-6 text-slate-200">
-          Event not found.
-        </div>
-      </div>
-    );
-  }
+    const provider = web3Auth?.provider as
+      | {
+          request: (args: {
+            method: string;
+            params?: unknown[];
+          }) => Promise<unknown>;
+        }
+      | undefined;
+
+    if (!provider?.request) {
+      showBuyPopup(
+        "error",
+        "Wallet provider is not ready. Please reconnect wallet and try again.",
+      );
+      return;
+    }
+
+    setBuying(true);
+    try {
+      const result = await purchaseTicket(
+        provider,
+        { eventId: event._id },
+        user.walletAddress,
+      );
+      showBuyPopup("success", `Purchase successful. Tx: ${result.txHash}`);
+
+      const refreshedEvent = await getEventById(event._id);
+      setEvent(refreshedEvent);
+    } catch (err) {
+      showBuyPopup(
+        "error",
+        err instanceof Error ? err.message : "Ticket purchase failed",
+      );
+    } finally {
+      setBuying(false);
+      setPurchaseConfirmTier(null);
+    }
+  };
+
+  const handlePurchaseClick = async (tierName?: string) => {
+    if (!user?.walletAddress) {
+      try {
+        await connectWallet();
+        showBuyPopup(
+          "success",
+          "Wallet connected. Please click Purchase Ticket again to continue.",
+        );
+      } catch (err) {
+        showBuyPopup(
+          "error",
+          err instanceof Error ? err.message : "Failed to connect wallet",
+        );
+      }
+      return;
+    }
+
+    setPurchaseConfirmTier(tierName || "this ticket");
+  };
+
+  if (loading) return <div className="p-8 text-white">Loading event...</div>;
+  if (error) return <div className="p-8 text-red-400">{error}</div>;
+  if (!event) return <div className="p-8 text-white">Event not found</div>;
 
   return (
     <div className="min-h-screen bg-slate-950 py-8">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
-        <section className="relative overflow-hidden rounded-3xl border border-slate-800 bg-slate-900/70 p-6 sm:p-8">
-          <div className="absolute -top-24 -right-24 h-56 w-56 rounded-full bg-cyan-500/15 blur-3xl" />
-          <div className="absolute -bottom-28 -left-20 h-56 w-56 rounded-full bg-emerald-500/10 blur-3xl" />
+      {buyPopup && (
+        <div className="fixed top-4 right-4 z-[60]">
+          <div
+            className={`min-w-[260px] max-w-[360px] rounded-lg border px-4 py-3 text-sm shadow-lg ${
+              buyPopup.type === "success"
+                ? "bg-emerald-900/95 border-emerald-600 text-emerald-100"
+                : "bg-red-900/95 border-red-600 text-red-100"
+            }`}
+          >
+            {buyPopup.message}
+          </div>
+        </div>
+      )}
+
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="grid lg:grid-cols-2 gap-8 mb-8">
+          <div className="aspect-video rounded-xl overflow-hidden">
+            <ImageWithFallback
+              src={coverImage}
+              alt={event.title || "Event image"}
+              className="w-full h-full object-cover"
+            />
+          </div>
 
           <div className="relative grid lg:grid-cols-2 gap-8">
             <div className="aspect-video rounded-2xl overflow-hidden border border-slate-800">
@@ -406,6 +497,37 @@ export const EventDetail: React.FC = () => {
           </CardContent>
         </Card>
       </div>
+
+      {purchaseConfirmTier && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+          <div className="bg-slate-900 p-6 rounded-xl border border-slate-700 w-[340px]">
+            <h3 className="text-white mb-2 font-semibold">Confirm Purchase</h3>
+            <p className="text-slate-300 text-sm mb-4">
+              Bạn có muốn mua vé{" "}
+              <span className="font-semibold">{purchaseConfirmTier}</span>{" "}
+              không?
+            </p>
+
+            <div className="flex gap-2">
+              <Button
+                className="flex-1 bg-purple-600 hover:bg-purple-700 text-white"
+                disabled={buying}
+                onClick={handlePurchaseTicket}
+              >
+                {buying ? "Purchasing..." : "Confirm"}
+              </Button>
+              <Button
+                variant="outline"
+                className="flex-1"
+                disabled={buying}
+                onClick={() => setPurchaseConfirmTier(null)}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

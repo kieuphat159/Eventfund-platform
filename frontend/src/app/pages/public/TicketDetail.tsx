@@ -23,6 +23,8 @@ import { Card, CardContent } from "../../components/ui/card";
 import { Badge } from "../../components/ui/badge";
 import { ImageWithFallback } from "../../components/figma/ImageWithFallback";
 import { useAuth } from "../../contexts/AuthContext";
+import { ethers } from "ethers";
+import { useWeb3Auth } from "@web3auth/modal/react";
 import {
   listingService,
   type ApiEvent,
@@ -31,7 +33,9 @@ import {
 } from "../../services/listings.service";
 
 type ListingEvent = ApiEvent & {
-  venue?: string;
+  venue?: {
+    address: string;
+  };
   description?: string;
   contractEventId?: string;
   network?: string;
@@ -42,15 +46,43 @@ type ListingTicket = ApiTicket & {
   metadataUri?: string;
 };
 
+const formatTicketType = (type?: string) => {
+  if (!type) return "Standard";
+  return type.charAt(0).toUpperCase() + type.slice(1);
+};
+
 export const TicketDetail: React.FC = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, connectWallet } = useAuth();
+  const { web3Auth } = useWeb3Auth();
   const [selectedImage, setSelectedImage] = React.useState(0);
   const [copiedAddress, setCopiedAddress] = React.useState(false);
 
   const [listing, setListing] = React.useState<ApiListing | null>(null);
   const [loading, setLoading] = React.useState(true);
+  const [buying, setBuying] = React.useState(false);
+  const [showBuyConfirm, setShowBuyConfirm] = React.useState(false);
+  const [buyPopup, setBuyPopup] = React.useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(null);
+
+  React.useEffect(() => {
+    if (!buyPopup) return;
+
+    const timeoutId = window.setTimeout(() => {
+      setBuyPopup(null);
+    }, 3000);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [buyPopup]);
+
+  const showListingPopup = (type: "success" | "error", message: string) => {
+    setBuyPopup({ type, message });
+  };
 
   React.useEffect(() => {
     const fetchData = async () => {
@@ -81,7 +113,6 @@ export const TicketDetail: React.FC = () => {
     listing && typeof listing.ticketId === "object"
       ? (listing.ticketId as ListingTicket)
       : null;
-  console.log("Listing:", listing);
   if (!listing) {
     return (
       <div className="min-h-screen bg-slate-950 py-12">
@@ -106,8 +137,9 @@ export const TicketDetail: React.FC = () => {
   }
 
   const parseEth = (value?: string | number) => {
-    const parsed = Number(value ?? 0);
-    return Number.isFinite(parsed) ? parsed : 0;
+    if (!value) return 0;
+
+    return Number(ethers.formatEther(value.toString()));
   };
 
   const shortenAddress = (address?: string) => {
@@ -138,7 +170,6 @@ export const TicketDetail: React.FC = () => {
   const listingPrice = parseEth(listing.price);
   const maxPrice = parseEth(listing.maxPrice);
   const originalPrice = parseEth(ticket?.originalPrice);
-  const lastSalePrice = parseEth(ticket?.originalPrice);
   const belowMaxPct =
     maxPrice > 0
       ? Math.max(0, ((maxPrice - listingPrice) / maxPrice) * 100)
@@ -155,13 +186,9 @@ export const TicketDetail: React.FC = () => {
     ? `https://etherscan.io/tx/${listing.txHash}`
     : "#";
 
-  // Gallery images (main image + additional placeholder images)
-  const galleryImages = [
-    ...(event?.imageUrls ?? []),
-    "https://images.unsplash.com/photo-1540039155733-5bb30b53aa14?w=800",
-    "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=800",
-    "https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=800",
-  ];
+  // Gallery images
+
+  const galleryImages = event?.imageUrls?.length ? event.imageUrls : [];
 
   const handleCopyAddress = (address: string) => {
     navigator.clipboard.writeText(address);
@@ -169,18 +196,87 @@ export const TicketDetail: React.FC = () => {
     setTimeout(() => setCopiedAddress(false), 2000);
   };
 
-  const handleBuyNow = () => {
-    if (user?.role === "public") {
-      alert("Please connect your wallet to purchase tickets");
-    } else {
-      alert(
-        "Purchase functionality would be integrated with smart contract here",
+  const handleBuyNow = async () => {
+    if (!user?.walletAddress) {
+      try {
+        await connectWallet();
+        showListingPopup(
+          "success",
+          "Wallet connected. Please click Buy Now again to continue.",
+        );
+      } catch (err) {
+        showListingPopup(
+          "error",
+          err instanceof Error ? err.message : "Failed to connect wallet",
+        );
+      }
+      return;
+    }
+
+    setShowBuyConfirm(true);
+  };
+
+  const handleConfirmBuy = async () => {
+    if (!listing?._id || !user?.walletAddress) {
+      showListingPopup("error", "Missing listing or wallet information");
+      return;
+    }
+
+    const provider = web3Auth?.provider as
+      | {
+          request: (args: {
+            method: string;
+            params?: unknown[];
+          }) => Promise<unknown>;
+        }
+      | undefined;
+
+    if (!provider?.request) {
+      showListingPopup(
+        "error",
+        "Wallet provider is not ready. Please reconnect wallet and try again.",
       );
+      return;
+    }
+
+    setBuying(true);
+    try {
+      const result = await listingService.buy(
+        provider,
+        listing._id,
+        user.walletAddress,
+      );
+      showListingPopup("success", `Purchase successful. Tx: ${result.txHash}`);
+
+      const refreshed = await listingService.getById(listing._id);
+      setListing(refreshed);
+      setShowBuyConfirm(false);
+    } catch (err) {
+      showListingPopup(
+        "error",
+        err instanceof Error ? err.message : "Failed to purchase ticket",
+      );
+    } finally {
+      setBuying(false);
     }
   };
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-950 via-purple-950/20 to-slate-950 py-8">
+      {buyPopup && (
+        <div className="fixed top-4 right-4 z-[60]">
+          <div
+            className={`min-w-[260px] max-w-[360px] rounded-lg border px-4 py-3 text-sm shadow-lg ${
+              buyPopup.type === "success"
+                ? "bg-emerald-900/95 border-emerald-600 text-emerald-100"
+                : "bg-red-900/95 border-red-600 text-red-100"
+            }`}
+          >
+            {buyPopup.message}
+          </div>
+        </div>
+      )}
+
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Back Button */}
         <Button
@@ -199,7 +295,7 @@ export const TicketDetail: React.FC = () => {
             {/* Main Image */}
             <div className="aspect-video rounded-2xl overflow-hidden bg-slate-900 border border-slate-800">
               <ImageWithFallback
-                src={galleryImages[selectedImage]}
+                src={galleryImages[selectedImage] || ""}
                 alt={event?.title || "Event image"}
                 className="w-full h-full object-cover"
               />
@@ -242,7 +338,7 @@ export const TicketDetail: React.FC = () => {
                   <MapPin className="w-5 h-5 text-orange-400 mx-auto mb-2" />
                   <p className="text-xs text-slate-500 mb-1">Location</p>
                   <p className="text-sm text-white font-medium">
-                    {event?.venue || "N/A"}
+                    {event?.venue?.address || "N/A"}
                   </p>
                 </CardContent>
               </Card>
@@ -269,7 +365,7 @@ export const TicketDetail: React.FC = () => {
                   <div>
                     <p className="text-xs text-slate-500 mb-1">Ticket Type</p>
                     <p className="text-xl font-bold text-white">
-                      {ticket?.ticketType || "standard"}
+                      {formatTicketType(ticket?.ticketType)}
                     </p>
                   </div>
                   <Ticket className="w-8 h-8 text-purple-400" />
@@ -283,11 +379,11 @@ export const TicketDetail: React.FC = () => {
                 <p className="text-sm text-slate-500 mb-2">Current Price</p>
                 <div className="flex items-baseline gap-2 mb-3">
                   <span className="text-4xl font-bold text-purple-400">
-                    {listingPrice.toFixed(4)}
+                    {listingPrice}
                   </span>
                   <span className="text-xl text-slate-400">ETH</span>
                   <span className="text-sm text-slate-500 ml-2">
-                    (≈ ${(listingPrice * 2400).toFixed(2)} USD)
+                    (≈ ${(Number(listingPrice) * 2400).toFixed(2)} USD)
                   </span>
                 </div>
                 <div className="flex items-center gap-2 text-sm text-green-400">
@@ -329,10 +425,7 @@ export const TicketDetail: React.FC = () => {
                     <p className="text-xs text-slate-500">Location</p>
                   </div>
                   <p className="text-sm text-white font-medium">
-                    {event?.venue || "N/A"}
-                  </p>
-                  <p className="text-xs text-slate-400 mt-1">
-                    {event?._id || "Event ID unavailable"}
+                    {event?.venue?.address || "N/A"}
                   </p>
                 </CardContent>
               </Card>
@@ -412,6 +505,7 @@ export const TicketDetail: React.FC = () => {
                 <Button
                   className="w-full h-12 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white text-base font-semibold"
                   onClick={handleBuyNow}
+                  disabled={buying}
                 >
                   <Wallet className="w-5 h-5 mr-2" />
                   Connect Wallet to Buy
@@ -420,17 +514,14 @@ export const TicketDetail: React.FC = () => {
                 <Button
                   className="w-full h-12 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white text-base font-semibold"
                   onClick={handleBuyNow}
+                  disabled={buying}
                 >
                   <ShoppingCart className="w-5 h-5 mr-2" />
-                  Buy Now for {listingPrice.toFixed(4)} ETH
+                  {buying
+                    ? "Processing purchase..."
+                    : `Buy Now for ${listingPrice.toFixed(4)} ETH`}
                 </Button>
               )}
-              <Button
-                variant="outline"
-                className="w-full h-12 border-slate-800 text-white hover:bg-slate-800"
-              >
-                Make Offer
-              </Button>
             </div>
 
             {/* Security Notice */}
@@ -725,14 +816,7 @@ export const TicketDetail: React.FC = () => {
                       {maxPrice > 0 ? `${maxPrice.toFixed(4)} ETH` : "N/A"}
                     </span>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-slate-400">Last Sale</span>
-                    <span className="text-sm text-white font-medium">
-                      {lastSalePrice > 0
-                        ? `${lastSalePrice.toFixed(4)} ETH`
-                        : "N/A"}
-                    </span>
-                  </div>
+                  <div className="flex items-center justify-between"></div>
                   <div className="pt-3 border-t border-slate-800">
                     <div className="flex items-center justify-between">
                       <span className="text-sm text-slate-400">
@@ -838,6 +922,40 @@ export const TicketDetail: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {showBuyConfirm && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+          <div className="bg-slate-900 p-6 rounded-xl border border-slate-700 w-[360px]">
+            <h3 className="text-white mb-2 font-semibold">Confirm Purchase</h3>
+            <p className="text-slate-300 text-sm mb-4">
+              Do you want to purchase ticket{" "}
+              <span className="font-semibold">#{listing.tokenId}</span> for{" "}
+              <span className="font-semibold">
+                {listingPrice.toFixed(4)} ETH
+              </span>
+              ?
+            </p>
+
+            <div className="flex gap-2">
+              <Button
+                className="flex-1 bg-purple-600 hover:bg-purple-700 text-white"
+                disabled={buying}
+                onClick={handleConfirmBuy}
+              >
+                {buying ? "Purchasing..." : "Confirm"}
+              </Button>
+              <Button
+                variant="outline"
+                className="flex-1"
+                disabled={buying}
+                onClick={() => setShowBuyConfirm(false)}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

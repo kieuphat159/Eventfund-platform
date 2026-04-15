@@ -1,4 +1,4 @@
-import { api } from '../lib/api';
+import { api } from "../lib/api";
 
 export interface ApiEvent {
   _id?: string;
@@ -15,7 +15,8 @@ export interface ApiTicket {
   tokenId: string;
   originalPrice?: string;
   ticketType?: string;
-  status?: 'minted' | 'sold' | 'used' | 'expired';
+  status?: "minted" | "sold" | "used" | "expired";
+  isListed?: boolean;
   currentOwner?: string;
   createdAt?: string;
   soldAt?: string;
@@ -43,20 +44,75 @@ interface TicketDetailResponse {
   message?: string;
 }
 
+export interface PurchaseIntentPayload {
+  eventId?: string;
+  tokenId?: string;
+}
+
+export interface PurchaseIntentTransaction {
+  to: string;
+  data: string;
+  value: string;
+  chainId: string;
+  functionName?: string;
+}
+
+export interface PurchaseIntentData {
+  tokenId: string;
+  eventId: string;
+  buyer: string;
+  transaction: PurchaseIntentTransaction;
+}
+
+interface PurchaseIntentResponse {
+  success: boolean;
+  data?: PurchaseIntentData;
+  message?: string;
+}
+
+export interface ConfirmPurchasePayload {
+  txHash: string;
+  tokenId?: string;
+  buyerWallet?: string;
+}
+
+export interface ConfirmPurchaseData {
+  synced: boolean;
+  alreadySynced: boolean;
+  txHash: string;
+  ticket?: ApiTicket;
+}
+
+interface ConfirmPurchaseResponse {
+  success: boolean;
+  data?: ConfirmPurchaseData;
+  message?: string;
+}
+
+export interface Eip1193Provider {
+  request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
+}
+
+export interface PurchaseTicketResult {
+  txHash: string;
+  intent: PurchaseIntentData;
+  confirmation: ConfirmPurchaseData | null;
+}
+
 function getAuthHeaders(): HeadersInit {
-  const jwtToken = localStorage.getItem('jwtToken');
+  const jwtToken = localStorage.getItem("jwtToken");
   return jwtToken ? { Authorization: `Bearer ${jwtToken}` } : {};
 }
 
 function normalizeTicket(ticket: ApiTicket): ApiTicket {
-  if (typeof ticket.eventId === 'object' && ticket.eventId?._id) {
+  if (typeof ticket.eventId === "object" && ticket.eventId?._id) {
     return {
       ...ticket,
       eventIdRaw: ticket.eventId._id,
     };
   }
 
-  if (typeof ticket.eventId === 'string') {
+  if (typeof ticket.eventId === "string") {
     return {
       ...ticket,
       eventIdRaw: ticket.eventId,
@@ -66,7 +122,9 @@ function normalizeTicket(ticket: ApiTicket): ApiTicket {
   return ticket;
 }
 
-export async function getUserTickets(walletAddress: string): Promise<ApiTicket[]> {
+export async function getUserTickets(
+  walletAddress: string,
+): Promise<ApiTicket[]> {
   const payload = await api.get<TicketsResponse>(
     `/tickets/user/${walletAddress.toLowerCase()}?page=1&limit=100`,
   );
@@ -76,7 +134,7 @@ export async function getUserTickets(walletAddress: string): Promise<ApiTicket[]
 
 export interface GetTicketsParams {
   eventId?: string;
-  status?: 'minted' | 'sold' | 'used' | 'expired';
+  status?: "minted" | "sold" | "used" | "expired";
   owner?: string;
   page?: number;
   limit?: number;
@@ -91,17 +149,21 @@ export interface PaginatedTicketsResult {
   totalPages: number;
 }
 
-export async function getTickets(params: GetTicketsParams = {}): Promise<PaginatedTicketsResult> {
+export async function getTickets(
+  params: GetTicketsParams = {},
+): Promise<PaginatedTicketsResult> {
   const query = new URLSearchParams();
 
-  if (params.eventId) query.set('eventId', params.eventId);
-  if (params.status) query.set('status', params.status);
-  if (params.owner) query.set('owner', params.owner.toLowerCase());
-  query.set('page', String(params.page ?? 1));
-  query.set('limit', String(params.limit ?? 20));
-  if (params.sort) query.set('sort', params.sort);
+  if (params.eventId) query.set("eventId", params.eventId);
+  if (params.status) query.set("status", params.status);
+  if (params.owner) query.set("owner", params.owner.toLowerCase());
+  query.set("page", String(params.page ?? 1));
+  query.set("limit", String(params.limit ?? 20));
+  if (params.sort) query.set("sort", params.sort);
 
-  const payload = await api.get<TicketsResponse>(`/tickets?${query.toString()}`);
+  const payload = await api.get<TicketsResponse>(
+    `/tickets?${query.toString()}`,
+  );
   const data = payload.data;
 
   return {
@@ -113,12 +175,19 @@ export async function getTickets(params: GetTicketsParams = {}): Promise<Paginat
   };
 }
 
-export async function getTicketByTokenId(tokenId: string): Promise<ApiTicket | null> {
-  const payload = await api.get<TicketDetailResponse>(`/tickets/${encodeURIComponent(tokenId)}`);
+export async function getTicketByTokenId(
+  tokenId: string,
+): Promise<ApiTicket | null> {
+  const payload = await api.get<TicketDetailResponse>(
+    `/tickets/${encodeURIComponent(tokenId)}`,
+  );
   return payload.data ? normalizeTicket(payload.data) : null;
 }
 
-export async function markTicketAsUsed(tokenId: string, eventId?: string): Promise<ApiTicket | null> {
+export async function markTicketAsUsed(
+  tokenId: string,
+  eventId?: string,
+): Promise<ApiTicket | null> {
   const payload = await api.post<TicketDetailResponse>(
     `/tickets/${encodeURIComponent(tokenId)}/use`,
     {
@@ -130,3 +199,97 @@ export async function markTicketAsUsed(tokenId: string, eventId?: string): Promi
 
   return payload.data ? normalizeTicket(payload.data) : null;
 }
+
+export async function createPurchaseIntent(
+  payload: PurchaseIntentPayload,
+): Promise<PurchaseIntentData | null> {
+  const response = await api.post<PurchaseIntentResponse>(
+    "/tickets/purchase-intent",
+    payload,
+    { headers: getAuthHeaders() },
+  );
+
+  return response.data || null;
+}
+
+export async function confirmPurchaseTransaction(
+  payload: ConfirmPurchasePayload,
+): Promise<ConfirmPurchaseData | null> {
+  const response = await api.post<ConfirmPurchaseResponse>(
+    "/tickets/purchase/confirm",
+    payload,
+    { headers: getAuthHeaders() },
+  );
+
+  return response.data
+    ? {
+        ...response.data,
+        ticket: response.data.ticket
+          ? normalizeTicket(response.data.ticket)
+          : undefined,
+      }
+    : null;
+}
+
+function toHexValue(decimalString: string): string {
+  const value = BigInt(decimalString);
+  return `0x${value.toString(16)}`;
+}
+
+export async function purchaseTicket(
+  provider: Eip1193Provider,
+  payload: PurchaseIntentPayload,
+  buyerWallet?: string,
+): Promise<PurchaseTicketResult> {
+  if (!provider?.request) {
+    throw new Error("Wallet provider is unavailable");
+  }
+
+  const intent = await createPurchaseIntent(payload);
+  if (!intent?.transaction) {
+    throw new Error("Unable to create purchase intent");
+  }
+
+  const fromAddress = buyerWallet || intent.buyer;
+  if (!fromAddress) {
+    throw new Error("Buyer wallet address is required to purchase ticket");
+  }
+
+  const txHash = (await provider.request({
+    method: "eth_sendTransaction",
+    params: [
+      {
+        from: fromAddress,
+        to: intent.transaction.to,
+        data: intent.transaction.data,
+        value: toHexValue(intent.transaction.value),
+      },
+    ],
+  })) as string;
+
+  if (!txHash) {
+    throw new Error("Failed to send purchase transaction");
+  }
+
+  const confirmation = await confirmPurchaseTransaction({
+    txHash,
+    tokenId: intent.tokenId,
+    buyerWallet: fromAddress,
+  });
+
+  return {
+    txHash,
+    intent,
+    confirmation,
+  };
+}
+
+export const ticketsService = {
+  getUserTickets,
+  getTickets,
+  getTicketByTokenId,
+  markTicketAsUsed,
+  createPurchaseIntent,
+  confirmPurchaseTransaction,
+  purchaseTicket,
+};
