@@ -1,9 +1,13 @@
-import * as ListingRepo from '../../repositories/listing.repo.js';
-import * as TicketRepo from '../../repositories/ticket.repo.js';
-import { ethers } from 'ethers';
-import { multiplyBigInt, divideBigInt, toBigInt } from '../../utils/bigint.js';
-import { NotFoundError, ForbiddenError, BadRequestError } from '../../utils/customErrors.js';
-import { getMarketplace, provider } from '../blockchain/index.js';
+import * as ListingRepo from "../../repositories/listing.repo.js";
+import * as TicketRepo from "../../repositories/ticket.repo.js";
+import { ethers } from "ethers";
+import { multiplyBigInt, divideBigInt, toBigInt } from "../../utils/bigint.js";
+import {
+  NotFoundError,
+  ForbiddenError,
+  BadRequestError,
+} from "../../utils/customErrors.js";
+import { getMarketplace, provider } from "../blockchain/index.js";
 
 function normalizeTxHash(txHash) {
   return txHash?.toLowerCase();
@@ -11,7 +15,7 @@ function normalizeTxHash(txHash) {
 
 function validateTransactionHash(txHash) {
   if (!txHash || !ethers.isHexString(txHash, 32)) {
-    throw new BadRequestError('Invalid transaction hash');
+    throw new BadRequestError("Invalid transaction hash");
   }
 }
 
@@ -43,26 +47,37 @@ async function parseMarketplaceEventsFromReceipt(receipt) {
  * @param {Object} repositories - Injected repositories (for testing)
  * @returns {Promise<Object>} Encoded on-chain tx payload
  */
-export async function createListingIntent(payload, sellerWallet, repositories = {}) {
+export async function createListingIntent(
+  payload,
+  sellerWallet,
+  repositories = {},
+) {
   const ticketRepo = repositories.ticket || TicketRepo;
 
   const { ticketId, price } = payload;
-  const ticket = await ticketRepo.findById(ticketId, { lean: true }, repositories.models);
-  if (!ticket) throw new NotFoundError('Ticket not found');
+  const ticket = await ticketRepo.findById(
+    ticketId,
+    { lean: true },
+    repositories.models,
+  );
+  if (!ticket) throw new NotFoundError("Ticket not found");
 
   if (ticket.currentOwner.toLowerCase() !== sellerWallet.toLowerCase()) {
-    throw new ForbiddenError('Not authorized to list this ticket');
+    throw new ForbiddenError("Not authorized to list this ticket");
   }
 
-  if (ticket.status !== 'sold') {
-    throw new BadRequestError('Ticket must be in sold status to be listed');
+  if (ticket.status !== "sold") {
+    throw new BadRequestError("Ticket must be in sold status to be listed");
   }
 
   if (ticket.isListed) {
-    throw new BadRequestError('Ticket is already listed');
+    throw new BadRequestError("Ticket is already listed");
   }
 
-  const maxPrice = divideBigInt(multiplyBigInt(ticket.originalPrice, '15'), '10');
+  const maxPrice = divideBigInt(
+    multiplyBigInt(ticket.originalPrice, "15"),
+    "10",
+  );
   if (toBigInt(price) > toBigInt(maxPrice)) {
     throw new BadRequestError(`Price exceeds maximum allowed (${maxPrice})`);
   }
@@ -70,12 +85,12 @@ export async function createListingIntent(payload, sellerWallet, repositories = 
   const marketplace = getMarketplace();
   const [to, network] = await Promise.all([
     marketplace.getAddress(),
-    provider.getNetwork()
+    provider.getNetwork(),
   ]);
 
-  const data = marketplace.interface.encodeFunctionData('createListing', [
+  const data = marketplace.interface.encodeFunctionData("createListing", [
     BigInt(ticket.tokenId),
-    BigInt(price)
+    BigInt(price),
   ]);
 
   return {
@@ -85,10 +100,10 @@ export async function createListingIntent(payload, sellerWallet, repositories = 
     transaction: {
       to,
       data,
-      value: '0',
+      value: "0",
       chainId: network.chainId.toString(),
-      functionName: 'createListing'
-    }
+      functionName: "createListing",
+    },
   };
 }
 
@@ -99,15 +114,24 @@ export async function createListingIntent(payload, sellerWallet, repositories = 
  * @param {Object} repositories - Injected repositories (for testing)
  * @returns {Promise<Object>} Encoded on-chain tx payload
  */
-export async function createBuyListingIntent(listingId, buyerWallet, repositories = {}) {
+export async function createBuyListingIntent(
+  listingId,
+  buyerWallet,
+  repositories = {},
+) {
   const listingRepo = repositories.listing || ListingRepo;
 
-  const listing = await listingRepo.findById(listingId, { lean: true }, repositories.models);
-  if (!listing) throw new NotFoundError('Listing not found');
-  if (listing.status !== 'active') throw new BadRequestError('Listing is not active');
+  const listing = await listingRepo.findById(
+    listingId,
+    { lean: true },
+    repositories.models,
+  );
+  if (!listing) throw new NotFoundError("Listing not found");
+  if (listing.status !== "active")
+    throw new BadRequestError("Listing is not active");
 
   if (listing.seller.toLowerCase() === buyerWallet.toLowerCase()) {
-    throw new BadRequestError('Seller cannot buy own listing');
+    throw new BadRequestError("Seller cannot buy own listing");
   }
 
   const marketplace = getMarketplace();
@@ -115,14 +139,18 @@ export async function createBuyListingIntent(listingId, buyerWallet, repositorie
   const [contractListingId, to, network] = await Promise.all([
     marketplace.getActiveListingByTokenId(BigInt(listing.tokenId)),
     marketplace.getAddress(),
-    provider.getNetwork()
+    provider.getNetwork(),
   ]);
 
   if (contractListingId === 0n) {
-    throw new BadRequestError('No active on-chain listing found for this ticket');
+    throw new BadRequestError(
+      "No active on-chain listing found for this ticket",
+    );
   }
 
-  const data = marketplace.interface.encodeFunctionData('buyListing', [contractListingId]);
+  const data = marketplace.interface.encodeFunctionData("buyListing", [
+    contractListingId,
+  ]);
 
   return {
     listingId: String(listing._id),
@@ -134,8 +162,8 @@ export async function createBuyListingIntent(listingId, buyerWallet, repositorie
       data,
       value: String(listing.price),
       chainId: network.chainId.toString(),
-      functionName: 'buyListing'
-    }
+      functionName: "buyListing",
+    },
   };
 }
 
@@ -146,18 +174,26 @@ export async function createBuyListingIntent(listingId, buyerWallet, repositorie
  * @param {Object} repositories - Injected repositories (for testing)
  * @returns {Promise<Object>} Encoded on-chain tx payload
  */
-export async function createCancelListingIntent(listingId, sellerWallet, repositories = {}) {
+export async function createCancelListingIntent(
+  listingId,
+  sellerWallet,
+  repositories = {},
+) {
   const listingRepo = repositories.listing || ListingRepo;
 
-  const listing = await listingRepo.findById(listingId, { lean: true }, repositories.models);
-  if (!listing) throw new NotFoundError('Listing not found');
+  const listing = await listingRepo.findById(
+    listingId,
+    { lean: true },
+    repositories.models,
+  );
+  if (!listing) throw new NotFoundError("Listing not found");
 
   if (listing.seller.toLowerCase() !== sellerWallet.toLowerCase()) {
-    throw new ForbiddenError('Not authorized to cancel this listing');
+    throw new ForbiddenError("Not authorized to cancel this listing");
   }
 
-  if (listing.status !== 'active') {
-    throw new BadRequestError('Listing is not active');
+  if (listing.status !== "active") {
+    throw new BadRequestError("Listing is not active");
   }
 
   const marketplace = getMarketplace();
@@ -165,14 +201,18 @@ export async function createCancelListingIntent(listingId, sellerWallet, reposit
   const [contractListingId, to, network] = await Promise.all([
     marketplace.getActiveListingByTokenId(BigInt(listing.tokenId)),
     marketplace.getAddress(),
-    provider.getNetwork()
+    provider.getNetwork(),
   ]);
 
   if (contractListingId === 0n) {
-    throw new BadRequestError('No active on-chain listing found for this ticket');
+    throw new BadRequestError(
+      "No active on-chain listing found for this ticket",
+    );
   }
 
-  const data = marketplace.interface.encodeFunctionData('cancelListing', [contractListingId]);
+  const data = marketplace.interface.encodeFunctionData("cancelListing", [
+    contractListingId,
+  ]);
 
   return {
     listingId: String(listing._id),
@@ -182,10 +222,10 @@ export async function createCancelListingIntent(listingId, sellerWallet, reposit
     transaction: {
       to,
       data,
-      value: '0',
+      value: "0",
       chainId: network.chainId.toString(),
-      functionName: 'cancelListing'
-    }
+      functionName: "cancelListing",
+    },
   };
 }
 
@@ -195,7 +235,10 @@ export async function createCancelListingIntent(listingId, sellerWallet, reposit
  * @param {Object} repositories - Injected repositories (for testing)
  * @returns {Promise<Object>} Synced listing and ticket
  */
-export async function confirmListingSoldTransaction(payload, repositories = {}) {
+export async function confirmListingSoldTransaction(
+  payload,
+  repositories = {},
+) {
   const listingRepo = repositories.listing || ListingRepo;
   const ticketRepo = repositories.ticket || TicketRepo;
 
@@ -205,71 +248,79 @@ export async function confirmListingSoldTransaction(payload, repositories = {}) 
 
   const receipt = await provider.getTransactionReceipt(txHash);
   if (!receipt) {
-    throw new BadRequestError('Transaction not mined yet');
+    throw new BadRequestError("Transaction not mined yet");
   }
   if (Number(receipt.status) !== 1) {
-    throw new BadRequestError('Transaction failed on-chain');
+    throw new BadRequestError("Transaction failed on-chain");
   }
 
   const parsedEvents = await parseMarketplaceEventsFromReceipt(receipt);
-  const soldEvents = parsedEvents.filter((event) => event?.name === 'ListingSold');
+  const soldEvents = parsedEvents.filter(
+    (event) => event?.name === "ListingSold",
+  );
   const soldEvent = soldEvents[0];
 
   if (!soldEvent) {
-    throw new BadRequestError('ListingSold event not found in transaction receipt');
+    throw new BadRequestError(
+      "ListingSold event not found in transaction receipt",
+    );
   }
 
-  const tokenId = String(soldEvent.args?.tokenId ?? '');
-  const buyer = String(soldEvent.args?.buyer ?? '').toLowerCase();
+  const tokenId = String(soldEvent.args?.tokenId ?? "");
+  const buyer = String(soldEvent.args?.buyer ?? "").toLowerCase();
 
   if (buyerWallet && buyer !== buyerWallet.toLowerCase()) {
-    throw new BadRequestError('Buyer wallet does not match on-chain event');
+    throw new BadRequestError("Buyer wallet does not match on-chain event");
   }
 
   const listing = listingId
     ? await listingRepo.findById(listingId, { lean: true }, repositories.models)
-    : await listingRepo.findListings(
-        { tokenId, status: 'active' },
-        { page: 1, limit: 1, sort: '-listedAt', lean: true },
-        repositories.models
-      ).then((result) => result?.docs?.[0] || null);
+    : await listingRepo
+        .findListings(
+          { tokenId, status: "active" },
+          { page: 1, limit: 1, sort: "-listedAt", lean: true },
+          repositories.models,
+        )
+        .then((result) => result?.docs?.[0] || null);
 
   if (!listing) {
-    throw new NotFoundError('Listing not found in database');
+    throw new NotFoundError("Listing not found in database");
   }
 
-  if (listing.status === 'sold') {
+  if (listing.status === "sold") {
     return {
       synced: false,
       alreadySynced: true,
       txHash: normalizeTxHash(txHash),
-      listing
+      listing,
     };
   }
 
-  const block = receipt.blockNumber ? await provider.getBlock(receipt.blockNumber) : null;
+  const block = receipt.blockNumber
+    ? await provider.getBlock(receipt.blockNumber)
+    : null;
   const soldAt = block ? new Date(Number(block.timestamp) * 1000) : new Date();
 
   const updatedListing = await listingRepo.updateStatus(
     listing._id,
-    'sold',
+    "sold",
     {
       soldTo: buyer,
       soldAt,
-      soldTxHash: normalizeTxHash(txHash)
+      soldTxHash: normalizeTxHash(txHash),
     },
-    repositories.models
+    repositories.models,
   );
 
   const updatedTicket = await ticketRepo.updateStatus(
     tokenId,
-    'sold',
+    "sold",
     {
       currentOwner: buyer,
       soldAt,
-      isListed: false
+      isListed: false,
     },
-    repositories.models
+    repositories.models,
   );
 
   return {
@@ -277,7 +328,7 @@ export async function confirmListingSoldTransaction(payload, repositories = {}) 
     alreadySynced: false,
     txHash: normalizeTxHash(txHash),
     listing: updatedListing,
-    ticket: updatedTicket
+    ticket: updatedTicket,
   };
 }
 
@@ -294,21 +345,21 @@ export async function getListings(query = {}, repositories = {}) {
 
   const dbQuery = {
     ...(eventId && { eventId }),
-    ...(status ? { status } : { status: 'active' }),
-    ...(minPrice || maxPrice) && {
+    ...(status ? { status } : { status: "active" }),
+    ...((minPrice || maxPrice) && {
       price: {
         ...(minPrice && { $gte: minPrice }),
-        ...(maxPrice && { $lte: maxPrice })
-      }
-    }
+        ...(maxPrice && { $lte: maxPrice }),
+      },
+    }),
   };
 
   const options = {
     page: page || 1,
     limit: Math.min(limit || 20, 100),
-    sort: sort || '-listedAt',
+    sort: sort || "-listedAt",
     lean: true,
-    populate: 'ticketId eventId'
+    populate: "ticketId eventId",
   };
 
   return await listingRepo.findListings(dbQuery, options, repositories.models);
@@ -324,11 +375,11 @@ export async function getListingById(listingId, repositories = {}) {
   const listingRepo = repositories.listing || ListingRepo;
   const listing = await listingRepo.findById(
     listingId,
-    { populate: ['ticketId', 'eventId'], lean: false },
-    repositories.models
+    { populate: ["ticketId", "eventId"], lean: false },
+    repositories.models,
   );
 
-  if (!listing) throw new NotFoundError('Listing not found');
+  if (!listing) throw new NotFoundError("Listing not found");
 
   return listing;
 }
@@ -340,44 +391,58 @@ export async function getListingById(listingId, repositories = {}) {
  * @param {Object} repositories - Injected repositories (for testing)
  * @returns {Promise<Object>} Created listing
  */
-export async function createListing(listingData, sellerWallet, repositories = {}) {
+export async function createListing(
+  listingData,
+  sellerWallet,
+  repositories = {},
+) {
   const listingRepo = repositories.listing || ListingRepo;
   const ticketRepo = repositories.ticket || TicketRepo;
 
   const { ticketId, price, expiresAt } = listingData;
 
-  const ticket = await ticketRepo.findById(ticketId, { lean: false }, repositories.models);
-  if (!ticket) throw new NotFoundError('Ticket not found');
+  const ticket = await ticketRepo.findById(
+    ticketId,
+    { lean: false },
+    repositories.models,
+  );
+  if (!ticket) throw new NotFoundError("Ticket not found");
 
   if (ticket.currentOwner.toLowerCase() !== sellerWallet.toLowerCase()) {
-    throw new ForbiddenError('Not authorized to list this ticket');
+    throw new ForbiddenError("Not authorized to list this ticket");
   }
 
-  if (ticket.status !== 'sold') {
-    throw new BadRequestError('Ticket must be in sold status to be listed');
+  if (ticket.status !== "sold") {
+    throw new BadRequestError("Ticket must be in sold status to be listed");
   }
 
   if (ticket.isListed) {
-    throw new BadRequestError('Ticket is already listed');
+    throw new BadRequestError("Ticket is already listed");
   }
 
-  const maxPrice = divideBigInt(multiplyBigInt(ticket.originalPrice, "15"), "10");
+  const maxPrice = divideBigInt(
+    multiplyBigInt(ticket.originalPrice, "15"),
+    "10",
+  );
 
   if (toBigInt(price) > toBigInt(maxPrice)) {
     throw new BadRequestError(`Price exceeds maximum allowed (${maxPrice})`);
   }
 
-  const listing = await listingRepo.createListing({
-    ticketId: ticket._id,
-    tokenId: ticket.tokenId,
-    eventId: ticket.eventId,
-    seller: sellerWallet.toLowerCase(),
-    price,
-    maxPrice,
-    status: 'active',
-    listedAt: new Date(),
-    expiresAt: new Date(expiresAt)
-  }, repositories.models);
+  const listing = await listingRepo.createListing(
+    {
+      ticketId: ticket._id,
+      tokenId: ticket.tokenId,
+      eventId: ticket.eventId,
+      seller: sellerWallet.toLowerCase(),
+      price,
+      maxPrice,
+      status: "active",
+      listedAt: new Date(),
+      expiresAt: new Date(expiresAt),
+    },
+    repositories.models,
+  );
 
   await ticketRepo.updateListingStatus(ticket._id, true, repositories.models);
 
@@ -391,29 +456,41 @@ export async function createListing(listingData, sellerWallet, repositories = {}
  * @param {Object} repositories - Injected repositories (for testing)
  * @returns {Promise<Object>} Updated listing
  */
-export async function cancelListing(listingId, sellerWallet, repositories = {}) {
+export async function cancelListing(
+  listingId,
+  sellerWallet,
+  repositories = {},
+) {
   const listingRepo = repositories.listing || ListingRepo;
   const ticketRepo = repositories.ticket || TicketRepo;
 
-  const listing = await listingRepo.findById(listingId, { lean: false }, repositories.models);
-  if (!listing) throw new NotFoundError('Listing not found');
+  const listing = await listingRepo.findById(
+    listingId,
+    { lean: false },
+    repositories.models,
+  );
+  if (!listing) throw new NotFoundError("Listing not found");
 
   if (listing.seller.toLowerCase() !== sellerWallet.toLowerCase()) {
-    throw new ForbiddenError('Not authorized to cancel this listing');
+    throw new ForbiddenError("Not authorized to cancel this listing");
   }
 
-  if (listing.status !== 'active') {
-    throw new BadRequestError('Listing is not active');
+  if (listing.status !== "active") {
+    throw new BadRequestError("Listing is not active");
   }
 
   const updatedListing = await listingRepo.updateStatus(
     listingId,
-    'cancelled',
+    "cancelled",
     {},
-    repositories.models
+    repositories.models,
   );
 
-  await ticketRepo.updateListingStatus(listing.ticketId, false, repositories.models);
+  await ticketRepo.updateListingStatus(
+    listing.ticketId,
+    false,
+    repositories.models,
+  );
 
   return updatedListing;
 }
@@ -425,13 +502,95 @@ export async function cancelListing(listingId, sellerWallet, repositories = {}) 
  * @param {Object} repositories - Injected repositories (for testing)
  * @returns {Promise<Object>} Updated listing
  */
-export async function updateListingStatus(listingId, status, repositories = {}) {
+export async function updateListingStatus(
+  listingId,
+  status,
+  repositories = {},
+) {
   const listingRepo = repositories.listing || ListingRepo;
 
-  const listing = await listingRepo.findById(listingId, { lean: false }, repositories.models);
-  if (!listing) throw new NotFoundError('Listing not found');
+  const listing = await listingRepo.findById(
+    listingId,
+    { lean: false },
+    repositories.models,
+  );
+  if (!listing) throw new NotFoundError("Listing not found");
 
-  return await listingRepo.updateStatus(listingId, status, {}, repositories.models);
+  return await listingRepo.updateStatus(
+    listingId,
+    status,
+    {},
+    repositories.models,
+  );
+}
+
+/**
+ * Get marketplace transaction history in Event | Tier | Price | Buyer | Seller | Time shape
+ * @param {Object} query - Query filters and pagination
+ * @param {Object} repositories - Injected repositories (for testing)
+ * @returns {Promise<Object>} Paginated transaction history
+ */
+export async function getMarketplaceTransactionHistory(
+  query = {},
+  repositories = {},
+) {
+  const listingRepo = repositories.listing || ListingRepo;
+
+  const {
+    eventId,
+    seller,
+    buyer,
+    page = 1,
+    limit = 20,
+    sort = "soldAt",
+    order = "desc",
+  } = query;
+
+  const dbQuery = {
+    status: "sold",
+    ...(eventId && { eventId }),
+    ...(seller && { seller: String(seller).toLowerCase() }),
+    ...(buyer && { soldTo: String(buyer).toLowerCase() }),
+  };
+
+  const safeSortField = ["soldAt", "price", "listedAt"].includes(sort)
+    ? sort
+    : "soldAt";
+  const safeOrder = order === "asc" ? "" : "-";
+
+  const result = await listingRepo.findListings(
+    dbQuery,
+    {
+      page: Number(page) || 1,
+      limit: Math.min(Number(limit) || 20, 100),
+      sort: `${safeOrder}${safeSortField}`,
+      lean: true,
+      populate: [
+        { path: "eventId", select: "title" },
+        { path: "ticketId", select: "ticketType tokenId" },
+      ],
+    },
+    repositories.models,
+  );
+
+  const docs = (result.docs || []).map((listing) => ({
+    listingId: String(listing._id),
+    eventId: listing.eventId?._id
+      ? String(listing.eventId._id)
+      : String(listing.eventId || ""),
+    event: listing.eventId?.title || null,
+    tier: listing.ticketId?.ticketType || null,
+    price: String(listing.price || "0"),
+    buyer: listing.soldTo || null,
+    seller: listing.seller || null,
+    time: listing.soldAt || null,
+    tokenId: listing.ticketId?.tokenId || String(listing.tokenId || ""),
+  }));
+
+  return {
+    ...result,
+    docs,
+  };
 }
 
 /**
@@ -451,8 +610,9 @@ export async function getMarketplaceStats(repositories = {}) {
     soldListings: stats.sold || 0,
     cancelledListings: stats.cancelled || 0,
     totalVolume: stats.totalVolume || "0",
-    averagePrice: stats.active > 0 && stats.totalVolume
-      ? divideBigInt(stats.totalVolume, String(stats.active))
-      : "0"
+    averagePrice:
+      stats.active > 0 && stats.totalVolume
+        ? divideBigInt(stats.totalVolume, String(stats.active))
+        : "0",
   };
 }
