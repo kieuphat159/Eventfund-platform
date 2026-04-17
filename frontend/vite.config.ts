@@ -75,7 +75,7 @@ export default defineConfig({
 
   define: {
     global: 'globalThis',
-    'process.env.NODE_ENV': JSON.stringify('development'),
+    'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV || 'production'),
     'process.version': JSON.stringify('v18.0.0'),
     'process.browser': 'true',
   },
@@ -100,6 +100,7 @@ export default defineConfig({
       'stream-browserify',
       'crypto-browserify',
       'ox',
+      'randombytes',
     ],
   },
 
@@ -111,4 +112,18 @@ export default defineConfig({
   },
 
   assetsInclude: ['**/*.svg', '**/*.csv'],
+
+  build: {
+    commonjsOptions: {
+      transformMixedEsModules: true,
+    },
+    rollupOptions: {
+      plugins: [
+        {
+          name: 'inject-exports',
+          banner: 'var exports = typeof exports !== "undefined" ? exports : {};',
+        },
+      ],
+    },
+  },
 })
