@@ -13,9 +13,7 @@ import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Textarea } from "../../components/ui/textarea";
 import { Label } from "../../components/ui/label";
-import {
-  createEventOnChain,
-} from "../../services/events.service";
+import { createEventOnChain } from "../../services/events.service";
 import { useAuth } from "../../contexts/AuthContext";
 
 type TicketTierForm = {
@@ -42,6 +40,10 @@ export const CreateEvent: React.FC = () => {
   const [description, setDescription] = useState("");
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [endTime, setEndTime] = useState("");
+  const [fundingDeadlineDate, setFundingDeadlineDate] = useState("");
+  const [fundingDeadlineTime, setFundingDeadlineTime] = useState("");
   const [location, setLocation] = useState("");
   const [category, setCategory] = useState("");
 
@@ -64,6 +66,10 @@ export const CreateEvent: React.FC = () => {
     setDescription("");
     setDate("");
     setTime("");
+    setEndDate("");
+    setEndTime("");
+    setFundingDeadlineDate("");
+    setFundingDeadlineTime("");
     setLocation("");
     setCategory("");
     setFundingGoal("");
@@ -110,9 +116,21 @@ export const CreateEvent: React.FC = () => {
     });
   };
 
+  const buildDateTime = (dateValue: string, timeValue: string) => {
+    if (!dateValue || !timeValue) return null;
+    return new Date(`${dateValue}T${timeValue}`);
+  };
+
   const buildStartDate = () => {
-    if (!date || !time) return null;
-    return new Date(`${date}T${time}`);
+    return buildDateTime(date, time);
+  };
+
+  const buildEndDate = () => {
+    return buildDateTime(endDate, endTime);
+  };
+
+  const buildFundingDeadline = () => {
+    return buildDateTime(fundingDeadlineDate, fundingDeadlineTime);
   };
 
   const getInputClass = (hasError?: boolean) =>
@@ -137,9 +155,26 @@ export const CreateEvent: React.FC = () => {
       errors.time = "Event time is required.";
     }
 
+    if (!endDate) {
+      errors.endDate = "Event end date is required.";
+    }
+
+    if (!endTime) {
+      errors.endTime = "Event end time is required.";
+    }
+
     const start = buildStartDate();
     if (date && time && (!start || Number.isNaN(start.getTime()))) {
       errors.dateTime = "Event date and time are invalid.";
+    }
+
+    const end = buildEndDate();
+    if (endDate && endTime && (!end || Number.isNaN(end.getTime()))) {
+      errors.endDateTime = "Event end date and time are invalid.";
+    }
+
+    if (start && end && end <= start) {
+      errors.endDateTime = "Event end must be after the start time.";
     }
 
     if (investmentEnabled) {
@@ -207,14 +242,33 @@ export const CreateEvent: React.FC = () => {
       errors.category = "Category is required.";
     }
 
-    if (investmentEnabled && start) {
-      const fundingDeadline = new Date(
-        start.getTime() - 7 * 24 * 60 * 60 * 1000,
-      );
+    if (investmentEnabled) {
+      if (!fundingDeadlineDate) {
+        errors.fundingDeadlineDate = "Funding deadline date is required.";
+      }
 
-      if (fundingDeadline <= new Date()) {
-        errors.fundingDeadline =
-          "The event must be scheduled at least 7 days from now to create a valid funding deadline.";
+      if (!fundingDeadlineTime) {
+        errors.fundingDeadlineTime = "Funding deadline time is required.";
+      }
+
+      const fundingDeadline = buildFundingDeadline();
+      if (
+        fundingDeadlineDate &&
+        fundingDeadlineTime &&
+        (!fundingDeadline || Number.isNaN(fundingDeadline.getTime()))
+      ) {
+        errors.fundingDeadlineDateTime =
+          "Funding deadline date and time are invalid.";
+      }
+
+      if (start && fundingDeadline && fundingDeadline >= start) {
+        errors.fundingDeadlineDateTime =
+          "Funding deadline must be after the current time and before the event start time.";
+      }
+
+      if (fundingDeadline && fundingDeadline <= new Date()) {
+        errors.fundingDeadlineDateTime =
+          "Funding deadline must be after the current time and before the event start time.";
       }
     }
 
@@ -296,10 +350,38 @@ export const CreateEvent: React.FC = () => {
         return;
       }
 
-      const end = new Date(start.getTime() + 2 * 60 * 60 * 1000);
-      const fundingDeadline = new Date(
-        start.getTime() - 7 * 24 * 60 * 60 * 1000,
-      );
+      const end = buildEndDate();
+      if (!end || Number.isNaN(end.getTime())) {
+        setError("Event end date and time are invalid.");
+        return;
+      }
+
+      if (end <= start) {
+        setError("Event end must be after the start time.");
+        return;
+      }
+
+      const fundingDeadline = buildFundingDeadline();
+      if (investmentEnabled) {
+        if (!fundingDeadline || Number.isNaN(fundingDeadline.getTime())) {
+          setError("Funding deadline date and time are invalid.");
+          return;
+        }
+
+        if (fundingDeadline <= new Date()) {
+          setError(
+            "Funding deadline must be after the current time and before the event start time.",
+          );
+          return;
+        }
+
+        if (fundingDeadline >= start) {
+          setError(
+            "Funding deadline must be after the current time and before the event start time.",
+          );
+          return;
+        }
+      }
 
       const normalizedTiers = ticketTiers
         .filter(
@@ -370,7 +452,7 @@ export const CreateEvent: React.FC = () => {
             : undefined,
           organizerStake: organizerStake.trim() || undefined,
           fundingDeadline: investmentEnabled
-            ? fundingDeadline.toISOString()
+            ? fundingDeadline?.toISOString()
             : undefined,
         },
         user.walletAddress,
@@ -495,7 +577,7 @@ export const CreateEvent: React.FC = () => {
           <div className="grid md:grid-cols-2 gap-4">
             <div>
               <Label htmlFor="date" className="text-white">
-                Event Date *
+                Event Start Date *
               </Label>
               <div className="relative mt-1.5">
                 <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-cyan-300" />
@@ -509,14 +591,11 @@ export const CreateEvent: React.FC = () => {
                       const next = { ...prev };
                       delete next.date;
                       delete next.dateTime;
-                      delete next.fundingDeadline;
                       return next;
                     });
                   }}
                   className={`pl-10 bg-slate-800 text-white ${
-                    fieldErrors.date ||
-                    fieldErrors.dateTime ||
-                    fieldErrors.fundingDeadline
+                    fieldErrors.date || fieldErrors.dateTime
                       ? "border-red-500 focus-visible:ring-red-500"
                       : "border-slate-700"
                   }`}
@@ -530,18 +609,11 @@ export const CreateEvent: React.FC = () => {
                   {fieldErrors.dateTime}
                 </p>
               )}
-              {!fieldErrors.date &&
-                !fieldErrors.dateTime &&
-                fieldErrors.fundingDeadline && (
-                  <p className="mt-1 text-sm text-red-400">
-                    {fieldErrors.fundingDeadline}
-                  </p>
-                )}
             </div>
 
             <div>
               <Label htmlFor="time" className="text-white">
-                Event Time *
+                Event Start Time *
               </Label>
               <Input
                 id="time"
@@ -553,20 +625,87 @@ export const CreateEvent: React.FC = () => {
                     const next = { ...prev };
                     delete next.time;
                     delete next.dateTime;
-                    delete next.fundingDeadline;
                     return next;
                   });
                 }}
                 className={`mt-1.5 bg-slate-800 text-white ${
-                  fieldErrors.time ||
-                  fieldErrors.dateTime ||
-                  fieldErrors.fundingDeadline
+                  fieldErrors.time || fieldErrors.dateTime
                     ? "border-red-500 focus-visible:ring-red-500"
                     : "border-slate-700"
                 }`}
               />
               {fieldErrors.time && (
                 <p className="mt-1 text-sm text-red-400">{fieldErrors.time}</p>
+              )}
+            </div>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              <Label htmlFor="end-date" className="text-white">
+                Event End Date *
+              </Label>
+              <div className="relative mt-1.5">
+                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-cyan-300" />
+                <Input
+                  id="end-date"
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => {
+                    setEndDate(e.target.value);
+                    setFieldErrors((prev) => {
+                      const next = { ...prev };
+                      delete next.endDate;
+                      delete next.endDateTime;
+                      return next;
+                    });
+                  }}
+                  className={`pl-10 bg-slate-800 text-white ${
+                    fieldErrors.endDate || fieldErrors.endDateTime
+                      ? "border-red-500 focus-visible:ring-red-500"
+                      : "border-slate-700"
+                  }`}
+                />
+              </div>
+              {fieldErrors.endDate && (
+                <p className="mt-1 text-sm text-red-400">
+                  {fieldErrors.endDate}
+                </p>
+              )}
+              {!fieldErrors.endDate && fieldErrors.endDateTime && (
+                <p className="mt-1 text-sm text-red-400">
+                  {fieldErrors.endDateTime}
+                </p>
+              )}
+            </div>
+
+            <div>
+              <Label htmlFor="end-time" className="text-white">
+                Event End Time *
+              </Label>
+              <Input
+                id="end-time"
+                type="time"
+                value={endTime}
+                onChange={(e) => {
+                  setEndTime(e.target.value);
+                  setFieldErrors((prev) => {
+                    const next = { ...prev };
+                    delete next.endTime;
+                    delete next.endDateTime;
+                    return next;
+                  });
+                }}
+                className={`mt-1.5 bg-slate-800 text-white ${
+                  fieldErrors.endTime || fieldErrors.endDateTime
+                    ? "border-red-500 focus-visible:ring-red-500"
+                    : "border-slate-700"
+                }`}
+              />
+              {fieldErrors.endTime && (
+                <p className="mt-1 text-sm text-red-400">
+                  {fieldErrors.endTime}
+                </p>
               )}
             </div>
           </div>
@@ -832,12 +971,16 @@ export const CreateEvent: React.FC = () => {
                 if (!enabled) {
                   setFundingGoal("");
                   setMinStakeRequired("");
+                  setFundingDeadlineDate("");
+                  setFundingDeadlineTime("");
                   setFieldErrors((prev) => {
                     const next = { ...prev };
                     delete next.fundingGoal;
                     delete next.minStakeRequired;
                     delete next.organizerStake;
-                    delete next.fundingDeadline;
+                    delete next.fundingDeadlineDate;
+                    delete next.fundingDeadlineTime;
+                    delete next.fundingDeadlineDateTime;
                     return next;
                   });
                 }
@@ -944,6 +1087,94 @@ export const CreateEvent: React.FC = () => {
               )}
             </div>
           </div>
+
+          {investmentEnabled && (
+            <div className="grid md:grid-cols-2 gap-4">
+              <div>
+                <Label
+                  htmlFor="funding-deadline-date"
+                  className="text-slate-300"
+                >
+                  Funding Deadline Date *
+                </Label>
+                <div className="relative mt-1.5">
+                  <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-cyan-300" />
+                  <Input
+                    id="funding-deadline-date"
+                    type="date"
+                    value={fundingDeadlineDate}
+                    onChange={(e) => {
+                      setFundingDeadlineDate(e.target.value);
+                      setFieldErrors((prev) => {
+                        const next = { ...prev };
+                        delete next.fundingDeadlineDate;
+                        delete next.fundingDeadlineDateTime;
+                        return next;
+                      });
+                    }}
+                    className={`pl-10 bg-slate-800 text-white ${
+                      fieldErrors.fundingDeadlineDate ||
+                      fieldErrors.fundingDeadlineDateTime
+                        ? "border-red-500 focus-visible:ring-red-500"
+                        : "border-slate-700"
+                    }`}
+                  />
+                </div>
+                {fieldErrors.fundingDeadlineDate && (
+                  <p className="mt-1 text-sm text-red-400">
+                    {fieldErrors.fundingDeadlineDate}
+                  </p>
+                )}
+                {!fieldErrors.fundingDeadlineDate &&
+                  fieldErrors.fundingDeadlineDateTime && (
+                    <p className="mt-1 text-sm text-red-400">
+                      {fieldErrors.fundingDeadlineDateTime}
+                    </p>
+                  )}
+              </div>
+
+              <div>
+                <Label
+                  htmlFor="funding-deadline-time"
+                  className="text-slate-300"
+                >
+                  Funding Deadline Time *
+                </Label>
+                <Input
+                  id="funding-deadline-time"
+                  type="time"
+                  value={fundingDeadlineTime}
+                  onChange={(e) => {
+                    setFundingDeadlineTime(e.target.value);
+                    setFieldErrors((prev) => {
+                      const next = { ...prev };
+                      delete next.fundingDeadlineTime;
+                      delete next.fundingDeadlineDateTime;
+                      return next;
+                    });
+                  }}
+                  className={`mt-1.5 bg-slate-800 text-white ${
+                    fieldErrors.fundingDeadlineTime ||
+                    fieldErrors.fundingDeadlineDateTime
+                      ? "border-red-500 focus-visible:ring-red-500"
+                      : "border-slate-700"
+                  }`}
+                />
+                {fieldErrors.fundingDeadlineTime && (
+                  <p className="mt-1 text-sm text-red-400">
+                    {fieldErrors.fundingDeadlineTime}
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {investmentEnabled && (
+            <p className="text-xs text-slate-500">
+              Funding deadline must be entered manually and must fall between
+              the current time and the event start time.
+            </p>
+          )}
 
           <p className="text-xs text-slate-500">
             Stake and funding fields are stored as integer strings in wei.
