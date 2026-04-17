@@ -119,7 +119,7 @@ jobs:
               \"aws s3 cp s3://$S3_BUCKET/frontend.tar.gz /tmp/frontend.tar.gz --region $AWS_REGION\",
               \"rm -rf /app/frontend-dist/* && tar -xzf /tmp/frontend.tar.gz -C /app/frontend-dist\",
               \"rm /tmp/frontend.tar.gz\",
-              \"cd /app && docker compose up -d frontend cloudflared\"
+              \"cd /app && docker compose up -d frontend ngrok\"
             ]" \
             --region $AWS_REGION \
             --query "Command.CommandId" --output text)
