@@ -116,7 +116,6 @@ export default defineConfig({
   build: {
     commonjsOptions: {
       transformMixedEsModules: true,
-      include: [/randombytes/, /@web3auth/],
     },
   },
 })
