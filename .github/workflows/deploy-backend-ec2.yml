@@ -67,8 +67,7 @@ jobs:
               \"aws s3 cp s3://$S3_BUCKET/backend.tar.gz /tmp/backend.tar.gz --region $AWS_REGION\",
               \"docker load < /tmp/backend.tar.gz\",
               \"rm /tmp/backend.tar.gz\",
-              \"cd /app && docker compose up -d api\",
-              \"for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do sleep 6 && curl -sf http://localhost:4000/health && exit 0 || true; done; curl -sf http://localhost:4000/health\"
+              \"cd /app && docker compose up -d api\"
             ]" \
             --region $AWS_REGION \
             --query "Command.CommandId" --output text)
