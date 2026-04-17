@@ -116,14 +116,7 @@ export default defineConfig({
   build: {
     commonjsOptions: {
       transformMixedEsModules: true,
-    },
-    rollupOptions: {
-      plugins: [
-        {
-          name: 'inject-exports',
-          banner: 'var exports = typeof exports !== "undefined" ? exports : {};',
-        },
-      ],
+      include: [/randombytes/, /@web3auth/],
     },
   },
 })
