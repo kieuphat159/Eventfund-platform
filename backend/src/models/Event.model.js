@@ -8,6 +8,12 @@ const eventSchema = new mongoose.Schema(
       trim: true,
     },
 
+    fundContractAddress: {
+      type: String,
+      lowercase: true,
+      trim: true,
+    },
+
     title: {
       type: String,
       required: true,
@@ -221,7 +227,15 @@ const eventSchema = new mongoose.Schema(
 );
 
 // ===== Indexes =====
-eventSchema.index({ contractEventId: 1 }, { unique: true, sparse: true });
+eventSchema.index({ contractEventId: 1 }, { name: "contractEventId_lookup" });
+eventSchema.index(
+  { fundContractAddress: 1, contractEventId: 1 },
+  {
+    name: "fundContractAddress_contractEventId_unique",
+    unique: true,
+    sparse: true,
+  },
+);
 eventSchema.index({ status: 1, category: 1 });
 eventSchema.index({ organizer: 1 });
 eventSchema.index({ fundingDeadline: 1 });

@@ -22,10 +22,13 @@ import {
 import {
   getAdminEventById,
   updateAdminEvent,
+  updateAdminEventStatus,
   type EventStatus,
 } from "../../services/events.service";
 
 const EVENT_STATUSES: EventStatus[] = [
+  'draft',
+  'funding',
   'funded',
   'ticketing',
   'completed',
@@ -46,6 +49,7 @@ export const AdminEditEvent: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [currentStatus, setCurrentStatus] = useState<EventStatus>('draft');
 
   const [formData, setFormData] = useState({
     title: '',
@@ -54,6 +58,9 @@ export const AdminEditEvent: React.FC = () => {
     status: 'draft' as EventStatus,
     startDate: '',
     endDate: '',
+    fundingGoal: '',
+    minStakeRequired: '',
+    fundingDeadline: '',
     venueName: '',
     venueAddress: '',
     quantity: '1',
@@ -92,20 +99,30 @@ export const AdminEditEvent: React.FC = () => {
           title: foundEvent.title || '',
           description: foundEvent.description || '',
           category: foundEvent.category || '',
-          status: EVENT_STATUSES.includes((foundEvent.status || 'funded') as EventStatus)
+          status: EVENT_STATUSES.includes((foundEvent.status || 'draft') as EventStatus)
             ? (foundEvent.status as EventStatus)
-            : 'funded',
+            : 'draft',
           startDate: foundEvent.startDate
             ? new Date(foundEvent.startDate).toISOString().slice(0, 16)
             : "",
           endDate: foundEvent.endDate
             ? new Date(foundEvent.endDate).toISOString().slice(0, 16)
             : '',
+          fundingGoal:
+            foundEvent.fundingGoal != null ? String(foundEvent.fundingGoal) : '',
+          minStakeRequired:
+            foundEvent.minStakeRequired != null
+              ? String(foundEvent.minStakeRequired)
+              : '',
+          fundingDeadline: foundEvent.fundingDeadline
+            ? new Date(foundEvent.fundingDeadline).toISOString().slice(0, 16)
+            : '',
           venueName: foundEvent.venue?.name || '',
           venueAddress: foundEvent.venue?.address || '',
           quantity: String(foundEvent.totalTickets && foundEvent.totalTickets > 0 ? foundEvent.totalTickets : 1),
           ticketType: '0',
         });
+        setCurrentStatus((foundEvent.status as EventStatus) || 'draft');
         setTicketTiers(
           foundEvent.ticketTiers?.length
             ? foundEvent.ticketTiers.map((tier) => ({
@@ -180,10 +197,24 @@ export const AdminEditEvent: React.FC = () => {
         }
       }
 
-      await updateAdminEventStatus(id, formData.status, {
-        quantity: formData.status === 'ticketing' ? quantity : undefined,
-        ticketType: formData.status === 'ticketing' ? ticketType : undefined,
-      });
+      const normalizedTiers = ticketTiers
+        .filter(
+          (tier) => tier.name.trim() && tier.price !== "" && tier.supply !== "",
+        )
+        .map((tier) => ({
+          name: tier.name.trim(),
+          price: Number(tier.price),
+          totalSupply: Number(tier.supply),
+        }));
+
+      let resolvedStatus = currentStatus;
+      if (formData.status !== currentStatus) {
+        const statusResult = await updateAdminEventStatus(id, formData.status, {
+          quantity: formData.status === 'ticketing' ? quantity : undefined,
+          ticketType: formData.status === 'ticketing' ? ticketType : undefined,
+        });
+        resolvedStatus = (statusResult?.status as EventStatus) || formData.status;
+      }
 
       if (!normalizedTiers.length) {
         setError("At least one valid ticket tier is required");
@@ -209,7 +240,6 @@ export const AdminEditEvent: React.FC = () => {
         title: formData.title,
         description: formData.description,
         category: formData.category,
-        status: formData.status,
         startDate: new Date(formData.startDate).toISOString(),
         endDate: new Date(formData.endDate).toISOString(),
         fundingGoal: formData.fundingGoal || "0",
@@ -225,6 +255,8 @@ export const AdminEditEvent: React.FC = () => {
       });
 
       setSuccess("Event updated successfully");
+      setCurrentStatus(resolvedStatus);
+      setFormData((prev) => ({ ...prev, status: resolvedStatus }));
       navigate(`/admin/events/${id}`);
     } catch (err) {
       setError(

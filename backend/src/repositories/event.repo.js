@@ -1,5 +1,22 @@
 import { Event as DefaultEvent } from '../models/index.js';
 
+function normalizeAddress(address) {
+  return address ? String(address).toLowerCase() : undefined;
+}
+
+function buildOnChainIdentityFilter(contractEventId, fundContractAddress) {
+  const filter = {
+    contractEventId: String(contractEventId),
+  };
+
+  const normalizedFundAddress = normalizeAddress(fundContractAddress);
+  if (normalizedFundAddress) {
+    filter.fundContractAddress = normalizedFundAddress;
+  }
+
+  return filter;
+}
+
 /**
  * Create a new event
  * @param {Object} eventData - Event data
@@ -168,10 +185,12 @@ export async function getRevenueStats(models = {}) {
  */
 export async function upsertByContractEventId(contractEventId, data, models = {}) {
   const Event = models.Event || DefaultEvent;
+  const normalizedFundAddress = normalizeAddress(data.fundContractAddress);
 
   // Build $set explicitly — no spread to avoid injecting stale/unknown fields
   const setFields = {
     contractEventId,
+    fundContractAddress: normalizedFundAddress,
     onChainOrganizer: data.onChainOrganizer,
     fundingGoal: data.fundingGoal,
     fundingDeadline: data.fundingDeadline,
@@ -190,7 +209,7 @@ export async function upsertByContractEventId(contractEventId, data, models = {}
   Object.keys(setFields).forEach((k) => setFields[k] === undefined && delete setFields[k]);
 
   const result = await Event.findOneAndUpdate(
-    { contractEventId },
+    buildOnChainIdentityFilter(contractEventId, normalizedFundAddress),
     {
       $set: setFields,
       $setOnInsert: {
@@ -222,10 +241,15 @@ export async function upsertByContractEventId(contractEventId, data, models = {}
 /**
  * Update event by contractEventId (dùng trong full rebuild)
  */
-export async function updateByContractEventId(contractEventId, updates, models = {}) {
+export async function updateByContractEventId(
+  contractEventId,
+  updates,
+  fundContractAddress,
+  models = {},
+) {
   const Event = models.Event || DefaultEvent;
   return await Event.findOneAndUpdate(
-    { contractEventId },
+    buildOnChainIdentityFilter(contractEventId, fundContractAddress),
     updates,
     { new: true, lean: true }
   );
@@ -234,9 +258,25 @@ export async function updateByContractEventId(contractEventId, updates, models =
 /**
  * Find event by contractEventId (dùng trong processor)
  */
-export async function findByContractEventId(contractEventId, models = {}) {
+export async function findByContractEventId(
+  contractEventId,
+  fundContractAddress,
+  models = {},
+) {
   const Event = models.Event || DefaultEvent;
-  return await Event.findOne({ contractEventId }).lean();
+  return await Event.findOne(
+    buildOnChainIdentityFilter(contractEventId, fundContractAddress),
+  ).lean();
+}
+
+/**
+ * Find event by full on-chain identity.
+ */
+export async function findByOnChainIdentity(
+  { contractEventId, fundContractAddress },
+  models = {},
+) {
+  return findByContractEventId(contractEventId, fundContractAddress, models);
 }
 
 /**
@@ -329,4 +369,4 @@ export async function clearProcessedTxHashes(txHashes, models = {}) {
   );
 }
 
-export default { createEvent, findById, findEvents, updateById, deleteById, updateFundingStatus, incrementTicketCounters, countEvents, getRevenueStats, upsertByContractEventId, findByContractEventId, findMatchingDraftForOnChainEvent, isTxHashProcessed, markTxHashProcessed, applyIdempotentDeltaByTxHash, updateByContractEventId, clearProcessedTxHashes };
+export default { createEvent, findById, findEvents, updateById, deleteById, updateFundingStatus, incrementTicketCounters, countEvents, getRevenueStats, upsertByContractEventId, findByContractEventId, findByOnChainIdentity, findMatchingDraftForOnChainEvent, isTxHashProcessed, markTxHashProcessed, applyIdempotentDeltaByTxHash, updateByContractEventId, clearProcessedTxHashes };

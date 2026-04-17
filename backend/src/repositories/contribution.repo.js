@@ -12,7 +12,12 @@ export async function upsertOrganizerStake(data, models = {}) {
   // Resolve eventId ObjectId from contractEventId if not provided directly
   let eventId = data.eventId;
   if (!eventId && data.eventContractId) {
-    const eventDoc = await Event.findOne({ contractEventId: data.eventContractId }).lean();
+    const filter = { contractEventId: data.eventContractId };
+    if (data.fundContractAddress) {
+      filter.fundContractAddress = String(data.fundContractAddress).toLowerCase();
+    }
+
+    const eventDoc = await Event.findOne(filter).lean();
     eventId = eventDoc?._id;
   }
 

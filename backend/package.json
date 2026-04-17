@@ -5,7 +5,7 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "dev": "concurrently \"nodemon src/server.js\" \"npm run indexer:fund\" \"npm run processor:fund\"",
+    "dev": "concurrently \"nodemon src/server.js\" \"npm run indexer:fund\" \"npm run processor:fund\" \"npm run indexer:ticket\" \"npm run processor:ticket\"",
     "start": "node src/server.js",
     "test": "cross-env NODE_ENV=test NODE_OPTIONS=--experimental-vm-modules jest --runInBand",
     "indexer:ticket": "node src/services/blockchain/indexers/ticket/run.js",
@@ -17,7 +17,8 @@
     "test:cloudinary": "node src/config/testCloudinary.js",
     "seed": "node src/scripts/seed.js",
     "processor:fund": "node src/services/blockchain/processors/fund.run.js",
-    "processor:marketplace": "node src/services/blockchain/processors/marketplace.run.js"
+    "processor:marketplace": "node src/services/blockchain/processors/marketplace.run.js",
+    "migrate:event-fund-scope": "node src/scripts/migrateEventFundScope.js"
   },
   "keywords": [],
   "author": "",

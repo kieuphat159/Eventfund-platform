@@ -17,8 +17,17 @@ import { StatusBadge } from "../../components/StatusBadge";
 import { ImageWithFallback } from "../../components/figma/ImageWithFallback";
 import { useAuth } from "../../contexts/AuthContext";
 import { getEventById, type EventItem } from "../../services/events.service";
-import { investInEvent } from "../../services/investment.service";
-import { purchaseTicket } from "../../services/tickets.service";
+import {
+  investInEventOnChain,
+  type Eip1193Provider,
+} from "../../services/investment.service";
+import {
+  getTicketStats,
+  getTickets,
+  purchaseTicket,
+  type ApiTicket,
+  type EventTicketStats,
+} from "../../services/tickets.service";
 import { useWeb3Auth } from "@web3auth/modal/react";
 import { calculatePercentage, formatIntegerWithUnit } from "../../lib/utils";
 
@@ -38,6 +47,9 @@ export const EventDetail: React.FC = () => {
     type: "success" | "error";
     message: string;
   } | null>(null);
+  const [ticketStats, setTicketStats] = useState<EventTicketStats | null>(null);
+  const [eventTickets, setEventTickets] = useState<ApiTicket[]>([]);
+  const [loadingTickets, setLoadingTickets] = useState(false);
   const [purchaseConfirmTier, setPurchaseConfirmTier] = useState<string | null>(
     null,
   );
@@ -47,7 +59,7 @@ export const EventDetail: React.FC = () => {
 
     const timeoutId = window.setTimeout(() => {
       setBuyPopup(null);
-    }, 3000);
+    }, 10000);
 
     return () => {
       window.clearTimeout(timeoutId);
@@ -56,6 +68,29 @@ export const EventDetail: React.FC = () => {
 
   const showBuyPopup = (type: "success" | "error", message: string) => {
     setBuyPopup({ type, message });
+  };
+
+  const loadTicketData = async (targetEventId: string) => {
+    setLoadingTickets(true);
+    try {
+      const [stats, tickets] = await Promise.all([
+        getTicketStats(targetEventId),
+        getTickets({
+          eventId: targetEventId,
+          page: 1,
+          limit: 50,
+          sort: "-createdAt",
+        }),
+      ]);
+
+      setTicketStats(stats);
+      setEventTickets(tickets.docs || []);
+    } catch {
+      setTicketStats(null);
+      setEventTickets([]);
+    } finally {
+      setLoadingTickets(false);
+    }
   };
 
   useEffect(() => {
@@ -67,6 +102,9 @@ export const EventDetail: React.FC = () => {
         setError("");
         const data = await getEventById(id);
         setEvent(data);
+        if (data?._id) {
+          await loadTicketData(data._id);
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load event");
       } finally {
@@ -86,6 +124,8 @@ export const EventDetail: React.FC = () => {
   }, [event]);
 
   const eventId = event?._id || event?.id || "";
+  const availableTickets = ticketStats?.availableTickets ?? null;
+  const trackedTickets = ticketStats?.totalTickets ?? totalTickets;
   const fundingProgress = Math.min(
     calculatePercentage(event?.currentFunding, event?.fundingGoal, 1),
     100,
@@ -123,7 +163,7 @@ export const EventDetail: React.FC = () => {
   };
 
   const handleInvest = async () => {
-    if (!user?.walletAddress) {
+    if (!user?.walletAddress && !user?.smartAccountAddress) {
       await connectWallet();
       return;
     }
@@ -142,8 +182,20 @@ export const EventDetail: React.FC = () => {
     setInvesting(true);
 
     try {
-      await investInEvent(eventId, investmentAmount.trim());
-      setInvestSuccess("Contribution recorded. Refreshing event data...");
+      const provider = web3Auth?.provider as Eip1193Provider | undefined;
+      if (!provider?.request) {
+        throw new Error(
+          "Wallet provider is not ready. Please reconnect wallet and try again.",
+        );
+      }
+
+      const result = await investInEventOnChain(
+        provider,
+        eventId,
+        investmentAmount.trim(),
+        user.walletAddress || user.smartAccountAddress,
+      );
+      setInvestSuccess(`On-chain contribution submitted: ${result.txHash}`);
       const refreshedEvent = await getEventById(eventId);
       setEvent(refreshedEvent);
     } catch (err) {
@@ -200,6 +252,7 @@ export const EventDetail: React.FC = () => {
 
       const refreshedEvent = await getEventById(event._id);
       setEvent(refreshedEvent);
+      await loadTicketData(event._id);
     } catch (err) {
       showBuyPopup(
         "error",
@@ -274,7 +327,7 @@ export const EventDetail: React.FC = () => {
               <div className="mb-4 flex flex-wrap items-center gap-3">
                 <StatusBadge status={event.status || "draft"} />
                 <span className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-300">
-                  {totalTickets} total tickets
+                  {availableTickets ?? totalTickets} available / {trackedTickets} tracked
                 </span>
               </div>
 
@@ -387,7 +440,9 @@ export const EventDetail: React.FC = () => {
                         {tier.price ?? 0} ETH
                       </p>
                       <p className="text-sm text-slate-400 mt-1">
-                        {tier.totalSupply || 0} available
+                        {availableTickets !== null
+                          ? `${availableTickets} remaining (overall)`
+                          : `${tier.totalSupply || 0} configured`}
                       </p>
                     </div>
 
@@ -401,16 +456,95 @@ export const EventDetail: React.FC = () => {
                     </ul>
 
                     <Button
-                      onClick={connectWallet}
+                      onClick={() => handlePurchaseClick(tier.name)}
                       className="w-full bg-cyan-600 hover:bg-cyan-500 text-white"
+                      disabled={buying || availableTickets === 0}
                     >
-                      {user?.walletAddress ? "Buy Ticket" : "Connect Wallet"}
+                      {availableTickets === 0
+                        ? "Sold Out"
+                        : buying
+                        ? "Processing..."
+                        : user?.walletAddress
+                          ? "Buy Ticket"
+                          : "Connect Wallet"}
                     </Button>
                   </div>
                 ))}
               </div>
             ) : (
               <div className="text-slate-400">No ticket tiers configured.</div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="bg-slate-900/80 border-slate-800 backdrop-blur-sm mt-8">
+          <CardContent className="p-6">
+            <h2 className="text-2xl font-semibold text-white mb-3">
+              Ticket Inventory
+            </h2>
+            <p className="text-sm text-slate-400 mb-4">
+              Synced from ticket records for this event.
+            </p>
+
+            <div className="grid sm:grid-cols-4 gap-3 mb-5">
+              <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3">
+                <div className="text-xs text-slate-500 mb-1">Available</div>
+                <div className="text-lg font-semibold text-emerald-300">
+                  {ticketStats?.availableTickets ?? "-"}
+                </div>
+              </div>
+              <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3">
+                <div className="text-xs text-slate-500 mb-1">Total Tracked</div>
+                <div className="text-lg font-semibold text-cyan-300">
+                  {ticketStats?.totalTickets ?? "-"}
+                </div>
+              </div>
+              <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3">
+                <div className="text-xs text-slate-500 mb-1">Sold</div>
+                <div className="text-lg font-semibold text-amber-300">
+                  {ticketStats?.soldTickets ?? "-"}
+                </div>
+              </div>
+              <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3">
+                <div className="text-xs text-slate-500 mb-1">Used</div>
+                <div className="text-lg font-semibold text-purple-300">
+                  {ticketStats?.usedTickets ?? "-"}
+                </div>
+              </div>
+            </div>
+
+            {loadingTickets ? (
+              <div className="text-slate-400 text-sm">Loading tickets...</div>
+            ) : eventTickets.length === 0 ? (
+              <div className="text-slate-400 text-sm">
+                No ticket records found for this event yet.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-slate-400 border-b border-slate-700">
+                      <th className="py-2 pr-3">Token</th>
+                      <th className="py-2 pr-3">Status</th>
+                      <th className="py-2 pr-3">Owner</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {eventTickets.map((ticket) => (
+                      <tr
+                        key={ticket.tokenId}
+                        className="border-b border-slate-800 text-slate-200"
+                      >
+                        <td className="py-2 pr-3 font-mono">#{ticket.tokenId}</td>
+                        <td className="py-2 pr-3">{ticket.status || "-"}</td>
+                        <td className="py-2 pr-3 font-mono text-xs">
+                          {ticket.currentOwner || "-"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </CardContent>
         </Card>

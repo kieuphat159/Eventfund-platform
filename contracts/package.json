@@ -9,6 +9,8 @@
     "chain": "npx hardhat node",
     "deploy:all": "npx hardhat run contracts/scripts/deployAll.js --network localhost",
     "deploy:sepolia": "npx hardhat run contracts/scripts/deployAll.js --network sepolia",
+    "deploy:fund": "npx hardhat run contracts/scripts/redeployFund.js --network localhost",
+    "deploy:fund:sepolia": "npx hardhat run contracts/scripts/redeployFund.js --network sepolia",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

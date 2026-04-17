@@ -10,7 +10,6 @@ import {
   validateMultipleImages,
 } from "../middlewares/image.middleware.js";
 
-
 const router = express.Router();
 const controller = new EventsController();
 
@@ -183,6 +182,26 @@ router.post(
   validate({ body: eventSchemas.createEvent }),
   controller.createEvent,
 );
+
+router.post(
+  "/create-intent",
+  authenticate,
+  requireEventCreator,
+  uploadEventImages,
+  validateMultipleImages,
+  validate({ body: eventSchemas.createEventIntent }),
+  controller.createEventIntent,
+);
+
+router.post(
+  "/create/confirm",
+  authenticate,
+  requireEventCreator,
+  validate({ body: eventSchemas.confirmCreateEvent }),
+  controller.confirmCreateEventTransaction,
+);
+
+router.get("/blockchain-config", controller.getBlockchainConfig);
 
 /**
  * @swagger
@@ -360,6 +379,20 @@ router.delete(
  *         description: Server error
  */
 router.post(
+  "/:id/invest-intent",
+  authenticate,
+  validate({ body: eventSchemas.investEvent }),
+  controller.createInvestmentIntent,
+);
+
+router.post(
+  "/:id/invest/confirm",
+  authenticate,
+  validate({ body: eventSchemas.confirmInvestEvent }),
+  controller.confirmInvestmentTransaction,
+);
+
+router.post(
   "/:id/invest",
   authenticate,
   validate({ body: eventSchemas.investEvent }),
@@ -437,7 +470,7 @@ router.post(
   "/:id/assign-verifier",
   authenticate,
   requireAdmin,
-  controller.assignVerifier
+  controller.assignVerifier,
 );
 
 export default router;

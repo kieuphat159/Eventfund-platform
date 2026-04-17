@@ -89,6 +89,20 @@ interface ConfirmPurchaseResponse {
   message?: string;
 }
 
+export interface EventTicketStats {
+  totalTickets: number;
+  soldTickets: number;
+  usedTickets: number;
+  mintedTickets: number;
+  availableTickets: number;
+}
+
+interface EventTicketStatsResponse {
+  success: boolean;
+  data?: EventTicketStats;
+  message?: string;
+}
+
 export interface Eip1193Provider {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
 }
@@ -99,9 +113,98 @@ export interface PurchaseTicketResult {
   confirmation: ConfirmPurchaseData | null;
 }
 
+const SEND_TX_MAX_RETRIES = 4;
+
 function getAuthHeaders(): HeadersInit {
   const jwtToken = localStorage.getItem("jwtToken");
   return jwtToken ? { Authorization: `Bearer ${jwtToken}` } : {};
+}
+
+function getRpcErrorMessage(error: unknown): string {
+  if (error && typeof error === "object") {
+    const err = error as {
+      message?: string;
+      shortMessage?: string;
+      data?: { message?: string; cause?: { message?: string } };
+    };
+
+    return (
+      err.shortMessage ||
+      err.message ||
+      err.data?.message ||
+      err.data?.cause?.message ||
+      "Unknown RPC error"
+    );
+  }
+
+  return String(error);
+}
+
+function isRateLimitError(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("429") ||
+    normalized.includes("too many requests") ||
+    normalized.includes("request limit reached")
+  );
+}
+
+function mapPurchaseRpcError(message: string): string {
+  if (isRateLimitError(message)) {
+    return "RPC đang bị rate-limit (429). Vui lòng đợi 3-5 giây rồi thử lại.";
+  }
+
+  return message;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+async function sendPurchaseTransactionWithRetry(
+  provider: Eip1193Provider,
+  tx: {
+    from: string;
+    to: string;
+    data: string;
+    value: string;
+  },
+): Promise<string> {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= SEND_TX_MAX_RETRIES; attempt += 1) {
+    try {
+      const txHash = (await provider.request({
+        method: "eth_sendTransaction",
+        params: [
+          {
+            from: tx.from,
+            to: tx.to,
+            data: tx.data,
+            value: tx.value,
+          },
+        ],
+      })) as string;
+
+      if (!txHash) {
+        throw new Error("Failed to send purchase transaction");
+      }
+
+      return txHash;
+    } catch (error) {
+      lastError = error;
+      const message = getRpcErrorMessage(error);
+
+      if (!isRateLimitError(message) || attempt === SEND_TX_MAX_RETRIES) {
+        throw new Error(mapPurchaseRpcError(message));
+      }
+
+      const retryDelay = 1000 * attempt;
+      await sleep(retryDelay);
+    }
+  }
+
+  throw new Error(mapPurchaseRpcError(getRpcErrorMessage(lastError)));
 }
 
 function normalizeTicket(ticket: ApiTicket): ApiTicket {
@@ -184,6 +287,15 @@ export async function getTicketByTokenId(
   return payload.data ? normalizeTicket(payload.data) : null;
 }
 
+export async function getTicketStats(
+  eventId: string,
+): Promise<EventTicketStats | null> {
+  const payload = await api.get<EventTicketStatsResponse>(
+    `/tickets/event/${encodeURIComponent(eventId)}/stats`,
+  );
+  return payload.data || null;
+}
+
 export async function markTicketAsUsed(
   tokenId: string,
   eventId?: string,
@@ -255,21 +367,12 @@ export async function purchaseTicket(
     throw new Error("Buyer wallet address is required to purchase ticket");
   }
 
-  const txHash = (await provider.request({
-    method: "eth_sendTransaction",
-    params: [
-      {
-        from: fromAddress,
-        to: intent.transaction.to,
-        data: intent.transaction.data,
-        value: toHexValue(intent.transaction.value),
-      },
-    ],
-  })) as string;
-
-  if (!txHash) {
-    throw new Error("Failed to send purchase transaction");
-  }
+  const txHash = await sendPurchaseTransactionWithRetry(provider, {
+    from: fromAddress,
+    to: intent.transaction.to,
+    data: intent.transaction.data,
+    value: toHexValue(intent.transaction.value),
+  });
 
   const confirmation = await confirmPurchaseTransaction({
     txHash,
@@ -288,6 +391,7 @@ export const ticketsService = {
   getUserTickets,
   getTickets,
   getTicketByTokenId,
+  getTicketStats,
   markTicketAsUsed,
   createPurchaseIntent,
   confirmPurchaseTransaction,

@@ -17,6 +17,7 @@ import {
   Copy,
   TrendingUp,
   FileText,
+  Loader2,
 } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent } from "../../components/ui/card";
@@ -30,6 +31,7 @@ import {
   type ApiEvent,
   type ApiListing,
   type ApiTicket,
+  type BuyListingProgressStage,
 } from "../../services/listings.service";
 
 type ListingEvent = ApiEvent & {
@@ -51,6 +53,20 @@ const formatTicketType = (type?: string) => {
   return type.charAt(0).toUpperCase() + type.slice(1);
 };
 
+type BuyUiStage =
+  | "idle"
+  | "preparing"
+  | "awaitingWallet"
+  | "waitingChain"
+  | "syncingBackend";
+
+const BUY_STAGE_MESSAGE: Record<Exclude<BuyUiStage, "idle">, string> = {
+  preparing: "Preparing purchase transaction...",
+  awaitingWallet: "Waiting for wallet confirmation...",
+  waitingChain: "Transaction submitted. Waiting on-chain confirmation...",
+  syncingBackend: "Syncing purchase state with backend...",
+};
+
 export const TicketDetail: React.FC = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -62,6 +78,8 @@ export const TicketDetail: React.FC = () => {
   const [listing, setListing] = React.useState<ApiListing | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [buying, setBuying] = React.useState(false);
+  const [buyStage, setBuyStage] = React.useState<BuyUiStage>("idle");
+  const [activeTxHash, setActiveTxHash] = React.useState<string | null>(null);
   const [showBuyConfirm, setShowBuyConfirm] = React.useState(false);
   const [buyPopup, setBuyPopup] = React.useState<{
     type: "success" | "error";
@@ -73,7 +91,7 @@ export const TicketDetail: React.FC = () => {
 
     const timeoutId = window.setTimeout(() => {
       setBuyPopup(null);
-    }, 3000);
+    }, 7000);
 
     return () => {
       window.clearTimeout(timeoutId);
@@ -183,8 +201,11 @@ export const TicketDetail: React.FC = () => {
   const expiresAtDate = listing.expiresAt ? new Date(listing.expiresAt) : null;
   const transferCount = ticket?.transferHistory?.length ?? 0;
   const txExplorerUrl = listing.txHash
-    ? `https://etherscan.io/tx/${listing.txHash}`
+    ? `https://sepolia.etherscan.io/tx/${listing.txHash}`
     : "#";
+  const activeTxExplorerUrl = activeTxHash
+    ? `https://sepolia.etherscan.io/tx/${activeTxHash}`
+    : null;
 
   // Gallery images
 
@@ -240,11 +261,22 @@ export const TicketDetail: React.FC = () => {
     }
 
     setBuying(true);
+    setBuyStage("preparing");
+    setActiveTxHash(null);
     try {
       const result = await listingService.buy(
         provider,
         listing._id,
         user.walletAddress,
+        (stage: BuyListingProgressStage, txHash?: string) => {
+          if (txHash) setActiveTxHash(txHash);
+          if (stage === "preparing_intent") setBuyStage("preparing");
+          if (stage === "awaiting_wallet_confirmation")
+            setBuyStage("awaitingWallet");
+          if (stage === "waiting_onchain_confirmation")
+            setBuyStage("waitingChain");
+          if (stage === "syncing_backend") setBuyStage("syncingBackend");
+        },
       );
       showListingPopup("success", `Purchase successful. Tx: ${result.txHash}`);
 
@@ -258,6 +290,7 @@ export const TicketDetail: React.FC = () => {
       );
     } finally {
       setBuying(false);
+      setBuyStage("idle");
     }
   };
 
@@ -273,6 +306,35 @@ export const TicketDetail: React.FC = () => {
             }`}
           >
             {buyPopup.message}
+          </div>
+        </div>
+      )}
+
+      {buying && buyStage !== "idle" && (
+        <div className="fixed inset-0 z-[70] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-xl border border-slate-700 bg-slate-900 p-5">
+            <div className="flex items-start gap-3">
+              <Loader2 className="w-5 h-5 mt-0.5 text-cyan-300 animate-spin" />
+              <div className="flex-1">
+                <h3 className="text-white font-semibold mb-1">
+                  Processing Purchase
+                </h3>
+                <p className="text-sm text-slate-300">
+                  {BUY_STAGE_MESSAGE[buyStage]}
+                </p>
+                {activeTxHash && activeTxExplorerUrl ? (
+                  <a
+                    href={activeTxExplorerUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-2 text-xs text-cyan-300 hover:text-cyan-200 mt-3"
+                  >
+                    View transaction on Sepolia
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                ) : null}
+              </div>
+            </div>
           </div>
         </div>
       )}
