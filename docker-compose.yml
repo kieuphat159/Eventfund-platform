@@ -1,0 +1,66 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+      # Enable BuildKit for better caching
+      args:
+        BUILDKIT_INLINE_CACHE: "1"
+
+    image: eventfund-backend:latest
+
+    ports:
+      - "${PORT:-4000}:4000"
+
+    # ─── AWS Parameter Store (Default for all environments) ─────────────────
+    environment:
+      - USE_AWS_PARAMS=true
+      - ENV=${ENV:-dev}
+      - AWS_REGION=${AWS_REGION:-ap-southeast-1}
+      # For local development with AWS CLI profile
+      - AWS_PROFILE=${AWS_PROFILE:-default}
+      # For CI/CD, these will be provided by OIDC
+      # - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      # - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      # - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN}
+
+    volumes:
+      - logs:/app/backend/logs
+      # Mount AWS credentials for local development
+      - ~/.aws:/home/appuser/.aws:ro
+
+    # ─── Fallback: Local .env file (uncomment if needed) ────────────────────
+    # env_file:
+    #   - backend/.env
+    # environment:
+    #   - USE_AWS_PARAMS=false
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+    # Resource limits (recommended for production)
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  logs:
