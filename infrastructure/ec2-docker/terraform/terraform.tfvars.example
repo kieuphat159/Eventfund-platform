@@ -1,0 +1,8 @@
+aws_region   = "ap-southeast-1"
+project_name = "eventfund"
+environment  = "dev"
+instance_type = "t3.micro"
+
+# Lấy token từ: Cloudflare Zero Trust → Networks → Tunnels → Create tunnel → Docker
+# Copy phần token trong lệnh: cloudflared tunnel run --token <TOKEN>
+cloudflare_tunnel_token = "YOUR_CLOUDFLARE_TUNNEL_TOKEN"
