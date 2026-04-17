@@ -96,7 +96,7 @@ jobs:
 
       - name: Build frontend
         env:
-          VITE_API_BASE_URL: ""
+          VITE_API_BASE_URL: "/api"
           VITE_WEB3AUTH_CLIENT_ID: ${{ secrets.VITE_WEB3AUTH_CLIENT_ID }}
           VITE_WEB3AUTH_NETWORK: ${{ secrets.VITE_WEB3AUTH_NETWORK }}
           VITE_RPC_URL: ${{ secrets.VITE_RPC_URL }}
