@@ -68,6 +68,7 @@ if [ -n "$USE_AWS_PARAMS" ] && [ "$USE_AWS_PARAMS" = "true" ]; then
         PIMLICO_BUNDLER_URL_BASE
         PIMLICO_PAYMASTER_URL_BASE
         PIMLICO_SPONSORSHIP_POLICY_ID
+        BACKEND_SIGNER_PRIVATE_KEY
     "
 
     # Fetch and export each parameter
