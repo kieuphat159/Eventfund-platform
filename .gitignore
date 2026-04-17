@@ -34,3 +34,11 @@ contracts/typechain-types/
 contracts/coverage/
 contracts/coverage.json
 contracts/ignition/deployments/chain-31337
+
+# === Terraform ===
+**/.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfvars
+!*.tfvars.example
+**/*.exe

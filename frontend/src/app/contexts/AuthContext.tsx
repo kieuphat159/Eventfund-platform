@@ -15,9 +15,8 @@ import {
 import { User } from "../types/roles";
 import { getWalletAddresses } from "../services/walletService";
 import { userService } from "../services/user.service";
-import { WEB3AUTH_SEPOLIA_CHAIN_ID } from "../web3auth.config";
 
-const RAW_API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:4000";
+const RAW_API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 const API_ORIGIN = RAW_API_BASE.replace(/\/+$/, "").replace(/\/api$/, "");
 
 interface AuthContextType {
@@ -138,12 +137,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
     try {
       await connect();
-
-      if (web3Auth) {
-        await web3Auth.switchChain({
-          chainId: WEB3AUTH_SEPOLIA_CHAIN_ID,
-        });
-      }
 
       const activeProvider = web3Auth?.provider;
       if (!activeProvider) throw new Error("Provider not ready");

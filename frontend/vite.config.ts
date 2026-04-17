@@ -110,4 +110,25 @@ export default defineConfig({
   },
 
   assetsInclude: ['**/*.svg', '**/*.csv'],
+
+  build: {
+    commonjsOptions: {
+      transformMixedEsModules: true,
+    },
+    rollupOptions: {
+      plugins: [
+        {
+          name: 'inject-exports-for-web3auth',
+          transform(code: string, id: string) {
+            if (id.includes('web3auth') || id.includes('randombytes')) {
+              return {
+                code: `var exports = typeof exports !== "undefined" ? exports : {};\n${code}`,
+                map: null,
+              }
+            }
+          },
+        },
+      ],
+    },
+  },
 })
