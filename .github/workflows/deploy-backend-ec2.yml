@@ -2,12 +2,14 @@ name: Deploy App (EC2)
 
 on:
   push:
-    branches: [main, dev, "cd/cd"]
+    branches: [main, dev, cd/cd]
     paths:
       - 'backend/**'
       - 'frontend/**'
       - 'Dockerfile'
       - 'docker-entrypoint.sh'
+  pull_request:
+    branches: [main, dev, cd/cd]
   workflow_dispatch:
 
 permissions:
@@ -40,7 +42,7 @@ jobs:
         run: |
           aws s3 mb s3://$S3_BUCKET --region $AWS_REGION 2>/dev/null || true
 
-      # ─── Build & deploy backend ───────────────────────────────────────────
+      # Build and deploy backend
       - name: Build backend Docker image
         run: |
           docker build -t eventfund-backend:latest --target production .
@@ -74,7 +76,7 @@ jobs:
             --query "Command.CommandId" --output text)
           aws ssm wait command-executed --command-id $CMD_ID --instance-id $INSTANCE_ID --region $AWS_REGION
 
-      # ─── Build & deploy frontend ──────────────────────────────────────────
+      # Build and deploy frontend
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
