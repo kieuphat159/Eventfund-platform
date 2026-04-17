@@ -20,12 +20,13 @@ concurrency:
 
 env:
   AWS_REGION: ap-southeast-1
-  INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
-  S3_BUCKET: eventfund-deploy-tmp-${{ secrets.AWS_ACCOUNT_ID }}
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
+      S3_BUCKET: eventfund-deploy-tmp-${{ secrets.AWS_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v4
 
