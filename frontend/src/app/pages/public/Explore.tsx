@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Search, Grid, List } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Search, Grid, List, Plus, CalendarDays, Tag } from 'lucide-react';
 import { Input } from '../../components/ui/input';
 import { Button } from '../../components/ui/button';
 import {
@@ -13,14 +13,17 @@ import {
 import { ImageWithFallback } from '../../components/figma/ImageWithFallback';
 import { StatusBadge } from '../../components/StatusBadge';
 import { getEvents, type EventItem } from '../../services/events.service';
-
-type DateFilter = 'all' | 'today' | 'week' | 'month';
+import { useAuth } from '../../contexts/AuthContext';
 
 export const Explore: React.FC = () => {
+  const navigate = useNavigate();
+  const { user } = useAuth();
+
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
-  const [dateFilter, setDateFilter] = useState<DateFilter>('all');
+  const [startDateFilter, setStartDateFilter] = useState('');
+  const [endDateFilter, setEndDateFilter] = useState('');
   const [events, setEvents] = useState<EventItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -44,23 +47,11 @@ export const Explore: React.FC = () => {
 
   const publicEvents = useMemo(() => {
     return events.filter((event) =>
-      ['funded', 'ticketing', 'ongoing', 'completed'].includes(event.status || '')
+      ['funding', 'funded', 'ticketing', 'ongoing', 'completed'].includes(event.status || '')
     );
   }, [events]);
 
   const filteredEvents = useMemo(() => {
-    const now = new Date();
-    const endOfToday = new Date(now);
-    endOfToday.setHours(23, 59, 59, 999);
-
-    const endOfWeek = new Date(now);
-    endOfWeek.setDate(now.getDate() + 7);
-    endOfWeek.setHours(23, 59, 59, 999);
-
-    const endOfMonth = new Date(now);
-    endOfMonth.setMonth(now.getMonth() + 1);
-    endOfMonth.setHours(23, 59, 59, 999);
-
     return publicEvents.filter((event) => {
       const q = searchQuery.trim().toLowerCase();
 
@@ -78,20 +69,47 @@ export const Explore: React.FC = () => {
 
       const eventDate = event.startDate ? new Date(event.startDate) : null;
 
-      const matchesDate =
-        dateFilter === 'all'
-          ? true
-          : !eventDate
-            ? false
-            : dateFilter === 'today'
-              ? eventDate >= now && eventDate <= endOfToday
-              : dateFilter === 'week'
-                ? eventDate >= now && eventDate <= endOfWeek
-                : eventDate >= now && eventDate <= endOfMonth;
+      const matchesStartDate = !startDateFilter
+        ? true
+        : !eventDate
+          ? false
+          : eventDate >= new Date(`${startDateFilter}T00:00:00`);
 
-      return matchesSearch && matchesCategory && matchesDate;
+      const matchesEndDate = !endDateFilter
+        ? true
+        : !eventDate
+          ? false
+          : eventDate <= new Date(`${endDateFilter}T23:59:59`);
+
+      return matchesSearch && matchesCategory && matchesStartDate && matchesEndDate;
     });
-  }, [publicEvents, searchQuery, categoryFilter, dateFilter]);
+  }, [publicEvents, searchQuery, categoryFilter, startDateFilter, endDateFilter]);
+
+  const handleCreateEvent = () => {
+    if (!user) {
+      navigate('/login');
+      return;
+    }
+
+    if (user.role === 'admin') {
+      return;
+    }
+
+    navigate('/app/events/create');
+  };
+
+  const formatCategory = (category?: string) => {
+    if (!category) return 'Uncategorized';
+
+    switch (category.toLowerCase()) {
+      case 'tech':
+        return 'Technology';
+      case 'art':
+        return 'Art & Culture';
+      default:
+        return category.charAt(0).toUpperCase() + category.slice(1);
+    }
+  };
 
   if (loading) {
     return <div className="min-h-screen bg-slate-950 py-8 text-white">Loading events...</div>;
@@ -104,15 +122,28 @@ export const Explore: React.FC = () => {
   return (
     <div className="min-h-screen bg-slate-950 py-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold text-white mb-2">Explore Events</h1>
-          <p className="text-slate-400">Discover amazing experiences on the blockchain</p>
+        <div className="mb-8 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div>
+            <h1 className="text-4xl font-bold text-white mb-2">Explore Events</h1>
+            <p className="text-slate-400">Discover amazing experiences on the blockchain</p>
+          </div>
+
+          {user?.role !== 'admin' && (
+            <Button
+              type="button"
+              onClick={handleCreateEvent}
+              className="bg-emerald-500 hover:bg-emerald-600 text-white font-semibold px-5 py-2.5 shadow-lg shadow-emerald-500/20"
+            >
+              <Plus className="w-4 h-4 mr-2 text-white" />
+              Create Event
+            </Button>
+          )}
         </div>
 
         <div className="bg-slate-900 border border-slate-800 rounded-lg p-6 mb-8">
-          <div className="grid md:grid-cols-5 gap-4">
+          <div className="grid md:grid-cols-6 gap-4">
             <div className="md:col-span-2 relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-cyan-300" />
               <Input
                 type="search"
                 placeholder="Search events..."
@@ -123,31 +154,75 @@ export const Explore: React.FC = () => {
             </div>
 
             <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-              <SelectTrigger className="bg-slate-800 border-slate-700 text-white">
+              <SelectTrigger className="bg-slate-800 border-slate-700 text-cyan-300 font-medium">
                 <SelectValue placeholder="Category" />
               </SelectTrigger>
-              <SelectContent className="bg-slate-800 border-slate-700">
-                <SelectItem value="all">All Categories</SelectItem>
-                <SelectItem value="music">Music</SelectItem>
-                <SelectItem value="tech">Tech</SelectItem>
-                <SelectItem value="sports">Sports</SelectItem>
-                <SelectItem value="art">Art</SelectItem>
-                <SelectItem value="business">Business</SelectItem>
-                <SelectItem value="conference">Conference</SelectItem>
+
+              <SelectContent className="bg-slate-800 border-slate-700 text-white">
+                <SelectItem
+                  value="all"
+                  className="text-slate-200 focus:bg-purple-500/20 focus:text-purple-300 data-[state=checked]:bg-purple-500/20 data-[state=checked]:text-purple-300 data-[state=checked]:font-semibold"
+                >
+                  All Categories
+                </SelectItem>
+                <SelectItem
+                  value="music"
+                  className="text-slate-200 focus:bg-purple-500/20 focus:text-purple-300 data-[state=checked]:bg-purple-500/20 data-[state=checked]:text-purple-300 data-[state=checked]:font-semibold"
+                >
+                  Music
+                </SelectItem>
+                <SelectItem
+                  value="tech"
+                  className="text-slate-200 focus:bg-purple-500/20 focus:text-purple-300 data-[state=checked]:bg-purple-500/20 data-[state=checked]:text-purple-300 data-[state=checked]:font-semibold"
+                >
+                  Technology
+                </SelectItem>
+                <SelectItem
+                  value="sports"
+                  className="text-slate-200 focus:bg-purple-500/20 focus:text-purple-300 data-[state=checked]:bg-purple-500/20 data-[state=checked]:text-purple-300 data-[state=checked]:font-semibold"
+                >
+                  Sports
+                </SelectItem>
+                <SelectItem
+                  value="art"
+                  className="text-slate-200 focus:bg-purple-500/20 focus:text-purple-300 data-[state=checked]:bg-purple-500/20 data-[state=checked]:text-purple-300 data-[state=checked]:font-semibold"
+                >
+                  Art &amp; Culture
+                </SelectItem>
+                <SelectItem
+                  value="business"
+                  className="text-slate-200 focus:bg-purple-500/20 focus:text-purple-300 data-[state=checked]:bg-purple-500/20 data-[state=checked]:text-purple-300 data-[state=checked]:font-semibold"
+                >
+                  Business
+                </SelectItem>
+                <SelectItem
+                  value="conference"
+                  className="text-slate-200 focus:bg-purple-500/20 focus:text-purple-300 data-[state=checked]:bg-purple-500/20 data-[state=checked]:text-purple-300 data-[state=checked]:font-semibold"
+                >
+                  Conference
+                </SelectItem>
               </SelectContent>
             </Select>
 
-            <Select value={dateFilter} onValueChange={(value) => setDateFilter(value as DateFilter)}>
-              <SelectTrigger className="bg-slate-800 border-slate-700 text-white">
-                <SelectValue placeholder="Date" />
-              </SelectTrigger>
-              <SelectContent className="bg-slate-800 border-slate-700">
-                <SelectItem value="all">All Dates</SelectItem>
-                <SelectItem value="today">Today</SelectItem>
-                <SelectItem value="week">This Week</SelectItem>
-                <SelectItem value="month">This Month</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="relative">
+              <CalendarDays className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-fuchsia-300" />
+              <Input
+                type="date"
+                value={startDateFilter}
+                onChange={(e) => setStartDateFilter(e.target.value)}
+                className="pl-10 bg-slate-800 border-slate-700 text-white"
+              />
+            </div>
+
+            <div className="relative">
+              <CalendarDays className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-fuchsia-300" />
+              <Input
+                type="date"
+                value={endDateFilter}
+                onChange={(e) => setEndDateFilter(e.target.value)}
+                className="pl-10 bg-slate-800 border-slate-700 text-white"
+              />
+            </div>
 
             <div className="flex items-center space-x-2">
               <Button
@@ -157,7 +232,7 @@ export const Explore: React.FC = () => {
                 className={
                   viewMode === 'grid'
                     ? 'bg-purple-600 hover:bg-purple-700'
-                    : 'border-slate-700 hover:bg-slate-800'
+                    : 'border-slate-700 hover:bg-slate-800 text-white'
                 }
               >
                 <Grid className="w-4 h-4" />
@@ -169,13 +244,43 @@ export const Explore: React.FC = () => {
                 className={
                   viewMode === 'list'
                     ? 'bg-purple-600 hover:bg-purple-700'
-                    : 'border-slate-700 hover:bg-slate-800'
+                    : 'border-slate-700 hover:bg-slate-800 text-white'
                 }
               >
                 <List className="w-4 h-4" />
               </Button>
             </div>
           </div>
+
+          {(startDateFilter || endDateFilter) && (
+            <div className="mt-4 flex flex-wrap items-center gap-3 text-sm">
+              <span className="text-slate-400">Active date range:</span>
+
+              {startDateFilter && (
+                <span className="px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-400/20 text-cyan-300">
+                  From {startDateFilter}
+                </span>
+              )}
+
+              {endDateFilter && (
+                <span className="px-3 py-1 rounded-full bg-fuchsia-500/10 border border-fuchsia-400/20 text-fuchsia-300">
+                  To {endDateFilter}
+                </span>
+              )}
+
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => {
+                  setStartDateFilter('');
+                  setEndDateFilter('');
+                }}
+                className="h-auto px-2 py-1 text-slate-400 hover:text-white hover:bg-slate-800"
+              >
+                Clear dates
+              </Button>
+            </div>
+          )}
         </div>
 
         {filteredEvents.length === 0 ? (
@@ -210,6 +315,13 @@ export const Explore: React.FC = () => {
                         {event.title || 'Untitled event'}
                       </h3>
                       <StatusBadge status={(event.status as any) || 'draft'} />
+                    </div>
+
+                    <div className="mb-3">
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-cyan-500/10 border border-cyan-400/20 text-cyan-300 text-xs font-medium">
+                        <Tag className="w-3 h-3" />
+                        {formatCategory(event.category)}
+                      </span>
                     </div>
 
                     <p className="text-sm text-slate-400 mb-4 line-clamp-2">
@@ -268,6 +380,13 @@ export const Explore: React.FC = () => {
                           {event.title || 'Untitled event'}
                         </h3>
                         <StatusBadge status={(event.status as any) || 'draft'} />
+                      </div>
+
+                      <div className="mb-3">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-cyan-500/10 border border-cyan-400/20 text-cyan-300 text-xs font-medium">
+                          <Tag className="w-3 h-3" />
+                          {formatCategory(event.category)}
+                        </span>
                       </div>
 
                       <p className="text-sm text-slate-400 mb-3">

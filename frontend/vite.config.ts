@@ -30,33 +30,15 @@ export default defineConfig({
   },
 
   optimizeDeps: {
-    include: ['@web3auth/modal', '@web3auth/base', 'viem', 'permissionless', 'randombytes'],
-    esbuildOptions: {
-      define: {
-        global: 'globalThis',
-      },
-    },
-  },
-
-  build: {
-    commonjsOptions: {
-      transformMixedEsModules: true,
-    },
-    rollupOptions: {
-      plugins: [
-        {
-          name: 'inject-exports',
-          transform(code: string, id: string) {
-            if (id.includes('web3auth') || id.includes('randombytes')) {
-              return {
-                code: `var exports = typeof exports !== "undefined" ? exports : {};\n${code}`,
-                map: null,
-              }
-            }
-          },
-        },
-      ],
-    },
+    include: [
+      '@web3auth/modal',
+      'viem',
+      'permissionless',
+      'readable-stream',
+      'stream-browserify',
+      'crypto-browserify',
+      'ox',
+    ],
   },
 
   server: {

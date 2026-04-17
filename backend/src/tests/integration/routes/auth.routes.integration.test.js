@@ -14,6 +14,7 @@ import request from 'supertest';
 import jwt from 'jsonwebtoken';
 import { ethers } from 'ethers';
 import app from '../../../app.js';
+import config from '../../../config/env.js';
 import User from '../../../models/User.model.js';
 import JWTService from '../../../services/auth/jwt.service.js';
 import { connectTestDB, disconnectTestDB, clearTestDB } from '../../helpers/db.helper.js';
@@ -393,9 +394,9 @@ describe('Auth Routes - E2E Integration Tests', () => {
         const message = siweService.createSIWEMessage(
           wallet.address,
           expiredNonce,
-          'localhost:4000',
-          'http://localhost:4000',
-          1
+          config.siwe.domain,
+          config.siwe.uri,
+          config.siwe.chainId
         );
 
         // Sign message

@@ -18,6 +18,24 @@ export interface UserStats {
   memberSince: string;
 }
 
+export interface UserInvestment {
+  _id: string;
+  eventId: {
+    _id: string;
+    title: string;
+    status?: string;
+    startDate?: string;
+    endDate?: string;
+    description?: string;
+  };
+  contributionAmount: string;
+  sharePercentage: number;
+  claimedReward: string;
+  pendingReward: string;
+  shareTokenId?: string;
+  createdAt: string;
+}
+
 function getAuthHeaders(): HeadersInit {
   const jwtToken = localStorage.getItem("jwtToken");
   return jwtToken ? { Authorization: `Bearer ${jwtToken}` } : {};
@@ -77,5 +95,22 @@ export const userService = {
         memberSince: "N/A",
       };
     }
+  },
+
+  // Calls UsersController.getUserShares
+  getUserShares: async (): Promise<UserInvestment[]> => {
+    const response = await api.get<{ success: boolean; data: UserInvestment[] }>(
+      "/users/shares",
+      { headers: getAuthHeaders() },
+    );
+    return response.data || [];
+  },
+
+  getUserInvestmentById: async (id: string): Promise<UserInvestment> => {
+    const response = await api.get<{ success: boolean; data: UserInvestment }>(
+      `/users/shares/${id}`,
+      { headers: getAuthHeaders() },
+    );
+    return response.data;
   },
 };

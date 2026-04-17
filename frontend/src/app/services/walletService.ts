@@ -23,8 +23,10 @@ export async function getWalletAddresses(
 
   const addresses = await walletClient.getAddresses();
 
+  // Some Web3Auth setups return only one address.
+  // Prefer the documented ordering when both exist, and fall back gracefully otherwise.
   const smartAccountAddress = addresses[0];
-  const eoaAddress = addresses[1];
+  const eoaAddress = addresses[1] || addresses[0];
 
   if (!smartAccountAddress) throw new Error("Failed to get Smart Account address.");
   if (!eoaAddress) throw new Error("Failed to get EOA address.");

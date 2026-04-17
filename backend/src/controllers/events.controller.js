@@ -1,15 +1,15 @@
-import asyncHandler from '../utils/asyncHandler.js';
-import * as eventsService from '../services/events/events.service.js';
+import asyncHandler from "../utils/asyncHandler.js";
+import * as eventsService from "../services/events/events.service.js";
 
 /**
  * EventsController - Handles event management endpoints
  *
  * Endpoints:
- * - POST /events - Create new event (organizer role required)
+ * - POST /events - Create new draft event (authenticated user required)
  * - GET /events - List events with filters and pagination (public)
  * - GET /events/:id - Get single event (public)
- * - PATCH /events/:id - Update event (organizer role, ownership required)
- * - DELETE /events/:id - Delete draft event (organizer role, ownership required)
+ * - PATCH /events/:id - Update event content (ownership required)
+ * - DELETE /events/:id - Delete draft event (ownership required)
  * - GET /events/:id/stats - Get event statistics (public)
  */
 class EventsController {
@@ -27,7 +27,7 @@ class EventsController {
 
     res.status(201).json({
       success: true,
-      data: event
+      data: event,
     });
   });
 
@@ -41,7 +41,7 @@ class EventsController {
 
     res.status(200).json({
       success: true,
-      data: result
+      data: result,
     });
   });
 
@@ -54,7 +54,7 @@ class EventsController {
 
     res.status(200).json({
       success: true,
-      data: event
+      data: event,
     });
   });
 
@@ -64,11 +64,15 @@ class EventsController {
    */
   updateEvent = asyncHandler(async (req, res) => {
     const updates = req.validated?.body || req.body;
-    const event = await this.eventsService.updateEvent(req.params.id, updates, req.user);
+    const event = await this.eventsService.updateEvent(
+      req.params.id,
+      updates,
+      req.user,
+    );
 
     res.status(200).json({
       success: true,
-      data: event
+      data: event,
     });
   });
 
@@ -81,7 +85,25 @@ class EventsController {
 
     res.status(200).json({
       success: true,
-      message: 'Event deleted successfully'
+      message: "Event deleted successfully",
+    });
+  });
+
+  /**
+   * POST /events/:id/invest
+   * Invest in an event by contributing funding
+   */
+  investInEvent = asyncHandler(async (req, res) => {
+    const amount = req.validated?.body?.amount ?? req.body.amount;
+    const share = await this.eventsService.investInEvent(
+      req.params.id,
+      amount,
+      req.user,
+    );
+
+    res.status(200).json({
+      success: true,
+      data: share,
     });
   });
 
@@ -94,7 +116,7 @@ class EventsController {
 
     res.status(200).json({
       success: true,
-      data: stats
+      data: stats,
     });
   });
 
@@ -106,12 +128,32 @@ class EventsController {
     const { id, imageUrl } = req.params;
     const decodedImageUrl = decodeURIComponent(imageUrl);
 
-    const event = await this.eventsService.deleteEventImage(id, decodedImageUrl, req.user);
+    const event = await this.eventsService.deleteEventImage(
+      id,
+      decodedImageUrl,
+      req.user,
+    );
 
     res.status(200).json({
       success: true,
-      message: 'Image deleted successfully',
-      data: event
+      message: "Image deleted successfully",
+      data: event,
+    });
+  });
+
+  // 🔥 NEW: assign verifier
+  assignVerifier = asyncHandler(async (req, res) => {
+    const { verifier } = req.body;
+
+    const event = await this.eventsService.assignVerifier(
+      req.params.id,
+      verifier,
+      req.user
+    );
+
+    res.status(200).json({
+      success: true,
+      data: event,
     });
   });
 }

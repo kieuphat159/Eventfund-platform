@@ -1,8 +1,8 @@
-import express from 'express';
-import MarketplaceController from '../controllers/marketplace.controller.js';
-import { authenticate } from '../middlewares/auth.middleware.js';
-import { validate } from '../middlewares/validate.middleware.js';
-import { marketplaceSchemas } from '../validators/marketplace.validator.js';
+import express from "express";
+import MarketplaceController from "../controllers/marketplace.controller.js";
+import { authenticate } from "../middlewares/auth.middleware.js";
+import { validate } from "../middlewares/validate.middleware.js";
+import { marketplaceSchemas } from "../validators/marketplace.validator.js";
 
 const router = express.Router();
 const marketplaceController = new MarketplaceController();
@@ -125,7 +125,11 @@ const marketplaceController = new MarketplaceController();
  *       500:
  *         description: Server error
  */
-router.get('/listings', validate({ query: marketplaceSchemas.queryListings }), (req, res, next) => marketplaceController.getListings(req, res, next));
+router.get(
+  "/listings",
+  validate({ query: marketplaceSchemas.queryListings }),
+  (req, res, next) => marketplaceController.getListings(req, res, next),
+);
 
 /**
  * @swagger
@@ -182,7 +186,9 @@ router.get('/listings', validate({ query: marketplaceSchemas.queryListings }), (
  *       500:
  *         description: Server error
  */
-router.get('/listings/:id', (req, res, next) => marketplaceController.getListingById(req, res, next));
+router.get("/listings/:id", (req, res, next) =>
+  marketplaceController.getListingById(req, res, next),
+);
 
 /**
  * @swagger
@@ -246,7 +252,42 @@ router.get('/listings/:id', (req, res, next) => marketplaceController.getListing
  *       500:
  *         description: Server error
  */
-router.post('/listings', authenticate, validate({ body: marketplaceSchemas.createListing }), (req, res, next) => marketplaceController.createListing(req, res, next));
+router.post(
+  "/listings",
+  authenticate,
+  validate({ body: marketplaceSchemas.createListing }),
+  (req, res, next) => marketplaceController.createListing(req, res, next),
+);
+
+router.post(
+  "/listings/intent",
+  authenticate,
+  validate({ body: marketplaceSchemas.createListingIntent }),
+  (req, res, next) => marketplaceController.createListingIntent(req, res, next),
+);
+
+router.post("/listings/:id/buy-intent", authenticate, (req, res, next) =>
+  marketplaceController.createBuyListingIntent(req, res, next),
+);
+
+router.post("/listings/:id/cancel-intent", authenticate, (req, res, next) =>
+  marketplaceController.createCancelListingIntent(req, res, next),
+);
+
+router.post(
+  "/listings/confirm-sold",
+  authenticate,
+  validate({ body: marketplaceSchemas.confirmSoldTransaction }),
+  (req, res, next) =>
+    marketplaceController.confirmSoldTransaction(req, res, next),
+);
+
+router.get(
+  "/history",
+  validate({ query: marketplaceSchemas.queryHistory }),
+  (req, res, next) =>
+    marketplaceController.getMarketplaceTransactionHistory(req, res, next),
+);
 
 /**
  * @swagger
@@ -292,7 +333,9 @@ router.post('/listings', authenticate, validate({ body: marketplaceSchemas.creat
  *       500:
  *         description: Server error
  */
-router.delete('/listings/:id', authenticate, (req, res, next) => marketplaceController.cancelListing(req, res, next));
+router.delete("/listings/:id", authenticate, (req, res, next) =>
+  marketplaceController.cancelListing(req, res, next),
+);
 
 /**
  * @swagger
@@ -340,6 +383,8 @@ router.delete('/listings/:id', authenticate, (req, res, next) => marketplaceCont
  *       500:
  *         description: Server error
  */
-router.get('/stats', (req, res, next) => marketplaceController.getMarketplaceStats(req, res, next));
+router.get("/stats", (req, res, next) =>
+  marketplaceController.getMarketplaceStats(req, res, next),
+);
 
 export default router;

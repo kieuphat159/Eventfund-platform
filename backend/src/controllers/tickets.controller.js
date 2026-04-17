@@ -16,7 +16,7 @@ class TicketsController {
 
     res.status(200).json({
       success: true,
-      data: result
+      data: result,
     });
   });
 
@@ -27,7 +27,32 @@ class TicketsController {
 
     res.status(200).json({
       success: true,
-      data: ticket
+      data: ticket,
+    });
+  });
+
+  createPurchaseIntent = asyncHandler(async (req, res) => {
+    const body = req.validated?.body || req.body;
+
+    const intent = await this.ticketsService.createPurchaseIntent(
+      body,
+      req.user.walletAddress
+    );
+
+    res.status(200).json({
+      success: true,
+      data: intent,
+    });
+  });
+
+  confirmPurchaseTransaction = asyncHandler(async (req, res) => {
+    const body = req.validated?.body || req.body;
+
+    const result = await this.ticketsService.confirmPurchaseTransaction(body);
+
+    res.status(200).json({
+      success: true,
+      data: result,
     });
   });
 
@@ -39,18 +64,23 @@ class TicketsController {
 
     res.status(200).json({
       success: true,
-      data: result
+      data: result,
     });
   });
 
   verifyTicket = asyncHandler(async (req, res) => {
     const { tokenId, walletAddress } = req.validated?.body || req.body;
 
-    const result = await this.ticketsService.verifyTicket(tokenId, walletAddress);
+    // NEW: truyền thêm verifier đang đăng nhập
+    const result = await this.ticketsService.verifyTicket(
+      tokenId,
+      walletAddress,
+      req.user.walletAddress
+    );
 
     res.status(200).json({
       success: true,
-      data: result
+      data: result,
     });
   });
 
@@ -62,7 +92,32 @@ class TicketsController {
 
     res.status(200).json({
       success: true,
-      data: ticket
+      data: ticket,
+    });
+  });
+
+  createUseTicketIntent = asyncHandler(async (req, res) => {
+    const { tokenId } = req.params;
+
+    const intent = await this.ticketsService.createUseTicketIntent(
+      tokenId,
+      req.user.walletAddress
+    );
+
+    res.status(200).json({
+      success: true,
+      data: intent,
+    });
+  });
+
+  confirmUseTicketTransaction = asyncHandler(async (req, res) => {
+    const body = req.validated?.body || req.body;
+
+    const result = await this.ticketsService.confirmUseTicketTransaction(body);
+
+    res.status(200).json({
+      success: true,
+      data: result,
     });
   });
 
@@ -73,7 +128,7 @@ class TicketsController {
 
     res.status(200).json({
       success: true,
-      data: stats
+      data: stats,
     });
   });
 }

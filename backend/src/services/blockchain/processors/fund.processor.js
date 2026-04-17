@@ -12,6 +12,7 @@ import {
   planReorgSafeSync,
   readReorgPolicyFromEnv,
 } from "../sync/reorgPolicy.js";
+import { addBigInt, compareBigInt, toBigInt } from "../../../utils/bigint.js";
 
 // ==================== REPOSITORIES ====================
 import eventRepo from "../../../repositories/event.repo.js";
@@ -36,11 +37,14 @@ const toNumberSafe = (v) => {
   return Number.isFinite(n) ? n : 0;
 };
 
+const toAmountString = (v) =>
+  v === undefined || v === null ? "0" : String(v);
+
 const lowerAddress = (v) => (v ? String(v).toLowerCase() : undefined);
 
 function getEventStatusLabel(statusValue) {
   const map = {
-    0: "draft", // Changed from "none" to match Event schema enum
+    0: "draft",
     1: "funding",
     2: "funded",
     3: "ticketing",
@@ -236,30 +240,66 @@ async function rebuildFullEventStateFromChainLog(contractEventId, contractAddres
 async function handleEventCreated(log) {
   const { args, transactionHash, blockNumber } = log;
   const contractEventId = toStringId(args.eventId);
-  const organizer = lowerAddress(args.organizer);
+  const onChainOrganizer = lowerAddress(args.organizer);
 
-  await eventRepo.upsertByContractEventId(contractEventId, {
-    organizer,
-    fundingGoal: toStringId(args.fundingGoal),         // String in schema
-    fundingDeadline: toNumberSafe(args.fundingDeadline) > 0
-      ? new Date(toNumberSafe(args.fundingDeadline) * 1000)
-      : undefined,                                      // Date in schema, convert from unix
-    minStakeRequired: toStringId(args.minStakeRequired), // String in schema
-    organizerShareBps: toNumberSafe(args.organizerShareBps),
-    ticketPrice: toNumberSafe(args.ticketPrice),
-    maxTickets: toNumberSafe(args.maxTickets),
-    usedThreshold: toNumberSafe(args.usedThreshold),
-    organizerStake: toStringId(args.stakeAmount), // use organizerStake (schema field)
-    status: "funding",
-    escrowStatus: "holding",
-    // createdByTxHash and createdBlockNumber omitted: traceable via ChainLog
+  const normalizedFundingGoal = toStringId(args.fundingGoal);
+  const normalizedMinStakeRequired = toStringId(args.minStakeRequired);
+  const normalizedTicketPrice = toNumberSafe(args.ticketPrice);
+  const normalizedMaxTickets = toNumberSafe(args.maxTickets);
+  const normalizedUsedThreshold = toNumberSafe(args.usedThreshold);
+
+  const matchedDraft = await eventRepo.findMatchingDraftForOnChainEvent({
+    organizer: onChainOrganizer,
+    fundingGoal: normalizedFundingGoal,
+    minStakeRequired: normalizedMinStakeRequired,
+    ticketPrice: normalizedTicketPrice,
+    maxTickets: normalizedMaxTickets,
+    usedThreshold: normalizedUsedThreshold,
   });
+
+  if (matchedDraft?._id) {
+    await eventRepo.updateById(matchedDraft._id, {
+      $set: {
+        contractEventId,
+        onChainOrganizer,
+        fundingGoal: normalizedFundingGoal,
+        fundingDeadline: toNumberSafe(args.fundingDeadline) > 0
+          ? new Date(toNumberSafe(args.fundingDeadline) * 1000)
+          : undefined,
+        minStakeRequired: normalizedMinStakeRequired,
+        organizerShareBps: toNumberSafe(args.organizerShareBps),
+        ticketPrice: normalizedTicketPrice,
+        maxTickets: normalizedMaxTickets,
+        usedThreshold: normalizedUsedThreshold,
+        organizerStake: toStringId(args.stakeAmount),
+        status: "funding",
+        escrowStatus: "holding",
+      },
+    });
+  } else {
+    await eventRepo.upsertByContractEventId(contractEventId, {
+      organizer: onChainOrganizer,
+      onChainOrganizer,
+      fundingGoal: normalizedFundingGoal, // String in schema
+      fundingDeadline: toNumberSafe(args.fundingDeadline) > 0
+        ? new Date(toNumberSafe(args.fundingDeadline) * 1000)
+        : undefined,
+      minStakeRequired: normalizedMinStakeRequired,
+      organizerShareBps: toNumberSafe(args.organizerShareBps),
+      ticketPrice: normalizedTicketPrice,
+      maxTickets: normalizedMaxTickets,
+      usedThreshold: normalizedUsedThreshold,
+      organizerStake: toStringId(args.stakeAmount),
+      status: "funding",
+      escrowStatus: "holding",
+    });
+  }
 
   if (toNumberSafe(args.stakeAmount) > 0) {
     await contributionRepo.upsertOrganizerStake({
       txHash: transactionHash.toLowerCase(),
       eventContractId: contractEventId,
-      organizer,
+      organizer: onChainOrganizer,
       amount: toNumberSafe(args.stakeAmount),
       blockNumber,
     });
@@ -284,7 +324,7 @@ async function handleContributionMade(log, eventDoc) {
 async function handleSharesIssued(log, eventDoc) {
   const { args } = log;
   const holder = lowerAddress(args.donator);
-  const sharesMinted = toNumberSafe(args.sharesMinted);
+  const sharesMinted = toAmountString(args.sharesMinted);
 
   // mintedShares not incremented here; rebuildFundState is the source of truth
   await shareRepo.upsertSharesIssued(eventDoc._id, holder, sharesMinted);
@@ -487,7 +527,7 @@ async function handleRoyaltyDeposited(log, eventDoc) {
 async function handleContributionRefunded(log, eventDoc) {
   const { args, transactionHash } = log;
   const contributor = lowerAddress(args.donator);
-  const amount = toNumberSafe(args.amount);
+  const amount = toAmountString(args.amount);
 
   await contributionRepo.markDonatorContributionsAsRefunded(eventDoc._id, contributor);
 

@@ -172,7 +172,7 @@ export async function upsertByContractEventId(contractEventId, data, models = {}
   // Build $set explicitly — no spread to avoid injecting stale/unknown fields
   const setFields = {
     contractEventId,
-    organizer: data.organizer,
+    onChainOrganizer: data.onChainOrganizer,
     fundingGoal: data.fundingGoal,
     fundingDeadline: data.fundingDeadline,
     minStakeRequired: data.minStakeRequired,
@@ -194,6 +194,14 @@ export async function upsertByContractEventId(contractEventId, data, models = {}
     {
       $set: setFields,
       $setOnInsert: {
+        organizer: data.organizer,
+        title: data.title || `On-chain Event ${contractEventId}`,
+        startDate: data.startDate || data.fundingDeadline || new Date(),
+        endDate:
+          data.endDate ||
+          (data.fundingDeadline
+            ? new Date(new Date(data.fundingDeadline).getTime() + 60 * 60 * 1000)
+            : new Date(Date.now() + 60 * 60 * 1000)),
         createdAt: new Date(),
         currentFunding: "0",  // String to match schema type
         totalRevenue: "0",    // String to match schema type
@@ -229,6 +237,26 @@ export async function updateByContractEventId(contractEventId, updates, models =
 export async function findByContractEventId(contractEventId, models = {}) {
   const Event = models.Event || DefaultEvent;
   return await Event.findOne({ contractEventId }).lean();
+}
+
+/**
+ * Find latest draft owned by organizer that matches on-chain creation params.
+ */
+export async function findMatchingDraftForOnChainEvent(match, models = {}) {
+  const Event = models.Event || DefaultEvent;
+
+  return await Event.findOne({
+    status: "draft",
+    organizer: match.organizer,
+    fundingGoal: match.fundingGoal,
+    minStakeRequired: match.minStakeRequired,
+    ticketPrice: match.ticketPrice,
+    maxTickets: match.maxTickets,
+    usedThreshold: match.usedThreshold,
+    contractEventId: { $exists: false },
+  })
+    .sort({ createdAt: -1 })
+    .lean();
 }
 
 /**
@@ -301,4 +329,4 @@ export async function clearProcessedTxHashes(txHashes, models = {}) {
   );
 }
 
-export default { createEvent, findById, findEvents, updateById, deleteById, updateFundingStatus, incrementTicketCounters, countEvents, getRevenueStats, upsertByContractEventId, findByContractEventId, isTxHashProcessed, markTxHashProcessed, applyIdempotentDeltaByTxHash, updateByContractEventId, clearProcessedTxHashes };
+export default { createEvent, findById, findEvents, updateById, deleteById, updateFundingStatus, incrementTicketCounters, countEvents, getRevenueStats, upsertByContractEventId, findByContractEventId, findMatchingDraftForOnChainEvent, isTxHashProcessed, markTxHashProcessed, applyIdempotentDeltaByTxHash, updateByContractEventId, clearProcessedTxHashes };

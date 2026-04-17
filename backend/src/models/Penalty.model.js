@@ -15,13 +15,15 @@ const penaltySchema = new mongoose.Schema({
   },
 
   stakeAmount: {
-    type: Number, // Stake ban đầu
+    type: String, // Stake ban đầu
     required: true,
+    default: "0",
   },
 
   penaltyAmount: {
-    type: Number, // Số tiền bị phạt
+    type: String, // Số tiền bị phạt
     required: true,
+    default: "0",
   },
 
   penaltyPercentage: {
@@ -31,8 +33,13 @@ const penaltySchema = new mongoose.Schema({
 
   reason: {
     type: String,
-    enum: ["cancelled", "fraud", "threshold_not_met"],
+    enum: ["cancelled", "fraud", "threshold_not_met", "unknown"],
     required: true,
+  },
+
+  penaltyBps: {
+    type: Number,
+    default: 0,
   },
 
   txHash: {

@@ -5,7 +5,6 @@ import {
   Search,
   SlidersHorizontal,
   X,
-  MapPin,
   Calendar,
   Ticket,
 } from "lucide-react";
@@ -25,14 +24,14 @@ import {
 import { Badge } from "../../components/ui/badge";
 import { listingService, ApiListing } from "../../services/listings.service";
 import { ImageWithFallback } from "../../components/figma/ImageWithFallback";
+import { ethers } from "ethers";
 
 export const Marketplace: React.FC = () => {
   const [showFilters, setShowFilters] = React.useState(true);
   const [searchQuery, setSearchQuery] = React.useState("");
-  const [priceRange, setPriceRange] = React.useState([0, 10]);
+  const [priceRange, setPriceRange] = React.useState([0.01, 10]); // UI
+  const [appliedPriceRange, setAppliedPriceRange] = React.useState([0.01, 10]); // dùng gọi API
   const [selectedTicketType, setSelectedTicketType] = React.useState("all");
-  const [selectedLocation, setSelectedLocation] = React.useState("all");
-  const [selectedAvailability, setSelectedAvailability] = React.useState("all");
   const [selectedDate, setSelectedDate] = React.useState("all");
   const [sortBy, setSortBy] = React.useState("newest");
 
@@ -43,7 +42,26 @@ export const Marketplace: React.FC = () => {
   React.useEffect(() => {
     const fetchListings = async () => {
       try {
-        const res = await listingService.getAll();
+        setLoading(true);
+
+        const sortMap: Record<string, any> = {
+          newest: { sortBy: "listedAt", sortOrder: "desc" },
+          "price-low": { sortBy: "price", sortOrder: "asc" },
+          "price-high": { sortBy: "price", sortOrder: "desc" },
+        };
+
+        const res = await listingService.getAll({
+          page: 1,
+          limit: 20,
+          minPrice: ethers
+            .parseEther(appliedPriceRange[0].toString())
+            .toString(),
+          maxPrice: ethers
+            .parseEther(appliedPriceRange[1].toString())
+            .toString(),
+          ...sortMap[sortBy],
+        });
+
         setListings(res.docs);
       } catch (err) {
         console.error(err);
@@ -53,24 +71,20 @@ export const Marketplace: React.FC = () => {
     };
 
     fetchListings();
-  }, []);
+  }, [appliedPriceRange, sortBy]);
 
   const clearFilters = () => {
     setSearchQuery("");
     setPriceRange([0, 10]);
     setSelectedTicketType("all");
-    setSelectedLocation("all");
-    setSelectedAvailability("all");
     setSelectedDate("all");
     setSortBy("newest");
   };
 
   const activeFiltersCount = [
     searchQuery !== "",
-    priceRange[0] !== 0 || priceRange[1] !== 10,
+    priceRange[0] !== 0.01 || priceRange[1] !== 10,
     selectedTicketType !== "all",
-    selectedLocation !== "all",
-    selectedAvailability !== "all",
     selectedDate !== "all",
   ].filter(Boolean).length;
   const navigate = useNavigate();
@@ -79,6 +93,17 @@ export const Marketplace: React.FC = () => {
       <div className="text-white p-10 text-center">Loading marketplace...</div>
     );
   }
+
+  const filteredListings = listings.filter((listing) => {
+    const eventTitle = listing.eventId?.title?.toLowerCase() || "";
+    const matchesSearch = eventTitle.includes(searchQuery.toLowerCase());
+
+    const ticketType = listing.ticketId?.ticketType;
+    const matchesTicketType =
+      selectedTicketType === "all" ? true : ticketType === selectedTicketType;
+
+    return matchesSearch && matchesTicketType;
+  });
 
   return (
     <div className="min-h-screen bg-slate-950 py-8">
@@ -115,11 +140,10 @@ export const Marketplace: React.FC = () => {
                 <SelectTrigger className="bg-slate-900 border-slate-800 text-white h-12">
                   <SelectValue placeholder="Sort by" />
                 </SelectTrigger>
-                <SelectContent className="bg-slate-900 border-slate-800">
+                <SelectContent className="bg-slate-900 border-slate-800 text-white">
                   <SelectItem value="newest">New Listings</SelectItem>
                   <SelectItem value="price-low">Price: Low to High</SelectItem>
                   <SelectItem value="price-high">Price: High to Low</SelectItem>
-                  <SelectItem value="popular">Popular Events</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -170,20 +194,21 @@ export const Marketplace: React.FC = () => {
                     </Label>
                     <div className="pt-2">
                       <Slider
-                        min={0}
+                        min={0.01}
                         max={10}
-                        step={0.1}
+                        step={0.01}
                         value={priceRange}
-                        onValueChange={setPriceRange}
+                        onValueChange={setPriceRange} // kéo mượt
+                        onValueCommit={(value) => setAppliedPriceRange(value)} // thả chuột mới call
                         className="w-full"
                       />
                     </div>
                     <div className="flex items-center justify-between text-sm">
                       <span className="text-slate-400">
-                        {priceRange[0].toFixed(1)} ETH
+                        {priceRange[0].toFixed(2)} ETH
                       </span>
                       <span className="text-slate-400">
-                        {priceRange[1].toFixed(1)} ETH
+                        {priceRange[1].toFixed(2)} ETH
                       </span>
                     </div>
                   </div>
@@ -201,7 +226,7 @@ export const Marketplace: React.FC = () => {
                       <SelectTrigger className="bg-slate-800 border-slate-700 text-white">
                         <SelectValue />
                       </SelectTrigger>
-                      <SelectContent className="bg-slate-800 border-slate-700">
+                      <SelectContent className="bg-slate-800 border-slate-700 text-white">
                         <SelectItem value="all">All Dates</SelectItem>
                         <SelectItem value="today">Today</SelectItem>
                         <SelectItem value="tomorrow">Tomorrow</SelectItem>
@@ -225,64 +250,11 @@ export const Marketplace: React.FC = () => {
                       <SelectTrigger className="bg-slate-800 border-slate-700 text-white">
                         <SelectValue />
                       </SelectTrigger>
-                      <SelectContent className="bg-slate-800 border-slate-700">
+                      <SelectContent className="bg-slate-800 border-slate-700 text-white">
                         <SelectItem value="all">All Types</SelectItem>
                         <SelectItem value="vip">VIP</SelectItem>
-                        <SelectItem value="general">
-                          General Admission
-                        </SelectItem>
                         <SelectItem value="premium">Premium</SelectItem>
                         <SelectItem value="early-bird">Early Bird</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  {/* Location */}
-                  <div className="space-y-3">
-                    <Label className="text-slate-300 font-medium flex items-center">
-                      <MapPin className="w-4 h-4 mr-2 text-orange-400" />
-                      Location
-                    </Label>
-                    <Select
-                      value={selectedLocation}
-                      onValueChange={setSelectedLocation}
-                    >
-                      <SelectTrigger className="bg-slate-800 border-slate-700 text-white">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="bg-slate-800 border-slate-700">
-                        <SelectItem value="all">All Locations</SelectItem>
-                        <SelectItem value="new-york">New York, NY</SelectItem>
-                        <SelectItem value="los-angeles">
-                          Los Angeles, CA
-                        </SelectItem>
-                        <SelectItem value="san-francisco">
-                          San Francisco, CA
-                        </SelectItem>
-                        <SelectItem value="miami">Miami, FL</SelectItem>
-                        <SelectItem value="chicago">Chicago, IL</SelectItem>
-                        <SelectItem value="austin">Austin, TX</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  {/* Availability */}
-                  <div className="space-y-3">
-                    <Label className="text-slate-300 font-medium">
-                      Availability
-                    </Label>
-                    <Select
-                      value={selectedAvailability}
-                      onValueChange={setSelectedAvailability}
-                    >
-                      <SelectTrigger className="bg-slate-800 border-slate-700 text-white">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="bg-slate-800 border-slate-700">
-                        <SelectItem value="all">All Tickets</SelectItem>
-                        <SelectItem value="available">Available Now</SelectItem>
-                        <SelectItem value="low-stock">Low Stock</SelectItem>
-                        <SelectItem value="last-chance">Last Chance</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -309,19 +281,9 @@ export const Marketplace: React.FC = () => {
                             {selectedTicketType}
                           </Badge>
                         )}
-                        {selectedLocation !== "all" && (
-                          <Badge className="bg-orange-600/10 text-orange-400 border-orange-500/20">
-                            {selectedLocation}
-                          </Badge>
-                        )}
                         {selectedDate !== "all" && (
                           <Badge className="bg-cyan-600/10 text-cyan-400 border-cyan-500/20">
                             {selectedDate}
-                          </Badge>
-                        )}
-                        {selectedAvailability !== "all" && (
-                          <Badge className="bg-pink-600/10 text-pink-400 border-pink-500/20">
-                            {selectedAvailability}
                           </Badge>
                         )}
                       </div>
@@ -352,70 +314,87 @@ export const Marketplace: React.FC = () => {
 
         {/* Marketplace Grid */}
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {listings.map((listing) => (
-            <div
-              key={listing.id}
-              onClick={() => navigate(`/tickets/${listing.id}`)}
-              className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden hover:border-purple-500/50 transition-all hover:shadow-lg hover:shadow-purple-500/10 cursor-pointer"
-            >
-              <div className="aspect-video overflow-hidden relative">
-                <ImageWithFallback
-                  src={listing.eventId.imageUrls[0] || "/placeholder.png"}
-                  alt={listing.eventId.title}
-                  className="w-full h-full object-cover"
-                />
-                <div className="absolute top-3 right-3 bg-purple-600 text-white text-xs px-2 py-1 rounded-full flex items-center space-x-1">
-                  <Zap className="w-3 h-3" />
-                  <span>For Sale</span>
-                </div>
-              </div>
-              <div className="p-5">
-                <h3 className="text-lg font-semibold text-white mb-1">
-                  {listing.eventId.title}
-                </h3>
-                <p className="text-sm text-slate-400 mb-4">
-                  {listing.ticketId.ticketType}
-                </p>
+          {filteredListings.map((listing) => {
+            const listingId = listing.id || listing._id;
+            const eventTitle = listing.eventId?.title || "Untitled event";
+            const eventImage = listing.eventId?.imageUrls?.[0] || "/placeholder.png";
+            const ticketType = listing.ticketId?.ticketType || "Unknown ticket type";
+            const seller = listing.seller || "Unknown seller";
 
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <p className="text-xs text-slate-500 mb-1">Seller</p>
-                    <p className="text-sm text-slate-300 font-mono">
-                      {listing.seller.slice(0, 10)}...{listing.seller.slice(-4)}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-xs text-slate-500 mb-1">Price</p>
-                    <p className="text-xl font-bold text-purple-400">
-                      {listing.price} ETH
-                    </p>
+            let formattedPrice = "0";
+            try {
+              formattedPrice = ethers.formatEther(listing.price || "0");
+            } catch {
+              formattedPrice = "0";
+            }
+
+            return (
+              <div
+                key={listingId}
+                onClick={() => navigate(`/tickets/${listingId}`)}
+                className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden hover:border-purple-500/50 transition-all hover:shadow-lg hover:shadow-purple-500/10 cursor-pointer"
+              >
+                <div className="aspect-video overflow-hidden relative">
+                  <ImageWithFallback
+                    src={eventImage}
+                    alt={eventTitle}
+                    className="w-full h-full object-cover"
+                  />
+                  <div className="absolute top-3 right-3 bg-purple-600 text-white text-xs px-2 py-1 rounded-full flex items-center space-x-1">
+                    <Zap className="w-3 h-3" />
+                    <span>For Sale</span>
                   </div>
                 </div>
+                <div className="p-5">
+                  <h3 className="text-lg font-semibold text-white mb-1">
+                    {eventTitle}
+                  </h3>
+                  <p className="text-sm text-slate-400 mb-4">
+                    {ticketType}
+                  </p>
 
-                <Button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    navigate(`/tickets/${listing.id}`);
-                  }}
-                  className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white"
-                >
-                  <ShoppingCart className="w-4 h-4 mr-2" />
-                  Buy Now
-                </Button>
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <p className="text-xs text-slate-500 mb-1">Seller</p>
+                      <p className="text-sm text-slate-300 font-mono">
+                        {seller.length > 14
+                          ? `${seller.slice(0, 10)}...${seller.slice(-4)}`
+                          : seller}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs text-slate-500 mb-1">Price</p>
+                      <p className="text-xl font-bold text-purple-400">
+                        {formattedPrice} ETH
+                      </p>
+                    </div>
+                  </div>
+
+                  <Button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigate(`/tickets/${listingId}`);
+                    }}
+                    className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white"
+                  >
+                    <ShoppingCart className="w-4 h-4 mr-2" />
+                    Buy Now
+                  </Button>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Empty State Placeholder */}
-        {listings.length === 0 && (
+        {filteredListings.length === 0 && (
           <div className="text-center py-20">
             <ShoppingCart className="w-16 h-16 text-slate-700 mx-auto mb-4" />
             <h3 className="text-xl font-semibold text-white mb-2">
-              No listings available
+              No listings found
             </h3>
             <p className="text-slate-400">
-              Check back later for new ticket listings
+              Try adjusting your filters or check back later for new listings
             </p>
           </div>
         )}

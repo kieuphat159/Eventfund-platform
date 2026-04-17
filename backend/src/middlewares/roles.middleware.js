@@ -1,4 +1,5 @@
 import { UnauthorizedError, ForbiddenError } from '../utils/customErrors.js';
+import { ROLES } from '../constants/roles.js'; 
 
 /**
  * Role-based access control middleware
@@ -9,7 +10,7 @@ import { UnauthorizedError, ForbiddenError } from '../utils/customErrors.js';
  * Require specific role(s) to access endpoint
  * Admin role always has access to all endpoints
  *
- * @param {...string} roles - Required roles (user, organizer, verifier, admin)
+ * @param {...string} roles - Required roles (user, verifier, admin)
  * @returns {Function} Express middleware function
  */
 export function requireRole(...roles) {
@@ -33,26 +34,26 @@ export function requireRole(...roles) {
   };
 }
 
-/**
- * Require organizer or admin role
- * Convenience helper for organizer-only endpoints
- */
-export const requireOrganizer = requireRole('organizer', 'admin');
+export const requireOrganizer = requireRole('admin');
 
 /**
- * Require app user, organizer, or admin role
+
+
+
+/**
+
  * Used for self-service event CRUD; ownership is validated separately.
  */
-export const requireEventCreator = requireRole('user', 'organizer', 'admin');
+export const requireEventCreator = requireRole(ROLES.USER, ROLES.ADMIN);
 
 /**
  * Require verifier or admin role
  * Convenience helper for verifier-only endpoints
  */
-export const requireVerifier = requireRole('verifier', 'admin');
+export const requireVerifier = requireRole(ROLES.VERIFIER, ROLES.ADMIN);
 
 /**
  * Require admin role
  * Convenience helper for admin-only endpoints
  */
-export const requireAdmin = requireRole('admin');
+export const requireAdmin = requireRole(ROLES.ADMIN);

@@ -175,6 +175,71 @@ export async function markAsUsed(tokenId, usageData, models = {}) {
 }
 
 /**
+ * Mark ticket as sold after on-chain confirmation
+ * @param {string} tokenId - Token ID
+ * @param {Object} saleData - Sale data (buyer, soldAt, soldTxHash, price)
+ * @param {Object} models - Injected models (optional)
+ * @returns {Promise<Object|null>} Updated ticket as plain object or null
+ */
+export async function markAsSold(tokenId, saleData, models = {}) {
+  const Ticket = models.Ticket || DefaultTicket;
+
+  const transferEntry = {
+    from: saleData.from?.toLowerCase(),
+    to: saleData.buyer?.toLowerCase(),
+    txHash: saleData.soldTxHash?.toLowerCase(),
+    timestamp: saleData.soldAt || new Date(),
+    price: saleData.price || "0",
+    type: 'purchase'
+  };
+
+  const updates = {
+    status: 'sold',
+    currentOwner: saleData.buyer?.toLowerCase(),
+    soldAt: saleData.soldAt || new Date(),
+    soldTxHash: saleData.soldTxHash?.toLowerCase(),
+    ...(saleData.price ? { originalPrice: saleData.price } : {})
+  };
+
+  const ticket = await Ticket.findOneAndUpdate(
+    { tokenId },
+    {
+      $set: updates,
+      $push: { transferHistory: transferEntry }
+    },
+    { new: true, runValidators: true }
+  );
+
+  return ticket ? ticket.toObject() : null;
+}
+
+/**
+ * Mark ticket as used after on-chain confirmation
+ * @param {string} tokenId - Token ID
+ * @param {Object} usageData - Usage data (usedAt, verifiedBy, usedTxHash)
+ * @param {Object} models - Injected models (optional)
+ * @returns {Promise<Object|null>} Updated ticket as plain object or null
+ */
+export async function markAsUsedFromChain(tokenId, usageData, models = {}) {
+  const Ticket = models.Ticket || DefaultTicket;
+
+  const updates = {
+    status: 'used',
+    usedAt: usageData.usedAt || new Date(),
+    verifiedBy: usageData.verifiedBy?.toLowerCase(),
+    usedTxHash: usageData.usedTxHash?.toLowerCase()
+  };
+
+  const ticket = await Ticket.findOneAndUpdate(
+    { tokenId },
+    { $set: updates },
+    { new: true, runValidators: true }
+  );
+
+  return ticket ? ticket.toObject() : null;
+}
+
+/**
  * Update ticket listing status
  * @param {string} ticketId - Ticket ID
  * @param {boolean} isListed - Listing status
