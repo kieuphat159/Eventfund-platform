@@ -71,12 +71,12 @@ resource "aws_route_table_association" "public" {
 }
 
 # ─── Security Group ───────────────────────────────────────────────────────────
-# Cloudflare Tunnel chỉ cần outbound HTTPS (443) ra ngoài
+# ngrok chỉ cần outbound HTTPS ra ngoài
 # Không cần mở bất kỳ inbound port nào
 
 resource "aws_security_group" "ec2" {
   name        = "${var.project_name}-ec2-sg"
-  description = "EC2 security group - outbound only for Cloudflare Tunnel"
+  description = "EC2 security group - outbound only for ngrok tunnel"
   vpc_id      = aws_vpc.main.id
 
   egress {
@@ -159,7 +159,8 @@ resource "aws_instance" "app" {
     aws_region      = var.aws_region
     environment     = var.environment
     project         = var.project_name
-    cf_tunnel_token = var.cloudflare_tunnel_token
+    ngrok_authtoken = var.ngrok_authtoken
+    ngrok_domain    = var.ngrok_domain
     repo_url        = var.repo_url
     repo_branch     = var.repo_branch
   }))

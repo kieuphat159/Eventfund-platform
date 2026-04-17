@@ -2,7 +2,7 @@
 set -e
 exec > /var/log/user-data.log 2>&1
 
-# ─── System Update & Install ──────────────────────────────────────────────────
+# System Update & Install
 yum update -y
 yum install -y docker git aws-cli unzip
 
@@ -15,17 +15,16 @@ curl -SL "https://github.com/docker/compose/releases/latest/download/docker-comp
   -o /usr/local/lib/docker/cli-plugins/docker-compose
 chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 
-# Docker Buildx (required for docker compose build)
-mkdir -p /usr/local/lib/docker/cli-plugins
-curl -SL "https://github.com/docker/buildx/releases/latest/download/buildx-linux-amd64" \
+# Docker Buildx
+curl -SL "https://github.com/docker/buildx/releases/download/v0.19.3/buildx-v0.19.3.linux-amd64" \
   -o /usr/local/lib/docker/cli-plugins/docker-buildx
 chmod +x /usr/local/lib/docker/cli-plugins/docker-buildx
 
-# ─── App Directory ────────────────────────────────────────────────────────────
+# App directories
 mkdir -p /app/frontend-dist
 mkdir -p /app/repo
 
-# ─── Nginx config ─────────────────────────────────────────────────────────────
+# Nginx config
 cat > /app/nginx.conf << 'EOF'
 server {
     listen 80;
@@ -54,7 +53,7 @@ server {
 }
 EOF
 
-# ─── Docker Compose ───────────────────────────────────────────────────────────
+# Docker Compose
 cat > /app/docker-compose.yml << EOF
 services:
   api:
@@ -86,9 +85,11 @@ services:
     depends_on:
       - api
 
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    command: tunnel --no-autoupdate run --token ${cf_tunnel_token}
+  ngrok:
+    image: ngrok/ngrok:latest
+    command: http --domain=${ngrok_domain} frontend:80
+    environment:
+      - NGROK_AUTHTOKEN=${ngrok_authtoken}
     restart: unless-stopped
     depends_on:
       - frontend
@@ -97,15 +98,23 @@ volumes:
   logs:
 EOF
 
-# ─── Deploy script (CI/CD gọi cái này) ───────────────────────────────────────
+echo "user_data complete - waiting for CI/CD to deploy app"
+
+# Deploy script (CI/CD gọi cái này)
 cat > /app/deploy.sh << 'DEPLOY'
 #!/bin/bash
 set -e
-echo "Deploy triggered at $(date)"
+BRANCH=$${1:-${repo_branch}}
+echo "Deploying branch: $BRANCH"
+
+cd /app/repo
+git fetch origin
+git reset --hard origin/$BRANCH
+
 cd /app
+docker compose build api
 docker compose up -d
+
 echo "Deploy complete"
 DEPLOY
 chmod +x /app/deploy.sh
-
-echo "user_data complete - waiting for CI/CD to deploy app"
