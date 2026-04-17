@@ -15,6 +15,12 @@ curl -SL "https://github.com/docker/compose/releases/latest/download/docker-comp
   -o /usr/local/lib/docker/cli-plugins/docker-compose
 chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 
+# Docker Buildx (required for docker compose build)
+mkdir -p /usr/local/lib/docker/cli-plugins
+curl -SL "https://github.com/docker/buildx/releases/latest/download/buildx-linux-amd64" \
+  -o /usr/local/lib/docker/cli-plugins/docker-buildx
+chmod +x /usr/local/lib/docker/cli-plugins/docker-buildx
+
 # ─── App Directory ────────────────────────────────────────────────────────────
 mkdir -p /app/frontend-dist
 mkdir -p /app/repo
