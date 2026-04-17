@@ -51,14 +51,17 @@ jobs:
       - name: Upload backend image to S3
         run: aws s3 cp /tmp/backend.tar.gz s3://$S3_BUCKET/backend.tar.gz
 
-      - name: Clone repo on EC2 (first time)
+      - name: Clone or update repo on EC2
         run: |
-          aws ssm send-command \
+          CMD_ID=$(aws ssm send-command \
             --instance-id $INSTANCE_ID \
             --document-name "AWS-RunShellScript" \
-            --parameters 'commands=["if [ ! -d /app/repo/.git ]; then git clone --branch ${{ github.ref_name }} ${{ github.server_url }}/${{ github.repository }}.git /app/repo; else cd /app/repo && git fetch origin && git reset --hard origin/${{ github.ref_name }}; fi"]' \
+            --parameters "commands=[\"if [ ! -d /app/repo/.git ]; then git clone --branch ${{ github.ref_name }} https://github.com/${{ github.repository }}.git /app/repo; else cd /app/repo && git fetch origin && git reset --hard origin/${{ github.ref_name }}; fi\"]" \
             --region $AWS_REGION \
-            --output text --query "Command.CommandId" | xargs -I{} aws ssm wait command-executed --command-id {} --instance-id $INSTANCE_ID --region $AWS_REGION
+            --query "Command.CommandId" --output text)
+          echo "Command ID: $CMD_ID"
+          sleep 10
+          aws ssm wait command-executed --command-id $CMD_ID --instance-id $INSTANCE_ID --region $AWS_REGION
 
       - name: Deploy backend on EC2
         run: |
