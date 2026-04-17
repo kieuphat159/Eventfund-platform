@@ -9,7 +9,9 @@ const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, ".env") });
 
 function getAccounts() {
-  const raw = process.env.PRIVATE_KEY?.trim();
+  const raw =
+    process.env.PRIVATE_KEY?.trim() ||
+    process.env.BACKEND_SIGNER_PRIVATE_KEY?.trim();
   if (!raw) return [];
   const pk = raw.startsWith("0x") ? raw : `0x${raw}`;
   return [pk];

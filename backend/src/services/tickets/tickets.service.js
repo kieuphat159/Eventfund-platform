@@ -12,7 +12,26 @@ import { getTicket, provider } from '../blockchain/index.js';
 const ONCHAIN_TICKET_STATUS = {
   MINTED: 0n,
   SOLD: 1n,
+  USED: 2n,
+  EXPIRED: 3n,
+  REFUNDED: 4n,
 };
+
+function mapChainTicketTypeToDb(ticketTypeValue) {
+  const value = Number(ticketTypeValue);
+  if (value === 1) return 'vip';
+  if (value === 2) return 'early_bird';
+  if (value === 3) return 'etc';
+  return 'standard';
+}
+
+function mapOnchainStatusToDbStatus(chainStatus) {
+  if (chainStatus === ONCHAIN_TICKET_STATUS.SOLD) return 'sold';
+  if (chainStatus === ONCHAIN_TICKET_STATUS.USED) return 'used';
+  if (chainStatus === ONCHAIN_TICKET_STATUS.EXPIRED) return 'expired';
+  if (chainStatus === ONCHAIN_TICKET_STATUS.REFUNDED) return 'expired';
+  return null;
+}
 
 function normalizeTxHash(txHash) {
   return txHash?.toLowerCase();
@@ -27,6 +46,21 @@ function validateTransactionHash(txHash) {
   if (!txHash || !ethers.isHexString(txHash, 32)) {
     throw new BadRequestError('Invalid transaction hash');
   }
+}
+
+const TX_RECEIPT_WAIT_TIMEOUT_MS = Number(process.env.TX_RECEIPT_WAIT_TIMEOUT_MS || 120000);
+
+async function getMinedReceipt(txHash) {
+  let receipt = await provider.getTransactionReceipt(txHash);
+  if (receipt) return receipt;
+
+  try {
+    receipt = await provider.waitForTransaction(txHash, 1, TX_RECEIPT_WAIT_TIMEOUT_MS);
+  } catch {
+    receipt = null;
+  }
+
+  return receipt || null;
 }
 
 async function parseTicketEventsFromReceipt(receipt) {
@@ -88,6 +122,52 @@ async function findMintedTicketByEventId(eventId, repos = {}) {
   return result?.docs?.[0] || null;
 }
 
+async function hydrateMintedTicketFromChain(event, repos = {}) {
+  const ticketRepository = repos.ticketRepo || ticketRepo;
+  const ticketContract = getTicket();
+
+  if (!event?.contractEventId) {
+    return null;
+  }
+
+  const chainEventId = BigInt(event.contractEventId);
+  const tokenIds = await ticketContract.getEventTokenIds(chainEventId);
+
+  for (const tokenIdValue of tokenIds || []) {
+    const tokenId = toTokenIdString(tokenIdValue);
+    if (!tokenId) continue;
+
+    const chainTokenId = BigInt(tokenId);
+    const [status, price] = await Promise.all([
+      ticketContract.getTicketStatus(chainTokenId),
+      ticketContract.getTicketPrice(chainTokenId),
+    ]);
+
+    if (status !== ONCHAIN_TICKET_STATUS.MINTED) {
+      continue;
+    }
+
+    const [owner, ticketInfo] = await Promise.all([
+      ticketContract.ownerOf(chainTokenId),
+      ticketContract.getTicketInfo(chainTokenId),
+    ]);
+
+    const upserted = await ticketRepository.upsertMintedFromChain({
+      tokenId,
+      eventId: event._id,
+      currentOwner: owner,
+      originalPrice: price.toString(),
+      ticketType: mapChainTicketTypeToDb(ticketInfo?.ticketType),
+    });
+
+    if (upserted) {
+      return upserted;
+    }
+  }
+
+  return null;
+}
+
 /**
  * Build a primary-sale purchase intent for wallet signing
  */
@@ -105,6 +185,7 @@ export async function createPurchaseIntent(payload = {}, buyerWallet, repos = {}
   }
 
   let selectedTicket = null;
+  let event = null;
 
   if (tokenId) {
     selectedTicket = await ticketRepository.findByTokenId(String(tokenId), { lean: true });
@@ -112,7 +193,16 @@ export async function createPurchaseIntent(payload = {}, buyerWallet, repos = {}
     if (!mongoose.isValidObjectId(eventId)) {
       throw new BadRequestError('Invalid event id');
     }
+
+    event = await eventRepository.findById(eventId);
+    if (!event) {
+      throw new NotFoundError('Event not found');
+    }
+
     selectedTicket = await findMintedTicketByEventId(eventId, repos);
+    if (!selectedTicket) {
+      selectedTicket = await hydrateMintedTicketFromChain(event, repos);
+    }
   }
 
   if (!selectedTicket) {
@@ -123,26 +213,52 @@ export async function createPurchaseIntent(payload = {}, buyerWallet, repos = {}
     throw new BadRequestError('Ticket does not belong to this event');
   }
 
-  const event = await eventRepository.findById(selectedTicket.eventId);
   if (!event) {
-    throw new NotFoundError('Event not found');
+    event = await eventRepository.findById(selectedTicket.eventId);
+    if (!event) {
+      throw new NotFoundError('Event not found');
+    }
   }
 
   ensureEventOpenForTicketing(event);
 
   const ticketContract = getTicket();
-  const chainTokenId = BigInt(selectedTicket.tokenId);
-
-  const [chainStatus, chainPrice, contractAddress, network] = await Promise.all([
+  let chainTokenId = BigInt(selectedTicket.tokenId);
+  let [chainStatus, chainPrice] = await Promise.all([
     ticketContract.getTicketStatus(chainTokenId),
     ticketContract.getTicketPrice(chainTokenId),
+  ]);
+
+  if (chainStatus !== ONCHAIN_TICKET_STATUS.MINTED && !tokenId) {
+    const dbStatus = mapOnchainStatusToDbStatus(chainStatus);
+    if (dbStatus) {
+      await ticketRepository.updateStatus(selectedTicket.tokenId, dbStatus);
+    }
+
+    const refreshedTicket = await hydrateMintedTicketFromChain(event, repos);
+    if (!refreshedTicket) {
+      throw new NotFoundError('No available minted ticket found');
+    }
+
+    selectedTicket = refreshedTicket;
+    chainTokenId = BigInt(selectedTicket.tokenId);
+    [chainStatus, chainPrice] = await Promise.all([
+      ticketContract.getTicketStatus(chainTokenId),
+      ticketContract.getTicketPrice(chainTokenId),
+    ]);
+  }
+
+  if (chainStatus !== ONCHAIN_TICKET_STATUS.MINTED) {
+    if (!tokenId) {
+      throw new NotFoundError('No available minted ticket found');
+    }
+    throw new BadRequestError('Ticket is no longer available for primary purchase');
+  }
+
+  const [contractAddress, network] = await Promise.all([
     ticketContract.getAddress(),
     provider.getNetwork(),
   ]);
-
-  if (chainStatus !== ONCHAIN_TICKET_STATUS.MINTED) {
-    throw new BadRequestError('Ticket is no longer available for primary purchase');
-  }
 
   const data = ticketContract.interface.encodeFunctionData('purchaseTicket', [chainTokenId]);
 
@@ -171,9 +287,9 @@ export async function confirmPurchaseTransaction(payload = {}, repos = {}) {
 
   validateTransactionHash(txHash);
 
-  const receipt = await provider.getTransactionReceipt(txHash);
+  const receipt = await getMinedReceipt(txHash);
   if (!receipt) {
-    throw new BadRequestError('Transaction not mined yet');
+    throw new BadRequestError('Transaction not mined yet. Please wait a moment and retry.');
   }
   if (Number(receipt.status) !== 1) {
     throw new BadRequestError('Transaction failed on-chain');
@@ -315,9 +431,9 @@ export async function confirmUseTicketTransaction(payload = {}, repos = {}) {
 
   validateTransactionHash(txHash);
 
-  const receipt = await provider.getTransactionReceipt(txHash);
+  const receipt = await getMinedReceipt(txHash);
   if (!receipt) {
-    throw new BadRequestError('Transaction not mined yet');
+    throw new BadRequestError('Transaction not mined yet. Please wait a moment and retry.');
   }
   if (Number(receipt.status) !== 1) {
     throw new BadRequestError('Transaction failed on-chain');
@@ -529,6 +645,39 @@ export async function markTicketAsUsed(tokenId, verifierWallet, repos = {}) {
  */
 export async function getTicketStats(eventId, repos = {}) {
   const ticketRepository = repos.ticketRepo || ticketRepo;
+  const eventRepository = repos.eventRepo || eventRepo;
+
+  if (!mongoose.isValidObjectId(eventId)) {
+    throw new BadRequestError('Invalid event id');
+  }
+
+  const event = await eventRepository.findById(eventId);
+  if (!event) {
+    throw new NotFoundError('Event not found');
+  }
+
+  if (event.contractEventId) {
+    try {
+      const ticketContract = getTicket();
+      const chainEventId = BigInt(event.contractEventId);
+      const chainInfo = await ticketContract.getEventTicketInfo(chainEventId);
+
+      const totalTickets = Number(chainInfo.totalMinted || 0n);
+      const soldTickets = Number(chainInfo.totalSold || 0n);
+      const usedTickets = Number(chainInfo.totalUsed || 0n);
+      const availableTickets = Math.max(totalTickets - soldTickets, 0);
+
+      return {
+        totalTickets,
+        soldTickets,
+        usedTickets,
+        mintedTickets: totalTickets,
+        availableTickets,
+      };
+    } catch {
+      // Fallback to DB read-model when on-chain call fails.
+    }
+  }
 
   const eventObjectId = new mongoose.Types.ObjectId(eventId);
   const stats = await ticketRepository.getTicketStatsByEvent(eventObjectId);
@@ -538,7 +687,7 @@ export async function getTicketStats(eventId, repos = {}) {
     soldTickets: stats.sold || 0,
     usedTickets: stats.used || 0,
     mintedTickets: stats.minted || 0,
-    availableTickets: stats.minted || 0,
+    availableTickets: Math.max((stats.minted || 0) - (stats.sold || 0), 0),
   };
 }
 

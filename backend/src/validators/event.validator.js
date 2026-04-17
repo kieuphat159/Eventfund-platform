@@ -59,16 +59,13 @@ const createEventSchema = Joi.object({
     "any.required": "Description is required",
   }),
   category: Joi.string().optional(),
+  investmentEnabled: Joi.boolean().optional(),
   organizerAddress: ethereumAddress.optional(),
   organizerStake: bigIntString.optional(),
-  fundingGoal: bigIntString.required().messages({
-    "string.empty": "Funding goal is required",
-    "any.required": "Funding goal is required",
-  }),
+  fundingGoal: bigIntString.optional(),
   minStakeRequired: bigIntString.optional(),
-  fundingDeadline: Joi.date().iso().required().messages({
+  fundingDeadline: Joi.date().iso().optional().messages({
     "date.base": "Funding deadline must be a valid date",
-    "any.required": "Funding deadline is required",
   }),
   startDate: Joi.date().iso().required().messages({
     "date.base": "Start date must be a valid date",
@@ -108,7 +105,118 @@ const createEventSchema = Joi.object({
   organizerShareBps: Joi.number().integer().min(0).max(10000).optional(),
   ticketPrice: bigIntString.optional(),
   usedThreshold: Joi.number().integer().min(1).optional(),
-});
+}).custom((value, helpers) => {
+  if (value.investmentEnabled === false) {
+    const organizerStake = value.organizerStake ?? value.minStakeRequired;
+    if (!organizerStake || !/^[0-9]+$/.test(String(organizerStake)) || BigInt(organizerStake) <= 0n) {
+      return helpers.error("any.custom", {
+        message:
+          "Organizer stake is required and must be a positive integer string when investment is disabled",
+      });
+    }
+  }
+
+  const fundingGoal =
+    value.fundingGoal === undefined ? undefined : BigInt(value.fundingGoal);
+
+  if (fundingGoal !== undefined && fundingGoal > 0n && !value.fundingDeadline) {
+    return helpers.error("any.custom", {
+      message: "Funding deadline is required when funding goal is greater than 0",
+    });
+  }
+
+  return value;
+}, "conditional funding validation")
+  .messages({
+    "any.custom": "{{#message}}",
+  });
+
+const createEventIntentSchema = Joi.object({
+  title: Joi.string().min(3).max(200).required().messages({
+    "string.empty": "Title is required",
+    "string.min": "Title must be at least 3 characters long",
+    "string.max": "Title must not exceed 200 characters",
+    "any.required": "Title is required",
+  }),
+  description: Joi.string().min(1).required().messages({
+    "string.empty": "Description is required",
+    "any.required": "Description is required",
+  }),
+  category: Joi.string().optional(),
+  investmentEnabled: Joi.boolean().optional(),
+  organizerAddress: ethereumAddress.optional(),
+  organizerStake: bigIntString.optional(),
+  fundingGoal: bigIntString.optional(),
+  minStakeRequired: bigIntString.optional(),
+  fundingDeadline: Joi.date().iso().optional().messages({
+    "date.base": "Funding deadline must be a valid date",
+  }),
+  startDate: Joi.date().iso().required().messages({
+    "date.base": "Start date must be a valid date",
+    "any.required": "Start date is required",
+  }),
+  endDate: Joi.date().iso().greater(Joi.ref("startDate")).required().messages({
+    "date.base": "End date must be a valid date",
+    "date.greater": "End date must be after start date",
+    "any.required": "End date is required",
+  }),
+  venue: venueSchema.required().messages({
+    "any.required": "Venue is required",
+  }),
+  imageUrls: Joi.array().items(Joi.string().uri()).optional(),
+  metadataUri: Joi.string().optional(),
+  totalTickets: Joi.number().integer().min(1).required().messages({
+    "number.base": "Total tickets must be a number",
+    "number.integer": "Total tickets must be an integer",
+    "number.min": "Total tickets must be greater than 0",
+    "any.required": "Total tickets is required",
+  }),
+  ticketTiers: Joi.array().items(ticketTierSchema).min(1).optional().messages({
+    "array.base": "Ticket tiers must be an array",
+    "array.min": "At least one ticket tier is required",
+  }),
+  ticketUsageThreshold: Joi.number()
+    .integer()
+    .min(0)
+    .max(100)
+    .optional()
+    .messages({
+      "number.min": "Ticket usage threshold must be at least 0",
+      "number.max": "Ticket usage threshold must not exceed 100",
+    }),
+  syncOnChain: Joi.boolean().optional(),
+  organizerShareBps: Joi.number().integer().min(0).max(10000).optional(),
+  ticketPrice: bigIntString.optional(),
+  usedThreshold: Joi.number().integer().min(1).optional(),
+}).custom((value, helpers) => {
+  if (value.investmentEnabled === false) {
+    const organizerStake = value.organizerStake ?? value.minStakeRequired;
+    if (
+      !organizerStake ||
+      !/^[0-9]+$/.test(String(organizerStake)) ||
+      BigInt(organizerStake) <= 0n
+    ) {
+      return helpers.error("any.custom", {
+        message:
+          "Organizer stake is required and must be a positive integer string when investment is disabled",
+      });
+    }
+  }
+
+  const fundingGoal =
+    value.fundingGoal === undefined ? undefined : BigInt(value.fundingGoal);
+
+  if (fundingGoal !== undefined && fundingGoal > 0n && !value.fundingDeadline) {
+    return helpers.error("any.custom", {
+      message: "Funding deadline is required when funding goal is greater than 0",
+    });
+  }
+
+  return value;
+}, "conditional funding validation")
+  .messages({
+    "any.custom": "{{#message}}",
+  });
 
 // Schema for PATCH /events/:id
 const updateEventSchema = Joi.object({
@@ -205,8 +313,31 @@ const investEventSchema = Joi.object({
   }),
 });
 
+const txHashSchema = Joi.string()
+  .pattern(/^0x([A-Fa-f0-9]{64})$/)
+  .message("must be a valid transaction hash");
+
+const confirmCreateEventSchema = Joi.object({
+  txHash: txHashSchema.required(),
+  draftEventId: Joi.string()
+    .pattern(/^[0-9a-fA-F]{24}$/)
+    .optional()
+    .messages({
+      "string.pattern.base": "draftEventId must be a valid MongoDB ObjectId",
+    }),
+  organizerWallet: ethereumAddress.optional(),
+});
+
+const confirmInvestEventSchema = Joi.object({
+  txHash: txHashSchema.required(),
+  investorWallet: ethereumAddress.optional(),
+});
+
 export const eventSchemas = {
   createEvent: createEventSchema,
+  createEventIntent: createEventIntentSchema,
+  confirmCreateEvent: confirmCreateEventSchema,
+  confirmInvestEvent: confirmInvestEventSchema,
   updateEvent: updateEventSchema,
   queryEvents: queryEventsSchema,
   investEvent: investEventSchema,

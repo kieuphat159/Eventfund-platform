@@ -71,6 +71,7 @@ contract Fund is IFund, ReentrancyGuard {
     // -----------------------
     struct EventConfig {
         address organizer;
+        bool investmentEnabled;
 
         // Funding
         uint256 fundingGoal;
@@ -138,6 +139,7 @@ contract Fund is IFund, ReentrancyGuard {
         uint256 maxTickets,
         uint256 usedThreshold
     );
+    event InvestmentModeSet(uint256 indexed eventId, bool investmentEnabled);
 
     event ContributionMade(uint256 indexed eventId, address indexed donator, uint256 amount);
     event SharesIssued(uint256 indexed eventId, address indexed donator, uint256 sharesMinted);
@@ -288,12 +290,66 @@ contract Fund is IFund, ReentrancyGuard {
         uint256 maxTickets,
         uint256 usedThreshold
     ) external payable returns (uint256 eventId) {
-        if (fundingGoal == 0) revert BadParam();
-        if (fundingDeadline == 0 || fundingDeadline <= block.timestamp) revert BadParam();
+        return _createEvent(
+            fundingGoal,
+            fundingDeadline,
+            minStakeRequired,
+            organizerShareBps,
+            ticketPrice,
+            maxTickets,
+            usedThreshold,
+            true
+        );
+    }
 
-        // stake requirement
-        if (minStakeRequired == 0) revert BadParam();
-        if (msg.value < minStakeRequired) revert BadParam();
+    /// @notice Create event with explicit investment mode.
+    /// @dev Backward-compatible extension for non-invest events.
+    function createEventWithInvestment(
+        uint256 fundingGoal,
+        uint256 fundingDeadline,
+        uint256 minStakeRequired,
+        uint256 organizerShareBps,
+        uint256 ticketPrice,
+        uint256 maxTickets,
+        uint256 usedThreshold,
+        bool investmentEnabled
+    ) external payable returns (uint256 eventId) {
+        return _createEvent(
+            fundingGoal,
+            fundingDeadline,
+            minStakeRequired,
+            organizerShareBps,
+            ticketPrice,
+            maxTickets,
+            usedThreshold,
+            investmentEnabled
+        );
+    }
+
+    function _createEvent(
+        uint256 fundingGoal,
+        uint256 fundingDeadline,
+        uint256 minStakeRequired,
+        uint256 organizerShareBps,
+        uint256 ticketPrice,
+        uint256 maxTickets,
+        uint256 usedThreshold,
+        bool investmentEnabled
+    ) internal returns (uint256 eventId) {
+        if (investmentEnabled) {
+            if (fundingGoal == 0) revert BadParam();
+            if (fundingDeadline == 0 || fundingDeadline <= block.timestamp) revert BadParam();
+
+            // stake requirement
+            if (minStakeRequired == 0) revert BadParam();
+            if (msg.value < minStakeRequired) revert BadParam();
+        } else {
+            // Self-funded / no-invest mode still requires organizer stake locking.
+            if (msg.value == 0) revert BadParam();
+            fundingGoal = 0;
+            fundingDeadline = 0;
+            minStakeRequired = msg.value;
+        }
 
         // revenue split
         if (organizerShareBps > BPS_DENOM) revert BadParam();
@@ -306,6 +362,7 @@ contract Fund is IFund, ReentrancyGuard {
         EventConfig storage e = events_[eventId];
 
         e.organizer = msg.sender;
+        e.investmentEnabled = investmentEnabled;
 
         e.fundingGoal = fundingGoal;
         e.fundingDeadline = fundingDeadline;
@@ -319,7 +376,13 @@ contract Fund is IFund, ReentrancyGuard {
         e.maxTickets = maxTickets;
         e.usedThreshold = usedThreshold;
 
-        e.status = EventStatus.Funding;
+        if (investmentEnabled) {
+            e.status = EventStatus.Funding;
+        } else {
+            // Non-invest mode: admin can transition to ticketing immediately.
+            e.status = EventStatus.Funded;
+            e.sharesFinalized = true;
+        }
 
         emit EventCreated(
             eventId,
@@ -333,6 +396,12 @@ contract Fund is IFund, ReentrancyGuard {
             maxTickets,
             usedThreshold
         );
+        emit InvestmentModeSet(eventId, investmentEnabled);
+
+        if (!investmentEnabled) {
+            emit FundingSuccessful(eventId);
+            emit FundingFinalized(eventId, e.totalShares, e.status);
+        }
     }
 
     // -----------------------
@@ -341,6 +410,7 @@ contract Fund is IFund, ReentrancyGuard {
     function contribute(uint256 eventId) external payable {
         EventConfig storage e = _mustGet(eventId);
 
+        if (!e.investmentEnabled) revert NotFunding();
         if (e.status != EventStatus.Funding) revert NotFunding();
         if (block.timestamp > e.fundingDeadline) revert FundingClosed();
         if (e.sharesFinalized) revert ShareLocked();
@@ -363,6 +433,12 @@ contract Fund is IFund, ReentrancyGuard {
         if (e.currentFunding >= e.fundingGoal) {
             e.status = EventStatus.Funded;
             emit FundingSuccessful(eventId);
+
+            // Auto-finalize when goal is reached so ticketing can be automated.
+            if (!e.sharesFinalized) {
+                e.sharesFinalized = true;
+                emit FundingFinalized(eventId, e.totalShares, e.status);
+            }
         }
     }
 
@@ -375,7 +451,16 @@ contract Fund is IFund, ReentrancyGuard {
     // -----------------------
     function finalizeFunding(uint256 eventId) external onlyOrganizerOrAdmin(eventId) {
         EventConfig storage e = _mustGet(eventId);
-        if (e.sharesFinalized) revert AlreadyFinalized();
+
+        // Idempotent for flows that auto-finalize on funding goal.
+        if (e.sharesFinalized) return;
+
+        if (!e.investmentEnabled) {
+            e.status = EventStatus.Funded;
+            e.sharesFinalized = true;
+            emit FundingFinalized(eventId, e.totalShares, e.status);
+            return;
+        }
 
         bool afterDeadline = block.timestamp > e.fundingDeadline;
 
@@ -402,7 +487,7 @@ contract Fund is IFund, ReentrancyGuard {
         uint256 eventId,
         uint8 ticketType,
         uint256 quantity
-    ) external onlyOrganizer(eventId) returns (uint256[] memory tokenIds) {
+    ) external onlyOrganizerOrAdmin(eventId) returns (uint256[] memory tokenIds) {
         EventConfig storage e = _mustGet(eventId);
         if (address(ticket) == address(0)) revert TicketContractNotSet();
 
@@ -467,7 +552,6 @@ contract Fund is IFund, ReentrancyGuard {
         if (!e.sharesFinalized) revert Unsafe();
         if (e.revenueReleased) revert AlreadyFinalized();
         if (e.status != EventStatus.Completed) revert NotCompleted();
-        if (e.totalShares == 0) revert BadParam();
 
         // Nếu đã bật refunds thì không được release revenue (tránh double-mode)
         if (e.refundsEnabled) revert Unsafe();
@@ -487,8 +571,16 @@ contract Fund is IFund, ReentrancyGuard {
         uint256 afterFee = totalRevenue - platformFee;
 
         // 2) organizer share
-        uint256 organizerShare = (afterFee * e.organizerShareBps) / BPS_DENOM;
-        uint256 donatorPool = afterFee - organizerShare;
+        uint256 organizerShare;
+        uint256 donatorPool;
+        if (!e.investmentEnabled || e.totalShares == 0) {
+            // No-invest events have no donators to split revenue with.
+            organizerShare = afterFee;
+            donatorPool = 0;
+        } else {
+            organizerShare = (afterFee * e.organizerShareBps) / BPS_DENOM;
+            donatorPool = afterFee - organizerShare;
+        }
 
         // 3) payout fee + organizer
         if (platformFee > 0) {
@@ -501,7 +593,9 @@ contract Fund is IFund, ReentrancyGuard {
         }
 
         // 4) donator pool => accRewardPerShare
-        e.accRewardPerShare += (donatorPool * 1e18) / e.totalShares;
+        if (donatorPool > 0) {
+            e.accRewardPerShare += (donatorPool * 1e18) / e.totalShares;
+        }
 
         emit RevenueReleased(eventId, totalRevenue, platformFee, organizerShare, donatorPool, e.accRewardPerShare);
     }

@@ -120,6 +120,13 @@ export interface Eip1193Provider {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
 }
 
+export type BuyListingProgressStage =
+  | "preparing_intent"
+  | "awaiting_wallet_confirmation"
+  | "waiting_onchain_confirmation"
+  | "syncing_backend"
+  | "completed";
+
 export interface MarketplaceStats {
   totalListings: number;
   activeListings: number;
@@ -395,24 +402,30 @@ export async function buyListing(
   provider: Eip1193Provider,
   listingId: string,
   buyerWallet: string,
+  onProgress?: (stage: BuyListingProgressStage, txHash?: string) => void,
 ) {
+  onProgress?.("preparing_intent");
   const intent = await createBuyListingIntent(listingId);
   if (!intent?.transaction) {
     throw new Error("Unable to create buy intent");
   }
 
+  onProgress?.("awaiting_wallet_confirmation");
   const txHash = await sendMarketplaceTransaction(
     provider,
     intent.transaction,
     buyerWallet,
   );
 
+  onProgress?.("waiting_onchain_confirmation", txHash);
+  onProgress?.("syncing_backend", txHash);
   const confirmation = await confirmSoldTransaction({
     txHash,
     listingId: intent.listingId,
     buyerWallet,
   });
 
+  onProgress?.("completed", txHash);
   return { txHash, intent, confirmation };
 }
 

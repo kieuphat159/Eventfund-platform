@@ -44,6 +44,17 @@ interface IFund {
         uint256 usedThreshold
     ) external payable returns (uint256 eventId);
 
+    function createEventWithInvestment(
+        uint256 fundingGoal,
+        uint256 fundingDeadline,
+        uint256 minStakeRequired,
+        uint256 organizerShareBps,
+        uint256 ticketPrice,
+        uint256 maxTickets,
+        uint256 usedThreshold,
+        bool investmentEnabled
+    ) external payable returns (uint256 eventId);
+
     function contribute(uint256 eventId) external payable;
 
     function finalizeFunding(uint256 eventId) external;

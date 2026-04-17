@@ -240,6 +240,59 @@ export async function markAsUsedFromChain(tokenId, usageData, models = {}) {
 }
 
 /**
+ * Upsert minted ticket from on-chain TicketMintedBatch event.
+ * This keeps Ticket read-model in sync so primary-sale APIs can find minted inventory.
+ * @param {Object} data - Minted ticket payload
+ * @param {Object} models - Injected models (optional)
+ * @returns {Promise<Object|null>} Upserted ticket as plain object or null
+ */
+export async function upsertMintedFromChain(data, models = {}) {
+  const Ticket = models.Ticket || DefaultTicket;
+
+  const tokenId = String(data.tokenId);
+  const owner = data.currentOwner ? String(data.currentOwner).toLowerCase() : undefined;
+  const price = data.originalPrice !== undefined && data.originalPrice !== null
+    ? String(data.originalPrice)
+    : '0';
+  const ticketType = data.ticketType;
+  const mintTxHash = data.mintTxHash ? String(data.mintTxHash).toLowerCase() : undefined;
+
+  const update = {
+    $setOnInsert: {
+      tokenId,
+      currentOwner: owner || '',
+      originalPrice: price,
+      status: 'minted',
+      isListed: false,
+      createdAt: data.mintedAt || new Date(),
+    },
+    $set: {
+      eventId: data.eventId,
+      ...(ticketType !== undefined && ticketType !== null ? { ticketType } : {}),
+    },
+  };
+
+  if (owner && mintTxHash) {
+    update.$addToSet = {
+      transferHistory: {
+        to: owner,
+        txHash: mintTxHash,
+        price,
+        type: 'mint',
+      },
+    };
+  }
+
+  const ticket = await Ticket.findOneAndUpdate(
+    { tokenId },
+    update,
+    { new: true, upsert: true, runValidators: true },
+  );
+
+  return ticket ? ticket.toObject() : null;
+}
+
+/**
  * Update ticket listing status
  * @param {string} ticketId - Ticket ID
  * @param {boolean} isListed - Listing status

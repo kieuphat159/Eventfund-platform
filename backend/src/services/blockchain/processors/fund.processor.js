@@ -189,10 +189,17 @@ async function rebuildFullEventStateFromChainLog(contractEventId, contractAddres
   }
 
   // $set toan bo state len Event document
-  await eventRepo.updateByContractEventId(contractEventId, { $set: state });
+  await eventRepo.updateByContractEventId(
+    contractEventId,
+    { $set: state },
+    contractAddress,
+  );
 
   // Rebuild currentFunding va sharePercentage tu Contribution
-  const eventDoc = await eventRepo.findByContractEventId(contractEventId);
+  const eventDoc = await eventRepo.findByContractEventId(
+    contractEventId,
+    contractAddress,
+  );
   if (eventDoc) {
     await rebuildFundState(eventDoc._id);
 
@@ -238,8 +245,9 @@ async function rebuildFullEventStateFromChainLog(contractEventId, contractAddres
 // HANDLE FUNCTIONS (Idempotent)
 // -------------------------
 async function handleEventCreated(log) {
-  const { args, transactionHash, blockNumber } = log;
+  const { args, transactionHash, blockNumber, contractAddress } = log;
   const contractEventId = toStringId(args.eventId);
+  const normalizedContractAddress = lowerAddress(contractAddress);
   const onChainOrganizer = lowerAddress(args.organizer);
 
   const normalizedFundingGoal = toStringId(args.fundingGoal);
@@ -261,6 +269,7 @@ async function handleEventCreated(log) {
     await eventRepo.updateById(matchedDraft._id, {
       $set: {
         contractEventId,
+        fundContractAddress: normalizedContractAddress,
         onChainOrganizer,
         fundingGoal: normalizedFundingGoal,
         fundingDeadline: toNumberSafe(args.fundingDeadline) > 0
@@ -278,6 +287,7 @@ async function handleEventCreated(log) {
     });
   } else {
     await eventRepo.upsertByContractEventId(contractEventId, {
+      fundContractAddress: normalizedContractAddress,
       organizer: onChainOrganizer,
       onChainOrganizer,
       fundingGoal: normalizedFundingGoal, // String in schema
@@ -299,6 +309,7 @@ async function handleEventCreated(log) {
     await contributionRepo.upsertOrganizerStake({
       txHash: transactionHash.toLowerCase(),
       eventContractId: contractEventId,
+      fundContractAddress: normalizedContractAddress,
       organizer: onChainOrganizer,
       amount: toNumberSafe(args.stakeAmount),
       blockNumber,
@@ -575,7 +586,7 @@ async function handleStakeWithdrawn(log, eventDoc) {
 // MAIN PROCESSOR
 // -------------------------
 async function processFundLog(log) {
-  const { eventName, args } = log;
+  const { eventName, args, contractAddress } = log;
   if (!eventName) return;
 
   if (eventName === "EventCreated") {
@@ -584,7 +595,10 @@ async function processFundLog(log) {
   }
 
   const contractEventId = toStringId(args?.eventId);
-  const eventDoc = await eventRepo.findByContractEventId(contractEventId);
+  const eventDoc = await eventRepo.findByContractEventId(
+    contractEventId,
+    lowerAddress(contractAddress),
+  );
   if (!eventDoc) return;
 
   switch (eventName) {
