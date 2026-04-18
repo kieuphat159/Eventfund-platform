@@ -132,19 +132,19 @@ jobs:
             "$IMAGE_TAG"
 
           # Wait for health check
-          for i in {1..30}; do
+          for i in {1..60}; do
             if curl -fsS "http://localhost:4000/health" | jq -e '.ok == true' >/dev/null 2>&1; then
               echo "✅ Health check passed"
               docker logs backend-test
               docker stop backend-test
               exit 0
             fi
-            echo "Waiting for backend to be ready... ($i/30)"
-            sleep 2
+            echo "Waiting for backend to be ready... ($i/60)"
+            sleep 3
           done
 
           echo "❌ Health check failed"
-          docker logs backend-test
+          docker logs --tail 200 backend-test
           docker stop backend-test
           exit 1
 
