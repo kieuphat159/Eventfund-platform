@@ -1,7 +1,15 @@
 # Dependencies
 node_modules/
+
+# Environment files
 .env
 .env.*
+!.env.example
+# Root .env is for docker-compose config (can be committed if no secrets)
+# backend/.env contains secrets (never commit)
+backend/.env
+backend/.env.*
+!backend/.env.example
 
 # Logs
 logs/
@@ -41,4 +49,3 @@ contracts/ignition/deployments/chain-31337
 *.tfstate.backup
 *.tfvars
 !*.tfvars.example
-**/*.exe

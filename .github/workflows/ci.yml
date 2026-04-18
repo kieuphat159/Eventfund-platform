@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [dev, main, testci]
+    branches: [dev, main, ci/cd]
   pull_request:
-    branches: [dev, main, testci]
+    branches: [dev, main, ci/cd]
   workflow_dispatch:
 
 permissions:
@@ -69,7 +69,7 @@ jobs:
 
     env:
       RPC_URL: ${{ secrets.RPC_URL }}
-      
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
