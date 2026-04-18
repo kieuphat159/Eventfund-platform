@@ -117,10 +117,6 @@ router.get(
  *                 type: string
  *                 description: Funding goal amount (string representation of wei amount)
  *                 example: "5000000000000000000"
- *               minStakeRequired:
- *                 type: string
- *                 description: Minimum stake required (string representation of wei amount)
- *                 example: "1000000000000000000"
  *               fundingDeadline:
  *                 type: string
  *                 format: date-time
@@ -153,7 +149,6 @@ router.get(
  *             description: "Annual conference for blockchain developers and Web3 enthusiasts"
  *             category: "conference"
  *             fundingGoal: "5000000000000000000"
- *             minStakeRequired: "1000000000000000000"
  *             fundingDeadline: "2026-04-15T23:59:59Z"
  *             startDate: "2026-05-20T09:00:00Z"
  *             endDate: "2026-05-22T18:00:00Z"

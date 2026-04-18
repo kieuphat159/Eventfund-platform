@@ -68,7 +68,6 @@ export const EditEvent: React.FC = () => {
   const [location, setLocation] = useState("");
   const [category, setCategory] = useState("");
   const [fundingGoal, setFundingGoal] = useState("");
-  const [minStakeRequired, setMinStakeRequired] = useState("");
   const [status, setStatus] = useState<EventStatus>("draft");
 
   const [ticketTiers, setTicketTiers] = useState<TicketTierForm[]>([
@@ -80,7 +79,10 @@ export const EditEvent: React.FC = () => {
   const topAnchorRef = useRef<HTMLDivElement | null>(null);
 
   const scrollToTop = () => {
-    topAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    topAnchorRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -111,9 +113,6 @@ export const EditEvent: React.FC = () => {
         setCategory(data.category || "");
         setFundingGoal(
           data.fundingGoal != null ? String(data.fundingGoal) : "",
-        );
-        setMinStakeRequired(
-          data.minStakeRequired != null ? String(data.minStakeRequired) : "",
         );
         setStatus((data.status as EventStatus) || "draft");
 
@@ -272,7 +271,6 @@ export const EditEvent: React.FC = () => {
         startDate: start.toISOString(),
         endDate: end.toISOString(),
         fundingGoal: fundingGoal.trim(),
-        minStakeRequired: minStakeRequired.trim() || "0",
         fundingDeadline: fundingDeadline.toISOString(),
         totalTickets,
         venue: {
@@ -629,25 +627,11 @@ export const EditEvent: React.FC = () => {
                 className="mt-1.5 bg-slate-800 border-slate-700 text-white"
               />
             </div>
-
-            <div>
-              <Label htmlFor="min-stake-required" className="text-slate-300">
-                Minimum Organizer Stake
-              </Label>
-              <Input
-                id="min-stake-required"
-                value={minStakeRequired}
-                onChange={(e) => setMinStakeRequired(e.target.value)}
-                placeholder="1000000000000000000"
-                className="mt-1.5 bg-slate-800 border-slate-700 text-white"
-              />
-            </div>
           </div>
 
           <p className="text-xs text-slate-500">
-            Backend đang lưu funding fields dạng integer string theo wei. Đây là
-            mức stake của event creator, không phải mức góp tối thiểu của
-            donator.
+            Min stake required do admin cấu hình. Backend lưu funding fields
+            dạng integer string theo wei.
           </p>
         </CardContent>
       </Card>

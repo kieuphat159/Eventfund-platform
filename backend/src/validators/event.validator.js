@@ -63,7 +63,6 @@ const createEventSchema = Joi.object({
   organizerAddress: ethereumAddress.optional(),
   organizerStake: bigIntString.optional(),
   fundingGoal: bigIntString.optional(),
-  minStakeRequired: bigIntString.optional(),
   fundingDeadline: Joi.date().iso().optional().messages({
     "date.base": "Funding deadline must be a valid date",
   }),
@@ -114,7 +113,7 @@ const createEventSchema = Joi.object({
 })
   .custom((value, helpers) => {
     if (value.investmentEnabled === false) {
-      const organizerStake = value.organizerStake ?? value.minStakeRequired;
+      const organizerStake = value.organizerStake;
       if (
         !organizerStake ||
         !/^[0-9]+$/.test(String(organizerStake)) ||
@@ -199,7 +198,6 @@ const createEventIntentSchema = Joi.object({
   organizerAddress: ethereumAddress.optional(),
   organizerStake: bigIntString.optional(),
   fundingGoal: bigIntString.optional(),
-  minStakeRequired: bigIntString.optional(),
   fundingDeadline: Joi.date().iso().optional().messages({
     "date.base": "Funding deadline must be a valid date",
   }),
@@ -249,7 +247,7 @@ const createEventIntentSchema = Joi.object({
 })
   .custom((value, helpers) => {
     if (value.investmentEnabled === false) {
-      const organizerStake = value.organizerStake ?? value.minStakeRequired;
+      const organizerStake = value.organizerStake;
       if (
         !organizerStake ||
         !/^[0-9]+$/.test(String(organizerStake)) ||
@@ -341,9 +339,6 @@ const updateEventSchema = Joi.object({
   }),
   fundingGoal: bigIntString.optional().messages({
     "string.empty": "Funding goal must be a valid positive integer string",
-  }),
-  minStakeRequired: bigIntString.optional().messages({
-    "string.empty": "Minimum stake must be a valid positive integer string",
   }),
   fundingDeadline: Joi.date().iso().optional().messages({
     "date.base": "Funding deadline must be a valid date",

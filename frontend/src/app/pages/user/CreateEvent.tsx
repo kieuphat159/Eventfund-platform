@@ -47,7 +47,6 @@ export const CreateEvent: React.FC = () => {
   const [category, setCategory] = useState("");
 
   const [fundingGoal, setFundingGoal] = useState("");
-  const [minStakeRequired, setMinStakeRequired] = useState("");
   const [organizerStake, setOrganizerStake] = useState("");
   const [investmentEnabled, setInvestmentEnabled] = useState(true);
 
@@ -71,7 +70,6 @@ export const CreateEvent: React.FC = () => {
     setLocation("");
     setCategory("");
     setFundingGoal("");
-    setMinStakeRequired("");
     setOrganizerStake("");
     setInvestmentEnabled(true);
     setTicketTiers([{ name: "General", price: "", supply: "" }]);
@@ -180,32 +178,12 @@ export const CreateEvent: React.FC = () => {
       }
 
       if (
-        minStakeRequired.trim() &&
-        (!/^\d+$/.test(minStakeRequired.trim()) ||
-          BigInt(minStakeRequired.trim()) <= 0n)
-      ) {
-        errors.minStakeRequired =
-          "Min stake required must be a positive integer string.";
-      }
-
-      if (
         organizerStake.trim() &&
         (!/^\d+$/.test(organizerStake.trim()) ||
           BigInt(organizerStake.trim()) <= 0n)
       ) {
         errors.organizerStake =
           "Organizer stake must be a positive integer string.";
-      }
-
-      if (
-        minStakeRequired.trim() &&
-        organizerStake.trim() &&
-        /^\d+$/.test(minStakeRequired.trim()) &&
-        /^\d+$/.test(organizerStake.trim()) &&
-        BigInt(organizerStake.trim()) < BigInt(minStakeRequired.trim())
-      ) {
-        errors.organizerStake =
-          "Organizer stake must be >= min stake required.";
       }
     }
 
@@ -236,7 +214,8 @@ export const CreateEvent: React.FC = () => {
 
     if (investmentEnabled) {
       if (!fundingDeadlineAt) {
-        errors.fundingDeadlineAt = "Funding deadline date and time are required.";
+        errors.fundingDeadlineAt =
+          "Funding deadline date and time are required.";
       }
 
       const fundingDeadline = buildFundingDeadline();
@@ -244,7 +223,8 @@ export const CreateEvent: React.FC = () => {
         fundingDeadlineAt &&
         (!fundingDeadline || Number.isNaN(fundingDeadline.getTime()))
       ) {
-        errors.fundingDeadlineAt = "Funding deadline date and time are invalid.";
+        errors.fundingDeadlineAt =
+          "Funding deadline date and time are invalid.";
       }
 
       if (start && fundingDeadline && fundingDeadline >= start) {
@@ -472,9 +452,6 @@ export const CreateEvent: React.FC = () => {
         {
           ...basePayload,
           fundingGoal: investmentEnabled ? fundingGoal.trim() : undefined,
-          minStakeRequired: investmentEnabled
-            ? minStakeRequired.trim() || undefined
-            : undefined,
           organizerStake: organizerStake.trim() || undefined,
           fundingDeadline: investmentEnabled
             ? fundingDeadline?.toISOString()
@@ -625,7 +602,9 @@ export const CreateEvent: React.FC = () => {
                 )}
               />
               {fieldErrors.startAt && (
-                <p className="mt-1 text-sm text-red-400">{fieldErrors.startAt}</p>
+                <p className="mt-1 text-sm text-red-400">
+                  {fieldErrors.startAt}
+                </p>
               )}
             </div>
 
@@ -969,12 +948,10 @@ export const CreateEvent: React.FC = () => {
                 setInvestmentEnabled(enabled);
                 if (!enabled) {
                   setFundingGoal("");
-                  setMinStakeRequired("");
                   setFundingDeadlineAt("");
                   setFieldErrors((prev) => {
                     const next = { ...prev };
                     delete next.fundingGoal;
-                    delete next.minStakeRequired;
                     delete next.organizerStake;
                     delete next.fundingDeadlineAt;
                     return next;
@@ -1017,37 +994,6 @@ export const CreateEvent: React.FC = () => {
               {fieldErrors.fundingGoal && (
                 <p className="mt-1 text-sm text-red-400">
                   {fieldErrors.fundingGoal}
-                </p>
-              )}
-            </div>
-
-            <div>
-              <Label htmlFor="min-stake-required" className="text-slate-300">
-                Minimum Organizer Stake
-              </Label>
-              <Input
-                id="min-stake-required"
-                value={minStakeRequired}
-                onChange={(e) => {
-                  setMinStakeRequired(e.target.value);
-                  setFieldErrors((prev) => {
-                    const next = { ...prev };
-                    delete next.minStakeRequired;
-                    delete next.organizerStake;
-                    return next;
-                  });
-                }}
-                placeholder="1000000000000000000"
-                className={`mt-1.5 bg-slate-800 text-white ${
-                  fieldErrors.minStakeRequired || fieldErrors.organizerStake
-                    ? "border-red-500 focus-visible:ring-red-500"
-                    : "border-slate-700"
-                }`}
-                disabled={!investmentEnabled}
-              />
-              {fieldErrors.minStakeRequired && (
-                <p className="mt-1 text-sm text-red-400">
-                  {fieldErrors.minStakeRequired}
                 </p>
               )}
             </div>
@@ -1103,11 +1049,14 @@ export const CreateEvent: React.FC = () => {
                   });
                 }}
                 className={getInputClass(
-                  !!fieldErrors.fundingDeadlineAt || !!fieldErrors.ticketingStartAt,
+                  !!fieldErrors.fundingDeadlineAt ||
+                    !!fieldErrors.ticketingStartAt,
                 )}
               />
               {fieldErrors.fundingDeadlineAt && (
-                <p className="mt-1 text-sm text-red-400">{fieldErrors.fundingDeadlineAt}</p>
+                <p className="mt-1 text-sm text-red-400">
+                  {fieldErrors.fundingDeadlineAt}
+                </p>
               )}
             </div>
           )}
@@ -1120,8 +1069,8 @@ export const CreateEvent: React.FC = () => {
           )}
 
           <p className="text-xs text-slate-500">
-            Stake and funding fields are stored as integer strings in wei.
-            Organizer stake is always locked on-chain when the event is created.
+            Minimum stake required is configured by admin during review. Stake
+            and funding fields are stored as integer strings in wei.
           </p>
         </CardContent>
       </Card>
@@ -1133,7 +1082,7 @@ export const CreateEvent: React.FC = () => {
           onClick={handleSubmit}
           className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white px-8 disabled:opacity-50"
         >
-          {submitting ? "Submitting..." : "Submit for Admin Review"}
+          {submitting ? "Submitting..." : "Submit"}
         </Button>
       </div>
     </div>
