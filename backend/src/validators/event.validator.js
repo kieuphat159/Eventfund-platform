@@ -76,6 +76,12 @@ const createEventSchema = Joi.object({
     "date.greater": "End date must be after start date",
     "any.required": "End date is required",
   }),
+  ticketingStartAt: Joi.date().iso().optional().messages({
+    "date.base": "Ticketing start must be a valid date",
+  }),
+  ticketingEndAt: Joi.date().iso().optional().messages({
+    "date.base": "Ticketing end must be a valid date",
+  }),
   venue: venueSchema.required().messages({
     "any.required": "Venue is required",
   }),
@@ -105,28 +111,74 @@ const createEventSchema = Joi.object({
   organizerShareBps: Joi.number().integer().min(0).max(10000).optional(),
   ticketPrice: bigIntString.optional(),
   usedThreshold: Joi.number().integer().min(1).optional(),
-}).custom((value, helpers) => {
-  if (value.investmentEnabled === false) {
-    const organizerStake = value.organizerStake ?? value.minStakeRequired;
-    if (!organizerStake || !/^[0-9]+$/.test(String(organizerStake)) || BigInt(organizerStake) <= 0n) {
+})
+  .custom((value, helpers) => {
+    if (value.investmentEnabled === false) {
+      const organizerStake = value.organizerStake ?? value.minStakeRequired;
+      if (
+        !organizerStake ||
+        !/^[0-9]+$/.test(String(organizerStake)) ||
+        BigInt(organizerStake) <= 0n
+      ) {
+        return helpers.error("any.custom", {
+          message:
+            "Organizer stake is required and must be a positive integer string when investment is disabled",
+        });
+      }
+    }
+
+    const fundingGoal =
+      value.fundingGoal === undefined ? undefined : BigInt(value.fundingGoal);
+
+    if (
+      fundingGoal !== undefined &&
+      fundingGoal > 0n &&
+      !value.fundingDeadline
+    ) {
       return helpers.error("any.custom", {
         message:
-          "Organizer stake is required and must be a positive integer string when investment is disabled",
+          "Funding deadline is required when funding goal is greater than 0",
       });
     }
-  }
 
-  const fundingGoal =
-    value.fundingGoal === undefined ? undefined : BigInt(value.fundingGoal);
+    if (value.ticketingEndAt && !value.ticketingStartAt) {
+      return helpers.error("any.custom", {
+        message: "ticketingStartAt is required when ticketingEndAt is provided",
+      });
+    }
 
-  if (fundingGoal !== undefined && fundingGoal > 0n && !value.fundingDeadline) {
-    return helpers.error("any.custom", {
-      message: "Funding deadline is required when funding goal is greater than 0",
-    });
-  }
+    if (
+      value.ticketingStartAt &&
+      value.fundingDeadline &&
+      new Date(value.ticketingStartAt) <= new Date(value.fundingDeadline)
+    ) {
+      return helpers.error("any.custom", {
+        message: "ticketingStartAt must be after fundingDeadline",
+      });
+    }
 
-  return value;
-}, "conditional funding validation")
+    if (
+      value.ticketingStartAt &&
+      value.ticketingEndAt &&
+      new Date(value.ticketingEndAt) <= new Date(value.ticketingStartAt)
+    ) {
+      return helpers.error("any.custom", {
+        message: "ticketingEndAt must be after ticketingStartAt",
+      });
+    }
+
+    if (
+      value.ticketingEndAt &&
+      value.startDate &&
+      new Date(value.ticketingEndAt) >= new Date(value.startDate)
+    ) {
+      return helpers.error("any.custom", {
+        message: "ticketingEndAt must be before event startDate",
+      });
+    }
+
+    return value;
+  }, "conditional funding validation")
   .messages({
     "any.custom": "{{#message}}",
   });
@@ -160,6 +212,12 @@ const createEventIntentSchema = Joi.object({
     "date.greater": "End date must be after start date",
     "any.required": "End date is required",
   }),
+  ticketingStartAt: Joi.date().iso().optional().messages({
+    "date.base": "Ticketing start must be a valid date",
+  }),
+  ticketingEndAt: Joi.date().iso().optional().messages({
+    "date.base": "Ticketing end must be a valid date",
+  }),
   venue: venueSchema.required().messages({
     "any.required": "Venue is required",
   }),
@@ -188,32 +246,74 @@ const createEventIntentSchema = Joi.object({
   organizerShareBps: Joi.number().integer().min(0).max(10000).optional(),
   ticketPrice: bigIntString.optional(),
   usedThreshold: Joi.number().integer().min(1).optional(),
-}).custom((value, helpers) => {
-  if (value.investmentEnabled === false) {
-    const organizerStake = value.organizerStake ?? value.minStakeRequired;
+})
+  .custom((value, helpers) => {
+    if (value.investmentEnabled === false) {
+      const organizerStake = value.organizerStake ?? value.minStakeRequired;
+      if (
+        !organizerStake ||
+        !/^[0-9]+$/.test(String(organizerStake)) ||
+        BigInt(organizerStake) <= 0n
+      ) {
+        return helpers.error("any.custom", {
+          message:
+            "Organizer stake is required and must be a positive integer string when investment is disabled",
+        });
+      }
+    }
+
+    const fundingGoal =
+      value.fundingGoal === undefined ? undefined : BigInt(value.fundingGoal);
+
     if (
-      !organizerStake ||
-      !/^[0-9]+$/.test(String(organizerStake)) ||
-      BigInt(organizerStake) <= 0n
+      fundingGoal !== undefined &&
+      fundingGoal > 0n &&
+      !value.fundingDeadline
     ) {
       return helpers.error("any.custom", {
         message:
-          "Organizer stake is required and must be a positive integer string when investment is disabled",
+          "Funding deadline is required when funding goal is greater than 0",
       });
     }
-  }
 
-  const fundingGoal =
-    value.fundingGoal === undefined ? undefined : BigInt(value.fundingGoal);
+    if (value.ticketingEndAt && !value.ticketingStartAt) {
+      return helpers.error("any.custom", {
+        message: "ticketingStartAt is required when ticketingEndAt is provided",
+      });
+    }
 
-  if (fundingGoal !== undefined && fundingGoal > 0n && !value.fundingDeadline) {
-    return helpers.error("any.custom", {
-      message: "Funding deadline is required when funding goal is greater than 0",
-    });
-  }
+    if (
+      value.ticketingStartAt &&
+      value.fundingDeadline &&
+      new Date(value.ticketingStartAt) <= new Date(value.fundingDeadline)
+    ) {
+      return helpers.error("any.custom", {
+        message: "ticketingStartAt must be after fundingDeadline",
+      });
+    }
 
-  return value;
-}, "conditional funding validation")
+    if (
+      value.ticketingStartAt &&
+      value.ticketingEndAt &&
+      new Date(value.ticketingEndAt) <= new Date(value.ticketingStartAt)
+    ) {
+      return helpers.error("any.custom", {
+        message: "ticketingEndAt must be after ticketingStartAt",
+      });
+    }
+
+    if (
+      value.ticketingEndAt &&
+      value.startDate &&
+      new Date(value.ticketingEndAt) >= new Date(value.startDate)
+    ) {
+      return helpers.error("any.custom", {
+        message: "ticketingEndAt must be before event startDate",
+      });
+    }
+
+    return value;
+  }, "conditional funding validation")
   .messages({
     "any.custom": "{{#message}}",
   });
@@ -232,6 +332,12 @@ const updateEventSchema = Joi.object({
   endDate: Joi.date().iso().greater(Joi.ref("startDate")).optional().messages({
     "date.base": "End date must be a valid date",
     "date.greater": "End date must be after start date",
+  }),
+  ticketingStartAt: Joi.date().iso().optional().messages({
+    "date.base": "Ticketing start must be a valid date",
+  }),
+  ticketingEndAt: Joi.date().iso().optional().messages({
+    "date.base": "Ticketing end must be a valid date",
   }),
   fundingGoal: bigIntString.optional().messages({
     "string.empty": "Funding goal must be a valid positive integer string",

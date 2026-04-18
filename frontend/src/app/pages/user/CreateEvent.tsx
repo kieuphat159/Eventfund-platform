@@ -1,6 +1,6 @@
 import React, { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Calendar, MapPin, Upload, Plus, Trash2 } from "lucide-react";
+import { MapPin, Upload, Plus, Trash2 } from "lucide-react";
 import { useWeb3Auth } from "@web3auth/modal/react";
 import {
   Card,
@@ -38,12 +38,11 @@ export const CreateEvent: React.FC = () => {
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [date, setDate] = useState("");
-  const [time, setTime] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [endTime, setEndTime] = useState("");
-  const [fundingDeadlineDate, setFundingDeadlineDate] = useState("");
-  const [fundingDeadlineTime, setFundingDeadlineTime] = useState("");
+  const [startAt, setStartAt] = useState("");
+  const [endAt, setEndAt] = useState("");
+  const [fundingDeadlineAt, setFundingDeadlineAt] = useState("");
+  const [ticketingStartAt, setTicketingStartAt] = useState("");
+  const [ticketingEndAt, setTicketingEndAt] = useState("");
   const [location, setLocation] = useState("");
   const [category, setCategory] = useState("");
 
@@ -64,12 +63,11 @@ export const CreateEvent: React.FC = () => {
   const resetForm = () => {
     setTitle("");
     setDescription("");
-    setDate("");
-    setTime("");
-    setEndDate("");
-    setEndTime("");
-    setFundingDeadlineDate("");
-    setFundingDeadlineTime("");
+    setStartAt("");
+    setEndAt("");
+    setFundingDeadlineAt("");
+    setTicketingStartAt("");
+    setTicketingEndAt("");
     setLocation("");
     setCategory("");
     setFundingGoal("");
@@ -116,21 +114,23 @@ export const CreateEvent: React.FC = () => {
     });
   };
 
-  const buildDateTime = (dateValue: string, timeValue: string) => {
-    if (!dateValue || !timeValue) return null;
-    return new Date(`${dateValue}T${timeValue}`);
-  };
-
   const buildStartDate = () => {
-    return buildDateTime(date, time);
+    return parseOptionalDateTime(startAt);
   };
 
   const buildEndDate = () => {
-    return buildDateTime(endDate, endTime);
+    return parseOptionalDateTime(endAt);
   };
 
   const buildFundingDeadline = () => {
-    return buildDateTime(fundingDeadlineDate, fundingDeadlineTime);
+    return parseOptionalDateTime(fundingDeadlineAt);
+  };
+
+  const parseOptionalDateTime = (value: string) => {
+    if (!value) return null;
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed;
   };
 
   const getInputClass = (hasError?: boolean) =>
@@ -147,34 +147,26 @@ export const CreateEvent: React.FC = () => {
       errors.title = "Event title is required.";
     }
 
-    if (!date) {
-      errors.date = "Event date is required.";
+    if (!startAt) {
+      errors.startAt = "Event start date and time are required.";
     }
 
-    if (!time) {
-      errors.time = "Event time is required.";
-    }
-
-    if (!endDate) {
-      errors.endDate = "Event end date is required.";
-    }
-
-    if (!endTime) {
-      errors.endTime = "Event end time is required.";
+    if (!endAt) {
+      errors.endAt = "Event end date and time are required.";
     }
 
     const start = buildStartDate();
-    if (date && time && (!start || Number.isNaN(start.getTime()))) {
-      errors.dateTime = "Event date and time are invalid.";
+    if (startAt && (!start || Number.isNaN(start.getTime()))) {
+      errors.startAt = "Event start date and time are invalid.";
     }
 
     const end = buildEndDate();
-    if (endDate && endTime && (!end || Number.isNaN(end.getTime()))) {
-      errors.endDateTime = "Event end date and time are invalid.";
+    if (endAt && (!end || Number.isNaN(end.getTime()))) {
+      errors.endAt = "Event end date and time are invalid.";
     }
 
     if (start && end && end <= start) {
-      errors.endDateTime = "Event end must be after the start time.";
+      errors.endAt = "Event end must be after the start time.";
     }
 
     if (investmentEnabled) {
@@ -243,33 +235,61 @@ export const CreateEvent: React.FC = () => {
     }
 
     if (investmentEnabled) {
-      if (!fundingDeadlineDate) {
-        errors.fundingDeadlineDate = "Funding deadline date is required.";
-      }
-
-      if (!fundingDeadlineTime) {
-        errors.fundingDeadlineTime = "Funding deadline time is required.";
+      if (!fundingDeadlineAt) {
+        errors.fundingDeadlineAt = "Funding deadline date and time are required.";
       }
 
       const fundingDeadline = buildFundingDeadline();
       if (
-        fundingDeadlineDate &&
-        fundingDeadlineTime &&
+        fundingDeadlineAt &&
         (!fundingDeadline || Number.isNaN(fundingDeadline.getTime()))
       ) {
-        errors.fundingDeadlineDateTime =
-          "Funding deadline date and time are invalid.";
+        errors.fundingDeadlineAt = "Funding deadline date and time are invalid.";
       }
 
       if (start && fundingDeadline && fundingDeadline >= start) {
-        errors.fundingDeadlineDateTime =
+        errors.fundingDeadlineAt =
           "Funding deadline must be after the current time and before the event start time.";
       }
 
       if (fundingDeadline && fundingDeadline <= new Date()) {
-        errors.fundingDeadlineDateTime =
+        errors.fundingDeadlineAt =
           "Funding deadline must be after the current time and before the event start time.";
       }
+    }
+
+    const ticketingStart = parseOptionalDateTime(ticketingStartAt);
+    const ticketingEnd = parseOptionalDateTime(ticketingEndAt);
+
+    if (ticketingStartAt && !ticketingStart) {
+      errors.ticketingStartAt = "Ticketing start time is invalid.";
+    }
+
+    if (ticketingEndAt && !ticketingEnd) {
+      errors.ticketingEndAt = "Ticketing end time is invalid.";
+    }
+
+    if (ticketingEnd && !ticketingStartAt) {
+      errors.ticketingStartAt =
+        "Ticketing start time is required when ticketing end time is set.";
+    }
+
+    if (investmentEnabled && ticketingStart) {
+      const fundingDeadline = buildFundingDeadline();
+      if (fundingDeadline && ticketingStart <= fundingDeadline) {
+        errors.ticketingStartAt =
+          "Ticketing start time must be after funding deadline.";
+      }
+    }
+
+    if (ticketingStart && ticketingEnd && ticketingEnd <= ticketingStart) {
+      errors.ticketingEndAt =
+        "Ticketing end time must be after ticketing start time.";
+    }
+
+    if (start && ticketingEnd && ticketingEnd >= start) {
+      errors.ticketingEndAt =
+        "Ticketing end time must be before event start time.";
     }
 
     const filledTiers = ticketTiers.filter(
@@ -383,6 +403,9 @@ export const CreateEvent: React.FC = () => {
         }
       }
 
+      const parsedTicketingStart = parseOptionalDateTime(ticketingStartAt);
+      const parsedTicketingEnd = parseOptionalDateTime(ticketingEndAt);
+
       const normalizedTiers = ticketTiers
         .filter(
           (tier) => tier.name.trim() || tier.price.trim() || tier.supply.trim(),
@@ -418,6 +441,8 @@ export const CreateEvent: React.FC = () => {
         organizerStake: organizerStake.trim() || undefined,
         startDate: start.toISOString(),
         endDate: end.toISOString(),
+        ticketingStartAt: parsedTicketingStart?.toISOString(),
+        ticketingEndAt: parsedTicketingEnd?.toISOString(),
         totalTickets,
         ticketPrice: String(normalizedTiers[0].price),
         venue: {
@@ -576,135 +601,109 @@ export const CreateEvent: React.FC = () => {
 
           <div className="grid md:grid-cols-2 gap-4">
             <div>
-              <Label htmlFor="date" className="text-white">
-                Event Start Date *
+              <Label htmlFor="start-at" className="text-white">
+                Event Start At *
               </Label>
-              <div className="relative mt-1.5">
-                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-cyan-300" />
-                <Input
-                  id="date"
-                  type="date"
-                  value={date}
-                  onChange={(e) => {
-                    setDate(e.target.value);
-                    setFieldErrors((prev) => {
-                      const next = { ...prev };
-                      delete next.date;
-                      delete next.dateTime;
-                      return next;
-                    });
-                  }}
-                  className={`pl-10 bg-slate-800 text-white ${
-                    fieldErrors.date || fieldErrors.dateTime
-                      ? "border-red-500 focus-visible:ring-red-500"
-                      : "border-slate-700"
-                  }`}
-                />
-              </div>
-              {fieldErrors.date && (
-                <p className="mt-1 text-sm text-red-400">{fieldErrors.date}</p>
-              )}
-              {!fieldErrors.date && fieldErrors.dateTime && (
-                <p className="mt-1 text-sm text-red-400">
-                  {fieldErrors.dateTime}
-                </p>
+              <Input
+                id="start-at"
+                type="datetime-local"
+                value={startAt}
+                onChange={(e) => {
+                  setStartAt(e.target.value);
+                  setFieldErrors((prev) => {
+                    const next = { ...prev };
+                    delete next.startAt;
+                    delete next.ticketingStartAt;
+                    delete next.ticketingEndAt;
+                    return next;
+                  });
+                }}
+                className={getInputClass(
+                  !!fieldErrors.startAt ||
+                    !!fieldErrors.ticketingStartAt ||
+                    !!fieldErrors.ticketingEndAt,
+                )}
+              />
+              {fieldErrors.startAt && (
+                <p className="mt-1 text-sm text-red-400">{fieldErrors.startAt}</p>
               )}
             </div>
 
             <div>
-              <Label htmlFor="time" className="text-white">
-                Event Start Time *
+              <Label htmlFor="end-at" className="text-white">
+                Event End At *
               </Label>
               <Input
-                id="time"
-                type="time"
-                value={time}
+                id="end-at"
+                type="datetime-local"
+                value={endAt}
                 onChange={(e) => {
-                  setTime(e.target.value);
+                  setEndAt(e.target.value);
                   setFieldErrors((prev) => {
                     const next = { ...prev };
-                    delete next.time;
-                    delete next.dateTime;
+                    delete next.endAt;
                     return next;
                   });
                 }}
-                className={`mt-1.5 bg-slate-800 text-white ${
-                  fieldErrors.time || fieldErrors.dateTime
-                    ? "border-red-500 focus-visible:ring-red-500"
-                    : "border-slate-700"
-                }`}
+                className={getInputClass(!!fieldErrors.endAt)}
               />
-              {fieldErrors.time && (
-                <p className="mt-1 text-sm text-red-400">{fieldErrors.time}</p>
+              {fieldErrors.endAt && (
+                <p className="mt-1 text-sm text-red-400">{fieldErrors.endAt}</p>
               )}
             </div>
           </div>
 
           <div className="grid md:grid-cols-2 gap-4">
             <div>
-              <Label htmlFor="end-date" className="text-white">
-                Event End Date *
+              <Label htmlFor="ticketing-start-at" className="text-white">
+                Ticketing Start At
               </Label>
-              <div className="relative mt-1.5">
-                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-cyan-300" />
-                <Input
-                  id="end-date"
-                  type="date"
-                  value={endDate}
-                  onChange={(e) => {
-                    setEndDate(e.target.value);
-                    setFieldErrors((prev) => {
-                      const next = { ...prev };
-                      delete next.endDate;
-                      delete next.endDateTime;
-                      return next;
-                    });
-                  }}
-                  className={`pl-10 bg-slate-800 text-white ${
-                    fieldErrors.endDate || fieldErrors.endDateTime
-                      ? "border-red-500 focus-visible:ring-red-500"
-                      : "border-slate-700"
-                  }`}
-                />
-              </div>
-              {fieldErrors.endDate && (
+              <Input
+                id="ticketing-start-at"
+                type="datetime-local"
+                value={ticketingStartAt}
+                onChange={(e) => {
+                  setTicketingStartAt(e.target.value);
+                  setFieldErrors((prev) => {
+                    const next = { ...prev };
+                    delete next.ticketingStartAt;
+                    delete next.ticketingEndAt;
+                    return next;
+                  });
+                }}
+                className={getInputClass(
+                  !!fieldErrors.ticketingStartAt ||
+                    !!fieldErrors.ticketingEndAt,
+                )}
+              />
+              {fieldErrors.ticketingStartAt && (
                 <p className="mt-1 text-sm text-red-400">
-                  {fieldErrors.endDate}
-                </p>
-              )}
-              {!fieldErrors.endDate && fieldErrors.endDateTime && (
-                <p className="mt-1 text-sm text-red-400">
-                  {fieldErrors.endDateTime}
+                  {fieldErrors.ticketingStartAt}
                 </p>
               )}
             </div>
 
             <div>
-              <Label htmlFor="end-time" className="text-white">
-                Event End Time *
+              <Label htmlFor="ticketing-end-at" className="text-white">
+                Ticketing End At
               </Label>
               <Input
-                id="end-time"
-                type="time"
-                value={endTime}
+                id="ticketing-end-at"
+                type="datetime-local"
+                value={ticketingEndAt}
                 onChange={(e) => {
-                  setEndTime(e.target.value);
+                  setTicketingEndAt(e.target.value);
                   setFieldErrors((prev) => {
                     const next = { ...prev };
-                    delete next.endTime;
-                    delete next.endDateTime;
+                    delete next.ticketingEndAt;
                     return next;
                   });
                 }}
-                className={`mt-1.5 bg-slate-800 text-white ${
-                  fieldErrors.endTime || fieldErrors.endDateTime
-                    ? "border-red-500 focus-visible:ring-red-500"
-                    : "border-slate-700"
-                }`}
+                className={getInputClass(!!fieldErrors.ticketingEndAt)}
               />
-              {fieldErrors.endTime && (
+              {fieldErrors.ticketingEndAt && (
                 <p className="mt-1 text-sm text-red-400">
-                  {fieldErrors.endTime}
+                  {fieldErrors.ticketingEndAt}
                 </p>
               )}
             </div>
@@ -971,16 +970,13 @@ export const CreateEvent: React.FC = () => {
                 if (!enabled) {
                   setFundingGoal("");
                   setMinStakeRequired("");
-                  setFundingDeadlineDate("");
-                  setFundingDeadlineTime("");
+                  setFundingDeadlineAt("");
                   setFieldErrors((prev) => {
                     const next = { ...prev };
                     delete next.fundingGoal;
                     delete next.minStakeRequired;
                     delete next.organizerStake;
-                    delete next.fundingDeadlineDate;
-                    delete next.fundingDeadlineTime;
-                    delete next.fundingDeadlineDateTime;
+                    delete next.fundingDeadlineAt;
                     return next;
                   });
                 }
@@ -1089,83 +1085,30 @@ export const CreateEvent: React.FC = () => {
           </div>
 
           {investmentEnabled && (
-            <div className="grid md:grid-cols-2 gap-4">
-              <div>
-                <Label
-                  htmlFor="funding-deadline-date"
-                  className="text-slate-300"
-                >
-                  Funding Deadline Date *
-                </Label>
-                <div className="relative mt-1.5">
-                  <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-cyan-300" />
-                  <Input
-                    id="funding-deadline-date"
-                    type="date"
-                    value={fundingDeadlineDate}
-                    onChange={(e) => {
-                      setFundingDeadlineDate(e.target.value);
-                      setFieldErrors((prev) => {
-                        const next = { ...prev };
-                        delete next.fundingDeadlineDate;
-                        delete next.fundingDeadlineDateTime;
-                        return next;
-                      });
-                    }}
-                    className={`pl-10 bg-slate-800 text-white ${
-                      fieldErrors.fundingDeadlineDate ||
-                      fieldErrors.fundingDeadlineDateTime
-                        ? "border-red-500 focus-visible:ring-red-500"
-                        : "border-slate-700"
-                    }`}
-                  />
-                </div>
-                {fieldErrors.fundingDeadlineDate && (
-                  <p className="mt-1 text-sm text-red-400">
-                    {fieldErrors.fundingDeadlineDate}
-                  </p>
+            <div>
+              <Label htmlFor="funding-deadline-at" className="text-slate-300">
+                Funding Deadline At *
+              </Label>
+              <Input
+                id="funding-deadline-at"
+                type="datetime-local"
+                value={fundingDeadlineAt}
+                onChange={(e) => {
+                  setFundingDeadlineAt(e.target.value);
+                  setFieldErrors((prev) => {
+                    const next = { ...prev };
+                    delete next.fundingDeadlineAt;
+                    delete next.ticketingStartAt;
+                    return next;
+                  });
+                }}
+                className={getInputClass(
+                  !!fieldErrors.fundingDeadlineAt || !!fieldErrors.ticketingStartAt,
                 )}
-                {!fieldErrors.fundingDeadlineDate &&
-                  fieldErrors.fundingDeadlineDateTime && (
-                    <p className="mt-1 text-sm text-red-400">
-                      {fieldErrors.fundingDeadlineDateTime}
-                    </p>
-                  )}
-              </div>
-
-              <div>
-                <Label
-                  htmlFor="funding-deadline-time"
-                  className="text-slate-300"
-                >
-                  Funding Deadline Time *
-                </Label>
-                <Input
-                  id="funding-deadline-time"
-                  type="time"
-                  value={fundingDeadlineTime}
-                  onChange={(e) => {
-                    setFundingDeadlineTime(e.target.value);
-                    setFieldErrors((prev) => {
-                      const next = { ...prev };
-                      delete next.fundingDeadlineTime;
-                      delete next.fundingDeadlineDateTime;
-                      return next;
-                    });
-                  }}
-                  className={`mt-1.5 bg-slate-800 text-white ${
-                    fieldErrors.fundingDeadlineTime ||
-                    fieldErrors.fundingDeadlineDateTime
-                      ? "border-red-500 focus-visible:ring-red-500"
-                      : "border-slate-700"
-                  }`}
-                />
-                {fieldErrors.fundingDeadlineTime && (
-                  <p className="mt-1 text-sm text-red-400">
-                    {fieldErrors.fundingDeadlineTime}
-                  </p>
-                )}
-              </div>
+              />
+              {fieldErrors.fundingDeadlineAt && (
+                <p className="mt-1 text-sm text-red-400">{fieldErrors.fundingDeadlineAt}</p>
+              )}
             </div>
           )}
 

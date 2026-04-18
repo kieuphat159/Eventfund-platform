@@ -116,17 +116,9 @@ async function supportsNoInvestCreate(fundContract, fundWithSigner) {
   }
 
   try {
-    await noInvestCreate.staticCall(
-      0n,
-      0n,
-      1n,
-      7000n,
-      1n,
-      1n,
-      1n,
-      false,
-      { value: 1n },
-    );
+    await noInvestCreate.staticCall(0n, 0n, 1n, 7000n, 1n, 1n, 1n, false, {
+      value: 1n,
+    });
 
     cachedNoInvestCreateSupport = {
       address,
@@ -268,6 +260,8 @@ function buildConfirmedEventPatch(draftEvent, extra = {}) {
     usedThreshold: draftEvent.usedThreshold,
     startDate: draftEvent.startDate,
     endDate: draftEvent.endDate,
+    ticketingStartAt: draftEvent.ticketingStartAt,
+    ticketingEndAt: draftEvent.ticketingEndAt,
     venue: draftEvent.venue,
     imageUrls: draftEvent.imageUrls,
     metadataUri: draftEvent.metadataUri,
@@ -366,6 +360,62 @@ function resolveImmediateFundingDeadline(eventData) {
   }
 
   return new Date();
+}
+
+function parseOptionalIsoDateTime(value, fieldName) {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  if (!Number.isFinite(parsed.getTime())) {
+    throw new BadRequestError(`${fieldName} must be a valid ISO datetime`);
+  }
+
+  return parsed;
+}
+
+function resolveTicketingTimeline(eventData, fundingDeadlineDate) {
+  const startDate = parseOptionalIsoDateTime(eventData?.startDate, "startDate");
+  const ticketingStartAt = parseOptionalIsoDateTime(
+    eventData?.ticketingStartAt,
+    "ticketingStartAt",
+  );
+  const ticketingEndAt = parseOptionalIsoDateTime(
+    eventData?.ticketingEndAt,
+    "ticketingEndAt",
+  );
+
+  if (ticketingEndAt && !ticketingStartAt) {
+    throw new BadRequestError(
+      "ticketingStartAt is required when ticketingEndAt is provided",
+    );
+  }
+
+  if (ticketingStartAt && fundingDeadlineDate) {
+    if (ticketingStartAt <= fundingDeadlineDate) {
+      throw new BadRequestError(
+        "ticketingStartAt must be after fundingDeadline",
+      );
+    }
+  }
+
+  if (
+    ticketingStartAt &&
+    ticketingEndAt &&
+    ticketingEndAt <= ticketingStartAt
+  ) {
+    throw new BadRequestError("ticketingEndAt must be after ticketingStartAt");
+  }
+
+  if (ticketingEndAt && startDate && ticketingEndAt >= startDate) {
+    throw new BadRequestError("ticketingEndAt must be before event startDate");
+  }
+
+  return {
+    ticketingStartAt,
+    ticketingEndAt,
+  };
 }
 
 function resolveFundingConfig(eventData) {
@@ -496,6 +546,10 @@ export async function createEvent(eventData, user, repos = {}) {
     organizerStake,
     fundingDeadlineDate,
   } = resolveFundingConfig(eventData);
+  const { ticketingStartAt, ticketingEndAt } = resolveTicketingTimeline(
+    eventData,
+    fundingDeadlineDate,
+  );
 
   const organizerShareBps = Number(eventData.organizerShareBps ?? 7000);
   const ticketPrice = resolveDraftTicketPriceNumber(eventData);
@@ -561,6 +615,8 @@ export async function createEvent(eventData, user, repos = {}) {
     minStakeRequired: minStakeRequired.toString(),
     fundingGoal: fundingGoal.toString(),
     fundingDeadline: fundingDeadlineDate,
+    ticketingStartAt,
+    ticketingEndAt,
     maxTickets: Number(maxTickets),
     currentFunding: "0",
     ticketsSold: 0,
@@ -716,6 +772,10 @@ export async function createCreateEventIntent(eventData, user, repos = {}) {
     organizerStake,
     fundingDeadlineDate,
   } = resolveFundingConfig(eventData);
+  const { ticketingStartAt, ticketingEndAt } = resolveTicketingTimeline(
+    eventData,
+    fundingDeadlineDate,
+  );
   if (investmentEnabled && !fundingDeadlineDate) {
     throw new BadRequestError(
       "Funding goal and funding deadline are required for on-chain event creation",
@@ -782,6 +842,8 @@ export async function createCreateEventIntent(eventData, user, repos = {}) {
     minStakeRequired: minStakeRequired.toString(),
     fundingGoal: fundingGoal.toString(),
     fundingDeadline: fundingDeadlineDate,
+    ticketingStartAt,
+    ticketingEndAt,
     maxTickets: Number(maxTickets),
     currentFunding: "0",
     ticketsSold: 0,
@@ -1134,6 +1196,8 @@ export async function updateEvent(eventId, updates, user, repos = {}) {
     "category",
     "startDate",
     "endDate",
+    "ticketingStartAt",
+    "ticketingEndAt",
     "fundingGoal",
     "minStakeRequired",
     "fundingDeadline",
@@ -1421,7 +1485,9 @@ export async function confirmInvestmentTransaction(
 
   const receipt = await getMinedReceipt(txHash);
   if (!receipt) {
-    throw new BadRequestError("Transaction not mined yet. Please retry shortly.");
+    throw new BadRequestError(
+      "Transaction not mined yet. Please retry shortly.",
+    );
   }
   if (Number(receipt.status) !== 1) {
     throw new BadRequestError("Transaction failed on-chain");
@@ -1434,9 +1500,7 @@ export async function confirmInvestmentTransaction(
 
   const matchedContribution = contributionEvents.find((parsedEvent) => {
     const chainEventId = String(parsedEvent.args?.eventId ?? "");
-    const chainInvestor = String(
-      parsedEvent.args?.donator ?? "",
-    ).toLowerCase();
+    const chainInvestor = String(parsedEvent.args?.donator ?? "").toLowerCase();
 
     return (
       chainEventId === String(event.contractEventId) &&
@@ -1454,7 +1518,9 @@ export async function confirmInvestmentTransaction(
   try {
     amountFromChain = toStringBigInt(String(matchedContribution.args?.amount));
   } catch {
-    throw new BadRequestError("Invalid contribution amount from on-chain receipt");
+    throw new BadRequestError(
+      "Invalid contribution amount from on-chain receipt",
+    );
   }
 
   if (compareBigInt(amountFromChain, "0") <= 0) {
@@ -1503,8 +1569,13 @@ export async function confirmInvestmentTransaction(
     });
   }
 
-  const fundingUpdates = await rebuildSharePercentagesAndFunding(String(event._id));
-  const updatedEvent = await repository.updateFundingStatus(eventId, fundingUpdates);
+  const fundingUpdates = await rebuildSharePercentagesAndFunding(
+    String(event._id),
+  );
+  const updatedEvent = await repository.updateFundingStatus(
+    eventId,
+    fundingUpdates,
+  );
 
   const updatedShare = await Share.findOne({
     eventId: event._id,
