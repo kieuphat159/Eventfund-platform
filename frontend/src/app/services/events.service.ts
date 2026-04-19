@@ -33,6 +33,8 @@ export interface EventItem {
 
   startDate?: string;
   endDate?: string;
+  ticketingStartAt?: string;
+  ticketingEndAt?: string;
   createdAt?: string;
   updatedAt?: string;
 
@@ -88,6 +90,8 @@ export interface CreateEventPayload {
   organizerAddress?: string;
   startDate: string;
   endDate: string;
+  ticketingStartAt?: string;
+  ticketingEndAt?: string;
   venue: {
     address: string;
   };
@@ -110,6 +114,8 @@ export interface UpdateEventPayload {
   category?: string;
   startDate?: string;
   endDate?: string;
+  ticketingStartAt?: string;
+  ticketingEndAt?: string;
   venue?: {
     address?: string;
   };
