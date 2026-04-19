@@ -51,7 +51,6 @@ const eventSchema = new mongoose.Schema(
     organizerShareBps: { type: Number, default: 0 },
     fundingDeadline: {
       type: Date,
-      required: true,
     },
 
     ticketPrice: { type: Number, default: 0 },
