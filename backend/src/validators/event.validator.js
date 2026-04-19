@@ -148,6 +148,7 @@ const createEventSchema = Joi.object({
     }
 
     if (
+      value.investmentEnabled !== false &&
       value.ticketingStartAt &&
       value.fundingDeadline &&
       new Date(value.ticketingStartAt) <= new Date(value.fundingDeadline)
@@ -283,6 +284,7 @@ const createEventIntentSchema = Joi.object({
     }
 
     if (
+      value.investmentEnabled !== false &&
       value.ticketingStartAt &&
       value.fundingDeadline &&
       new Date(value.ticketingStartAt) <= new Date(value.fundingDeadline)

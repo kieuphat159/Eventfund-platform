@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { MapPin, Upload, Plus, Trash2 } from "lucide-react";
 import { useWeb3Auth } from "@web3auth/modal/react";
@@ -112,6 +112,33 @@ export const CreateEvent: React.FC = () => {
     });
   };
 
+  // Calculate total ticket value (price in wei)
+  const calculateTotalTicketValue = () => {
+    return ticketTiers.reduce((total, tier) => {
+      try {
+        const price = BigInt(tier.price || "0");
+        const supply = BigInt(tier.supply || "0");
+        return total + price * supply;
+      } catch {
+        return total;
+      }
+    }, 0n);
+  };
+
+  // Calculate minimum stake as 5% of total ticket value when investment is disabled
+  const calculateMinStakeForSelfFunded = () => {
+    const totalValue = calculateTotalTicketValue();
+    const minStakeInWei = totalValue / 20n; // 5% = divide by 20
+    return minStakeInWei.toString();
+  };
+
+  // Auto-recalculate min stake whenever ticket tiers change and investment is disabled
+  useEffect(() => {
+    if (!investmentEnabled) {
+      setMinStakeRequired(calculateMinStakeForSelfFunded());
+    }
+  }, [ticketTiers, investmentEnabled]);
+
   const buildStartDate = () => {
     return parseOptionalDateTime(startAt);
   };
@@ -190,13 +217,13 @@ export const CreateEvent: React.FC = () => {
     if (!investmentEnabled) {
       if (!minStakeRequired.trim()) {
         errors.minStakeRequired =
-          "Minimum organizer stake is required and must be a positive integer string.";
+          "Organizer stake is required and must be a positive integer string.";
       } else if (
         !/^\d+$/.test(minStakeRequired.trim()) ||
         BigInt(minStakeRequired.trim()) <= 0n
       ) {
         errors.minStakeRequired =
-          "Minimum organizer stake is required and must be a positive integer string.";
+          "Organizer stake is required and must be a positive integer string.";
       }
     }
 
@@ -301,12 +328,11 @@ export const CreateEvent: React.FC = () => {
       if (tier.price.trim() === "") {
         errors[`tier-${index}-price`] = `Tier ${tierNumber} price is required.`;
       } else if (
-        Number.isNaN(Number(tier.price)) ||
-        !Number.isInteger(Number(tier.price)) ||
-        Number(tier.price) <= 0
+        !/^\d+$/.test(tier.price.trim()) ||
+        BigInt(tier.price.trim()) <= 0n
       ) {
         errors[`tier-${index}-price`] =
-          `Tier ${tierNumber} price must be a positive integer.`;
+          `Tier ${tierNumber} price must be a positive integer (in wei).`;
       }
 
       if (tier.supply.trim() === "") {
@@ -392,6 +418,7 @@ export const CreateEvent: React.FC = () => {
         )
         .map((tier) => ({
           name: tier.name.trim(),
+          // Price is already in wei
           price: Number(tier.price),
           totalSupply: Number(tier.supply),
         }));
@@ -450,11 +477,11 @@ export const CreateEvent: React.FC = () => {
         provider!,
         {
           ...basePayload,
-          fundingGoal: investmentEnabled ? fundingGoal.trim() : undefined,
+          fundingGoal: investmentEnabled ? fundingGoal.trim() : "0",
           minStakeRequired: minStakeRequired.trim() || undefined,
           fundingDeadline: investmentEnabled
             ? fundingDeadline?.toISOString()
-            : undefined,
+            : new Date(start.getTime() - 24 * 60 * 60 * 1000).toISOString(), // startDate - 1 day when investment disabled
         },
         user.walletAddress,
         user.smartAccountAddress,
@@ -872,13 +899,13 @@ export const CreateEvent: React.FC = () => {
                     htmlFor={`tier-price-${index}`}
                     className="text-slate-300"
                   >
-                    Price (ETH)
+                    Price (wei)
                   </Label>
                   <Input
                     id={`tier-price-${index}`}
                     type="number"
-                    step="0.01"
-                    placeholder="0.00"
+                    step="1"
+                    placeholder="800000000000000000"
                     value={tier.price}
                     onChange={(e) => updateTier(index, "price", e.target.value)}
                     className={`mt-1.5 bg-slate-800 text-white ${
@@ -946,8 +973,12 @@ export const CreateEvent: React.FC = () => {
                 const enabled = e.target.checked;
                 setInvestmentEnabled(enabled);
                 if (!enabled) {
-                  setFundingGoal("");
+                  // When investment is disabled, set funding goal to 0 and calculate min stake
+                  setFundingGoal("0");
                   setFundingDeadlineAt("");
+                  // Auto-calculate minimum stake as 10% of total ticket value
+                  const calculatedMinStake = calculateMinStakeForSelfFunded();
+                  setMinStakeRequired(calculatedMinStake);
                   setFieldErrors((prev) => {
                     const next = { ...prev };
                     delete next.fundingGoal;
@@ -955,6 +986,10 @@ export const CreateEvent: React.FC = () => {
                     delete next.fundingDeadlineAt;
                     return next;
                   });
+                } else {
+                  // When investment is enabled, reset to empty values
+                  setFundingGoal("");
+                  setMinStakeRequired("");
                 }
               }}
               className="w-4 h-4 rounded border-slate-700 bg-slate-800 accent-cyan-400"
@@ -999,7 +1034,12 @@ export const CreateEvent: React.FC = () => {
 
             <div>
               <Label htmlFor="min-stake-required" className="text-slate-300">
-                Minimum Organizer Stake
+                Organizer Stake (wei)
+                {!investmentEnabled && (
+                  <span className="text-xs text-slate-400 ml-2">
+                    (Auto-calculated: 10% of total ticket value)
+                  </span>
+                )}
               </Label>
               <Input
                 id="min-stake-required"
@@ -1012,12 +1052,17 @@ export const CreateEvent: React.FC = () => {
                     return next;
                   });
                 }}
-                placeholder="1000000000000000000"
+                placeholder={
+                  !investmentEnabled
+                    ? "Auto-calculated based on ticket tiers"
+                    : "1000000000000000000"
+                }
                 className={`mt-1.5 bg-slate-800 text-white ${
                   fieldErrors.minStakeRequired
                     ? "border-red-500 focus-visible:ring-red-500"
                     : "border-slate-700"
-                }`}
+                } ${!investmentEnabled ? "bg-slate-700 text-slate-300" : ""}`}
+                readOnly={!investmentEnabled}
               />
               {fieldErrors.minStakeRequired && (
                 <p className="mt-1 text-sm text-red-400">
