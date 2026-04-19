@@ -1,7 +1,6 @@
 import React from "react";
 import {
   ShoppingCart,
-  Zap,
   Search,
   SlidersHorizontal,
   X,
@@ -24,19 +23,17 @@ import {
 import { Badge } from "../../components/ui/badge";
 import { listingService, ApiListing } from "../../services/listings.service";
 import { ImageWithFallback } from "../../components/figma/ImageWithFallback";
-import { ethers } from "ethers";
 
 export const Marketplace: React.FC = () => {
   const [showFilters, setShowFilters] = React.useState(true);
   const [searchQuery, setSearchQuery] = React.useState("");
-  const [priceRange, setPriceRange] = React.useState([0.01, 10]); // UI
-  const [appliedPriceRange, setAppliedPriceRange] = React.useState([0.01, 10]); // dùng gọi API
+  const [minPriceWei, setMinPriceWei] = React.useState("");
+  const [maxPriceWei, setMaxPriceWei] = React.useState("");
   const [selectedTicketType, setSelectedTicketType] = React.useState("all");
   const [selectedDate, setSelectedDate] = React.useState("all");
   const [sortBy, setSortBy] = React.useState("newest");
 
   const [listings, setListings] = React.useState<ApiListing[]>([]);
-  console.log("Fetched listings:", listings);
   const [loading, setLoading] = React.useState(true);
 
   React.useEffect(() => {
@@ -52,13 +49,9 @@ export const Marketplace: React.FC = () => {
 
         const res = await listingService.getAll({
           page: 1,
-          limit: 20,
-          minPrice: ethers
-            .parseEther(appliedPriceRange[0].toString())
-            .toString(),
-          maxPrice: ethers
-            .parseEther(appliedPriceRange[1].toString())
-            .toString(),
+          limit: 100,
+          minPrice: minPriceWei.trim() || undefined,
+          maxPrice: maxPriceWei.trim() || undefined,
           ...sortMap[sortBy],
         });
 
@@ -71,11 +64,12 @@ export const Marketplace: React.FC = () => {
     };
 
     fetchListings();
-  }, [appliedPriceRange, sortBy]);
+  }, [minPriceWei, maxPriceWei, sortBy]);
 
   const clearFilters = () => {
     setSearchQuery("");
-    setPriceRange([0, 10]);
+    setMinPriceWei("");
+    setMaxPriceWei("");
     setSelectedTicketType("all");
     setSelectedDate("all");
     setSortBy("newest");
@@ -83,11 +77,20 @@ export const Marketplace: React.FC = () => {
 
   const activeFiltersCount = [
     searchQuery !== "",
-    priceRange[0] !== 0.01 || priceRange[1] !== 10,
+    minPriceWei.trim() !== "" || maxPriceWei.trim() !== "",
     selectedTicketType !== "all",
     selectedDate !== "all",
   ].filter(Boolean).length;
   const navigate = useNavigate();
+
+  const formatWei = (wei?: string) => {
+    try {
+      return BigInt(wei || "0").toLocaleString();
+    } catch {
+      return "0";
+    }
+  };
+
   if (loading) {
     return (
       <div className="text-white p-10 text-center">Loading marketplace...</div>
@@ -190,27 +193,31 @@ export const Marketplace: React.FC = () => {
                   {/* Price Range Slider */}
                   <div className="space-y-3">
                     <Label className="text-slate-300 font-medium">
-                      Price Range (ETH)
+                      Price Range (wei)
                     </Label>
-                    <div className="pt-2">
-                      <Slider
-                        min={0.01}
-                        max={10}
-                        step={0.01}
-                        value={priceRange}
-                        onValueChange={setPriceRange} // kéo mượt
-                        onValueCommit={(value) => setAppliedPriceRange(value)} // thả chuột mới call
-                        className="w-full"
+                    <div className="grid grid-cols-2 gap-3">
+                      <Input
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        value={minPriceWei}
+                        onChange={(e) => setMinPriceWei(e.target.value)}
+                        placeholder="Min wei"
+                        className="bg-slate-800 border-slate-700 text-white"
+                      />
+                      <Input
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        value={maxPriceWei}
+                        onChange={(e) => setMaxPriceWei(e.target.value)}
+                        placeholder="Max wei"
+                        className="bg-slate-800 border-slate-700 text-white"
                       />
                     </div>
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-slate-400">
-                        {priceRange[0].toFixed(2)} ETH
-                      </span>
-                      <span className="text-slate-400">
-                        {priceRange[1].toFixed(2)} ETH
-                      </span>
-                    </div>
+                    <p className="text-xs text-slate-500">
+                      Leave blank to show all listing prices.
+                    </p>
                   </div>
 
                   {/* Event Date */}
@@ -271,9 +278,9 @@ export const Marketplace: React.FC = () => {
                             Search: {searchQuery}
                           </Badge>
                         )}
-                        {(priceRange[0] !== 0 || priceRange[1] !== 10) && (
+                        {(minPriceWei.trim() !== "" || maxPriceWei.trim() !== "") && (
                           <Badge className="bg-green-600/10 text-green-400 border-green-500/20">
-                            {priceRange[0]}-{priceRange[1]} ETH
+                            {minPriceWei || "0"}-{maxPriceWei || "max"} wei
                           </Badge>
                         )}
                         {selectedTicketType !== "all" && (
@@ -298,9 +305,7 @@ export const Marketplace: React.FC = () => {
           <div className="flex items-center justify-between">
             <p className="text-slate-400">
               Showing{" "}
-              <span className="text-white font-semibold">
-                {listings.length}
-              </span>{" "}
+              <span className="text-white font-semibold">{filteredListings.length}</span>{" "}
               listings
             </p>
             {activeFiltersCount > 0 && (
@@ -321,13 +326,6 @@ export const Marketplace: React.FC = () => {
             const ticketType = listing.ticketId?.ticketType || "Unknown ticket type";
             const seller = listing.seller || "Unknown seller";
 
-            let formattedPrice = "0";
-            try {
-              formattedPrice = ethers.formatEther(listing.price || "0");
-            } catch {
-              formattedPrice = "0";
-            }
-
             return (
               <div
                 key={listingId}
@@ -340,9 +338,8 @@ export const Marketplace: React.FC = () => {
                     alt={eventTitle}
                     className="w-full h-full object-cover"
                   />
-                  <div className="absolute top-3 right-3 bg-purple-600 text-white text-xs px-2 py-1 rounded-full flex items-center space-x-1">
-                    <Zap className="w-3 h-3" />
-                    <span>For Sale</span>
+                  <div className="absolute top-3 right-3 bg-purple-600 text-white text-xs px-2 py-1 rounded-full">
+                    For Sale
                   </div>
                 </div>
                 <div className="p-5">
@@ -365,7 +362,7 @@ export const Marketplace: React.FC = () => {
                     <div className="text-right">
                       <p className="text-xs text-slate-500 mb-1">Price</p>
                       <p className="text-xl font-bold text-purple-400">
-                        {formattedPrice} ETH
+                        {formatWei(listing.price)} wei
                       </p>
                     </div>
                   </div>

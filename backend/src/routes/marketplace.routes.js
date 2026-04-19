@@ -282,6 +282,22 @@ router.post(
     marketplaceController.confirmSoldTransaction(req, res, next),
 );
 
+router.post(
+  "/listings/confirm-created",
+  authenticate,
+  validate({ body: marketplaceSchemas.confirmCreatedTransaction }),
+  (req, res, next) =>
+    marketplaceController.confirmCreatedTransaction(req, res, next),
+);
+
+router.post(
+  "/listings/confirm-cancelled",
+  authenticate,
+  validate({ body: marketplaceSchemas.confirmCancelledTransaction }),
+  (req, res, next) =>
+    marketplaceController.confirmCancelledTransaction(req, res, next),
+);
+
 router.get(
   "/history",
   validate({ query: marketplaceSchemas.queryHistory }),

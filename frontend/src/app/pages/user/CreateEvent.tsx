@@ -158,6 +158,11 @@ export const CreateEvent: React.FC = () => {
     return parsed;
   };
 
+  const isPositiveWeiInteger = (value: string) => {
+    const trimmed = value.trim();
+    return /^[0-9]+$/.test(trimmed) && BigInt(trimmed) > 0n;
+  };
+
   const getInputClass = (hasError?: boolean) =>
     `mt-1.5 bg-slate-800 text-white ${
       hasError
@@ -450,7 +455,7 @@ export const CreateEvent: React.FC = () => {
         ticketingStartAt: parsedTicketingStart?.toISOString(),
         ticketingEndAt: parsedTicketingEnd?.toISOString(),
         totalTickets,
-        ticketPrice: String(normalizedTiers[0].price),
+        ticketPrice: primaryTicketPriceWei,
         venue: {
           address: location.trim() || "TBA",
         },
@@ -919,6 +924,9 @@ export const CreateEvent: React.FC = () => {
                       {fieldErrors[`tier-${index}-price`]}
                     </p>
                   )}
+                  <p className="mt-1 text-xs text-slate-500">
+                    Enter wei as an integer string.
+                  </p>
                 </div>
 
                 <div>
@@ -1111,7 +1119,7 @@ export const CreateEvent: React.FC = () => {
           )}
 
           <p className="text-xs text-slate-500">
-            Stake and funding fields are stored as integer strings in wei.
+            Stake, funding, and ticket tier price fields use integer wei values.
             Minimum organizer stake is used as the on-chain stake threshold.
           </p>
         </CardContent>

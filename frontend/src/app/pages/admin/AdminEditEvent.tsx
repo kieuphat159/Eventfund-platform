@@ -41,6 +41,11 @@ type TicketTierForm = {
   supply: string;
 };
 
+const isPositiveWeiInteger = (value: string) => {
+  const trimmed = value.trim();
+  return /^[0-9]+$/.test(trimmed) && BigInt(trimmed) > 0n;
+};
+
 export const AdminEditEvent: React.FC = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -197,15 +202,15 @@ export const AdminEditEvent: React.FC = () => {
         }
       }
 
-      const normalizedTiers = ticketTiers
+      const filledTiers = ticketTiers
         .filter(
           (tier) => tier.name.trim() && tier.price !== "" && tier.supply !== "",
-        )
-        .map((tier) => ({
-          name: tier.name.trim(),
-          price: Number(tier.price),
-          totalSupply: Number(tier.supply),
-        }));
+        );
+      const normalizedTiers = filledTiers.map((tier) => ({
+        name: tier.name.trim(),
+        price: Number.parseInt(tier.price.trim(), 10),
+        totalSupply: Number(tier.supply),
+      }));
 
       let resolvedStatus = currentStatus;
       if (formData.status !== currentStatus) {
@@ -218,6 +223,18 @@ export const AdminEditEvent: React.FC = () => {
 
       if (!normalizedTiers.length) {
         setError("At least one valid ticket tier is required");
+        return;
+      }
+
+      const hasInvalidTier = normalizedTiers.some(
+        (_tier, index) =>
+          !isPositiveWeiInteger(filledTiers[index]?.price || "") ||
+          Number.isNaN(normalizedTiers[index]?.totalSupply) ||
+          !Number.isInteger(normalizedTiers[index]?.totalSupply) ||
+          normalizedTiers[index]?.totalSupply <= 0,
+      );
+      if (hasInvalidTier) {
+        setError("Tier price (wei) and supply must be positive integers");
         return;
       }
 
@@ -486,7 +503,7 @@ export const AdminEditEvent: React.FC = () => {
                 <div>
                   <Label className="text-slate-300">Ticket Tiers</Label>
                   <p className="text-sm text-slate-500 mt-1">
-                    Admin can tune supply and pricing here.
+                    Admin can tune supply and pricing here (price unit: wei).
                   </p>
                 </div>
                 <Button
@@ -512,11 +529,13 @@ export const AdminEditEvent: React.FC = () => {
                     placeholder="Tier name"
                   />
                   <Input
-                    type="number"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     value={tier.price}
                     onChange={(e) => updateTier(index, "price", e.target.value)}
                     className="bg-slate-800 border-slate-700 text-white"
-                    placeholder="Price"
+                    placeholder="Price (wei)"
                   />
                   <Input
                     type="number"

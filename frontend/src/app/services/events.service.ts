@@ -149,6 +149,8 @@ interface TransactionRequestShape {
   value: string;
 }
 
+const WEB3AUTH_TX_GAS_CAP = 16_777_216n;
+
 export interface CreateEventIntentTransaction {
   to: string;
   data: string;
@@ -389,6 +391,14 @@ function mapBundlerAuthError(message: string): string {
   return message;
 }
 
+function isGasLimitTooHighError(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("gas limit too high") ||
+    (normalized.includes("cap:") && normalized.includes("tx:"))
+  );
+}
+
 function toHexChainId(chainId: string): string {
   if (chainId.startsWith("0x")) {
     return chainId.toLowerCase();
@@ -526,6 +536,13 @@ async function estimateTransactionGas(
 
     // Pad the limit a bit to avoid edge-case underestimation.
     const paddedGas = estimatedGas + estimatedGas / 5n + 15000n;
+    if (paddedGas > WEB3AUTH_TX_GAS_CAP) {
+      console.warn(
+        `[CreateEvent] Pre-estimated gas ${paddedGas.toString()} exceeds wallet cap ${WEB3AUTH_TX_GAS_CAP.toString()}. Falling back to wallet-side estimation.`,
+      );
+      return undefined;
+    }
+
     return toHexValue(paddedGas.toString());
   } catch (error) {
     console.warn(
@@ -639,24 +656,42 @@ export async function createEventOnChain(
   });
 
   let txHash = "";
+  const txParamsBase = {
+    from: fromAddress,
+    to: intent.transaction.to,
+    data: intent.transaction.data,
+    value: toHexValue(intent.transaction.value),
+  };
   try {
     txHash = (await provider.request({
       method: "eth_sendTransaction",
       params: [
         {
-          from: fromAddress,
-          to: intent.transaction.to,
-          data: intent.transaction.data,
-          value: toHexValue(intent.transaction.value),
+          ...txParamsBase,
           ...(gas ? { gas } : {}),
         },
       ],
     })) as string;
   } catch (error) {
-    const message = mapBundlerAuthError(getRpcErrorMessage(error));
-    throw new Error(
-      `Create event transaction failed with signer ${fromAddress}: ${message}`,
-    );
+    const firstErrorMessage = getRpcErrorMessage(error);
+    if (gas && isGasLimitTooHighError(firstErrorMessage)) {
+      try {
+        txHash = (await provider.request({
+          method: "eth_sendTransaction",
+          params: [txParamsBase],
+        })) as string;
+      } catch (retryError) {
+        const retryMessage = mapBundlerAuthError(getRpcErrorMessage(retryError));
+        throw new Error(
+          `Create event transaction failed with signer ${fromAddress}: ${retryMessage}`,
+        );
+      }
+    } else {
+      const message = mapBundlerAuthError(firstErrorMessage);
+      throw new Error(
+        `Create event transaction failed with signer ${fromAddress}: ${message}`,
+      );
+    }
   }
 
   if (!txHash) {

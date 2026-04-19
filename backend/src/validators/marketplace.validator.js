@@ -41,6 +41,18 @@ const confirmSoldTransactionSchema = Joi.object({
   buyerWallet: ethereumAddress.optional(),
 });
 
+const confirmCreatedTransactionSchema = Joi.object({
+  txHash: txHashSchema.required(),
+  tokenId: Joi.string().min(1).optional(),
+  sellerWallet: ethereumAddress.optional(),
+});
+
+const confirmCancelledTransactionSchema = Joi.object({
+  txHash: txHashSchema.required(),
+  listingId: objectId.optional(),
+  sellerWallet: ethereumAddress.optional(),
+});
+
 // Schema for GET /marketplace/listings query parameters
 const queryListingsSchema = Joi.object({
   eventId: objectId.optional(),
@@ -71,6 +83,8 @@ export const marketplaceSchemas = {
   createListing: createListingSchema,
   createListingIntent: createListingIntentSchema,
   confirmSoldTransaction: confirmSoldTransactionSchema,
+  confirmCreatedTransaction: confirmCreatedTransactionSchema,
+  confirmCancelledTransaction: confirmCancelledTransactionSchema,
   queryListings: queryListingsSchema,
   queryHistory: queryHistorySchema,
 };
