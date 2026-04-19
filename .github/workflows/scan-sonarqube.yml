@@ -80,10 +80,14 @@ jobs:
           </html>
           EOF
 
+      - name: Sanitize branch name
+        id: sanitize
+        run: echo "branch=$(echo '${{ github.ref_name }}' | tr '/' '-')" >> $GITHUB_OUTPUT
+
       - name: Upload SonarCloud report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: sonarcloud-report-${{ github.ref_name }}-${{ github.run_number }}
+          name: sonarcloud-report-${{ steps.sanitize.outputs.branch }}-${{ github.run_number }}
           path: sonar-report/
           retention-days: 30
