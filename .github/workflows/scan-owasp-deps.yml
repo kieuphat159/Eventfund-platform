@@ -2,8 +2,6 @@ name: Scan – OWASP Dependency-Check (Full Project)
 
 on:
   workflow_dispatch:
-  push:
-    branches: [dev, main, ci/cd]
 
 jobs:
   owasp-dependency-check:

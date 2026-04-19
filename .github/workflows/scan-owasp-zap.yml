@@ -7,8 +7,6 @@ on:
         description: 'Frontend URL to scan (leave blank to use default)'
         required: false
         type: string
-  push:
-    branches: [dev, main, ci/cd]
 
 jobs:
   full-scan:
