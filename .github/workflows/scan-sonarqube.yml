@@ -2,6 +2,8 @@ name: Scan – SonarQube (Full Project)
 
 on:
   workflow_dispatch:
+  push:
+    branches: [dev, main, ci/cd]
 
 jobs:
   sonarqube-full:

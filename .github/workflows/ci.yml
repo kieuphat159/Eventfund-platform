@@ -25,6 +25,10 @@ jobs:
 
   backend:
     uses: ./.github/workflows/ci_backend.yml
+    permissions:
+      contents: read
+      id-token: write
+      security-events: write
     secrets:
       AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
       RPC_URL: ${{ secrets.RPC_URL }}

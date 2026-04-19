@@ -7,6 +7,8 @@ on:
         description: 'URL of the running app to scan (e.g. https://your-app.com)'
         required: true
         type: string
+  push:
+    branches: [dev, main, ci/cd]
 
 jobs:
   owasp-zap:
@@ -21,6 +23,6 @@ jobs:
       - name: Run OWASP ZAP Baseline Scan
         uses: zaproxy/action-baseline@v0.15.0
         with:
-          target: ${{ inputs.target_url }}
+          target: ${{ inputs.target_url || 'https://reed-nirvanic-brady.ngrok-free.dev/' }}
           cmd_options: '-a'
           fail_action: false
