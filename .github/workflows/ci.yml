@@ -7,161 +7,24 @@ on:
     branches: [dev, main, ci/cd]
   workflow_dispatch:
 
-permissions:
-  contents: read
-  id-token: write  # Required for AWS OIDC
-
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  AWS_REGION: ap-southeast-1
-  ECR_REPOSITORY: eventfund-backend
-
 jobs:
   frontend:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+    uses: ./.github/workflows/ci_frontend.yml
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20.19.0'
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install dependencies
-        working-directory: frontend
-        run: npm ci
-
-      - name: Build
-        working-directory: frontend
-        run: npm run build
+  sonarcloud:
+    uses: ./.github/workflows/ci_sonarcloud.yml
+    secrets:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
   contracts:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20.19.0'
-          cache: npm
-          cache-dependency-path: contracts/package-lock.json
-
-      - name: Install dependencies
-        working-directory: contracts
-        run: npm ci
-
-      - name: Compile
-        working-directory: contracts
-        env:
-          SEPOLIA_RPC_URL: http://127.0.0.1:8545
-        run: npx hardhat compile
+    uses: ./.github/workflows/ci_contracts.yml
 
   backend:
-    runs-on: ubuntu-latest
-
-    env:
+    uses: ./.github/workflows/ci_backend.yml
+    secrets:
+      AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
       RPC_URL: ${{ secrets.RPC_URL }}
-
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      # ─── Configure AWS credentials using OIDC ───────────────────────────────
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubActionsRole
-          aws-region: ${{ env.AWS_REGION }}
-
-      # ─── Set up Docker Buildx for better caching ────────────────────────────
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      # ─── Login to Amazon ECR ────────────────────────────────────────────────
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      # ─── Build and push Docker image with cache ─────────────────────────────
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile
-          target: production
-          push: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
-          load: ${{ github.ref != 'refs/heads/main' || github.event_name != 'push' }}
-          tags: |
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          build-args: |
-            BUILDKIT_INLINE_CACHE=1
-
-      # ─── Run smoke test ─────────────────────────────────────────────────────
-      - name: Smoke test (/health)
-        run: |
-          set -euo pipefail
-
-          # Determine image tag based on whether it was pushed or loaded
-          if [ "${{ github.ref }}" == "refs/heads/main" ] && [ "${{ github.event_name }}" == "push" ]; then
-            IMAGE_TAG="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}"
-          else
-            IMAGE_TAG="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}"
-          fi
-
-          # Start container with AWS Parameter Store
-          docker run -d \
-            --name backend-test \
-            -p 4000:4000 \
-            -e USE_AWS_PARAMS=true \
-            -e ENV=dev \
-            -e AWS_REGION=${{ env.AWS_REGION }} \
-            -e AWS_ACCESS_KEY_ID=${{ env.AWS_ACCESS_KEY_ID }} \
-            -e AWS_SECRET_ACCESS_KEY=${{ env.AWS_SECRET_ACCESS_KEY }} \
-            -e AWS_SESSION_TOKEN=${{ env.AWS_SESSION_TOKEN }} \
-            "$IMAGE_TAG"
-
-          # Wait for health check
-          for i in {1..60}; do
-            if curl -fsS "http://localhost:4000/health" | jq -e '.ok == true' >/dev/null 2>&1; then
-              echo "✅ Health check passed"
-              docker logs backend-test
-              docker stop backend-test
-              exit 0
-            fi
-            echo "Waiting for backend to be ready... ($i/60)"
-            sleep 3
-          done
-
-          echo "❌ Health check failed"
-          docker logs --tail 200 backend-test
-          docker stop backend-test
-          exit 1
-
-      # ─── Security scan with Trivy ───────────────────────────────────────────
-      - name: Run Trivy security scan
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
-          format: 'sarif'
-          output: 'trivy-results.sarif'
-          severity: 'CRITICAL,HIGH'
-        continue-on-error: true
-
-      # ─── Output build info ──────────────────────────────────────────────────
-      - name: Output build info
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        run: |
-          echo "✅ Image pushed to ECR:"
-          echo "   - ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest"
-          echo "   - ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}"
