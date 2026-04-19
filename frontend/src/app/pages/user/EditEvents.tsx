@@ -52,6 +52,11 @@ const toTimeInputValue = (iso?: string) => {
   return `${hh}:${mm}`;
 };
 
+const isPositiveWeiInteger = (value: string) => {
+  const trimmed = value.trim();
+  return /^[0-9]+$/.test(trimmed) && BigInt(trimmed) > 0n;
+};
+
 export const EditEvent: React.FC = () => {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
@@ -211,15 +216,15 @@ export const EditEvent: React.FC = () => {
         return;
       }
 
-      const normalizedTiers = ticketTiers
+      const filledTiers = ticketTiers
         .filter(
           (tier) => tier.name.trim() && tier.price !== "" && tier.supply !== "",
-        )
-        .map((tier) => ({
-          name: tier.name.trim(),
-          price: Number(tier.price),
-          totalSupply: Number(tier.supply),
-        }));
+        );
+      const normalizedTiers = filledTiers.map((tier) => ({
+        name: tier.name.trim(),
+        price: Number.parseInt(tier.price.trim(), 10),
+        totalSupply: Number(tier.supply),
+      }));
 
       if (!normalizedTiers.length) {
         setError("Vui lòng tạo ít nhất 1 hạng vé hợp lệ");
@@ -227,15 +232,15 @@ export const EditEvent: React.FC = () => {
       }
 
       const hasInvalidTier = normalizedTiers.some(
-        (tier) =>
-          Number.isNaN(tier.price) ||
-          Number.isNaN(tier.totalSupply) ||
-          tier.price < 0 ||
-          tier.totalSupply <= 0,
+        (_tier, index) =>
+          !isPositiveWeiInteger(filledTiers[index]?.price || "") ||
+          Number.isNaN(normalizedTiers[index]?.totalSupply) ||
+          !Number.isInteger(normalizedTiers[index]?.totalSupply) ||
+          normalizedTiers[index]?.totalSupply <= 0,
       );
 
       if (hasInvalidTier) {
-        setError("Giá vé hoặc số lượng vé không hợp lệ");
+        setError("Giá vé (wei) hoặc số lượng vé không hợp lệ");
         return;
       }
 
@@ -569,13 +574,14 @@ export const EditEvent: React.FC = () => {
                     htmlFor={`tier-price-${index}`}
                     className="text-slate-300"
                   >
-                    Price (ETH)
+                    Price (wei)
                   </Label>
                   <Input
                     id={`tier-price-${index}`}
-                    type="number"
-                    step="0.01"
-                    placeholder="0.00"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    placeholder="e.g., 1000000000000000"
                     value={tier.price}
                     onChange={(e) =>
                       updateTierField(index, "price", e.target.value)

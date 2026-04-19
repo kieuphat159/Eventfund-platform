@@ -40,6 +40,19 @@ async function parseMarketplaceEventsFromReceipt(receipt) {
   return parsedEvents;
 }
 
+async function findListingByContractListingId(
+  contractListingId,
+  repositories = {},
+) {
+  const listingRepo = repositories.listing || ListingRepo;
+  const result = await listingRepo.findListings(
+    { contractListingId: String(contractListingId) },
+    { page: 1, limit: 1, sort: "-listedAt", lean: true },
+    repositories.models,
+  );
+  return result?.docs?.[0] || null;
+}
+
 /**
  * Build create-listing intent for wallet signing
  * @param {Object} payload - Listing payload
@@ -329,6 +342,202 @@ export async function confirmListingSoldTransaction(
     txHash: normalizeTxHash(txHash),
     listing: updatedListing,
     ticket: updatedTicket,
+  };
+}
+
+/**
+ * Confirm a created-listing transaction and sync DB state
+ * @param {Object} payload - Confirmation payload
+ * @param {Object} repositories - Injected repositories (for testing)
+ * @returns {Promise<Object>} Synced listing and ticket
+ */
+export async function confirmListingCreatedTransaction(
+  payload,
+  repositories = {},
+) {
+  const listingRepo = repositories.listing || ListingRepo;
+  const ticketRepo = repositories.ticket || TicketRepo;
+
+  const { txHash, tokenId: expectedTokenId, sellerWallet } = payload;
+
+  validateTransactionHash(txHash);
+
+  const receipt = await provider.getTransactionReceipt(txHash);
+  if (!receipt) {
+    throw new BadRequestError("Transaction not mined yet");
+  }
+  if (Number(receipt.status) !== 1) {
+    throw new BadRequestError("Transaction failed on-chain");
+  }
+
+  const parsedEvents = await parseMarketplaceEventsFromReceipt(receipt);
+  const createdEvent = parsedEvents.find(
+    (event) => event?.name === "ListingCreated",
+  );
+
+  if (!createdEvent) {
+    throw new BadRequestError(
+      "ListingCreated event not found in transaction receipt",
+    );
+  }
+
+  const tokenId = String(createdEvent.args?.tokenId ?? "");
+  const seller = String(createdEvent.args?.seller ?? "").toLowerCase();
+  const contractListingId = String(createdEvent.args?.listingId ?? "");
+  const price = String(createdEvent.args?.price ?? "0");
+  const maxPrice = String(createdEvent.args?.maxPrice ?? "0");
+
+  if (expectedTokenId && tokenId !== String(expectedTokenId)) {
+    throw new BadRequestError("Token id does not match on-chain event");
+  }
+
+  if (sellerWallet && seller !== sellerWallet.toLowerCase()) {
+    throw new BadRequestError("Seller wallet does not match on-chain event");
+  }
+
+  const ticket = await ticketRepo.findByTokenId(
+    tokenId,
+    { lean: true },
+    repositories.models,
+  );
+  if (!ticket) {
+    throw new NotFoundError("Ticket not found in database");
+  }
+
+  const existingListing = await findListingByContractListingId(
+    contractListingId,
+    repositories,
+  );
+  if (existingListing?.status === "active") {
+    return {
+      synced: false,
+      alreadySynced: true,
+      txHash: normalizeTxHash(txHash),
+      listing: existingListing,
+      ticket,
+    };
+  }
+
+  const syncedListing = await listingRepo.upsertListingCreated(
+    {
+      contractListingId,
+      tokenId,
+      ticketId: ticket._id,
+      eventId: ticket.eventId,
+      seller,
+      price,
+      maxPrice,
+      status: "active",
+      transactionHash: normalizeTxHash(txHash),
+    },
+    repositories.models,
+  );
+
+  const syncedTicket = await ticketRepo.updateStatus(
+    tokenId,
+    "sold",
+    { isListed: true },
+    repositories.models,
+  );
+
+  return {
+    synced: true,
+    alreadySynced: false,
+    txHash: normalizeTxHash(txHash),
+    listing: syncedListing,
+    ticket: syncedTicket,
+  };
+}
+
+/**
+ * Confirm a cancelled-listing transaction and sync DB state
+ * @param {Object} payload - Confirmation payload
+ * @param {Object} repositories - Injected repositories (for testing)
+ * @returns {Promise<Object>} Synced listing and ticket
+ */
+export async function confirmListingCancelledTransaction(
+  payload,
+  repositories = {},
+) {
+  const listingRepo = repositories.listing || ListingRepo;
+  const ticketRepo = repositories.ticket || TicketRepo;
+
+  const { txHash, listingId, sellerWallet } = payload;
+
+  validateTransactionHash(txHash);
+
+  const receipt = await provider.getTransactionReceipt(txHash);
+  if (!receipt) {
+    throw new BadRequestError("Transaction not mined yet");
+  }
+  if (Number(receipt.status) !== 1) {
+    throw new BadRequestError("Transaction failed on-chain");
+  }
+
+  const parsedEvents = await parseMarketplaceEventsFromReceipt(receipt);
+  const cancelledEvent = parsedEvents.find(
+    (event) => event?.name === "ListingCancelled",
+  );
+
+  if (!cancelledEvent) {
+    throw new BadRequestError(
+      "ListingCancelled event not found in transaction receipt",
+    );
+  }
+
+  const tokenId = String(cancelledEvent.args?.tokenId ?? "");
+  const seller = String(cancelledEvent.args?.seller ?? "").toLowerCase();
+  const contractListingId = String(cancelledEvent.args?.listingId ?? "");
+
+  if (sellerWallet && seller !== sellerWallet.toLowerCase()) {
+    throw new BadRequestError("Seller wallet does not match on-chain event");
+  }
+
+  let listing = await findListingByContractListingId(
+    contractListingId,
+    repositories,
+  );
+  if (!listing && listingId) {
+    listing = await listingRepo.findById(
+      listingId,
+      { lean: true },
+      repositories.models,
+    );
+  }
+
+  if (!listing) {
+    throw new NotFoundError("Listing not found in database");
+  }
+
+  if (listing.status === "cancelled") {
+    return {
+      synced: false,
+      alreadySynced: true,
+      txHash: normalizeTxHash(txHash),
+      listing,
+    };
+  }
+
+  const syncedListing = await listingRepo.updateStatus(
+    listing._id,
+    "cancelled",
+    {},
+    repositories.models,
+  );
+
+  const syncedTicket = await ticketRepo.updateStatus(
+    tokenId,
+    "sold",
+    { isListed: false },
+    repositories.models,
+  );
+
+  return {
+    synced: true,
+    alreadySynced: false,
+    txHash: normalizeTxHash(txHash),
+    listing: syncedListing,
+    ticket: syncedTicket,
   };
 }
 

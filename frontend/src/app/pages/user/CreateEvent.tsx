@@ -131,6 +131,11 @@ export const CreateEvent: React.FC = () => {
     return parsed;
   };
 
+  const isPositiveWeiInteger = (value: string) => {
+    const trimmed = value.trim();
+    return /^[0-9]+$/.test(trimmed) && BigInt(trimmed) > 0n;
+  };
+
   const getInputClass = (hasError?: boolean) =>
     `mt-1.5 bg-slate-800 text-white ${
       hasError
@@ -300,13 +305,9 @@ export const CreateEvent: React.FC = () => {
 
       if (tier.price.trim() === "") {
         errors[`tier-${index}-price`] = `Tier ${tierNumber} price is required.`;
-      } else if (
-        Number.isNaN(Number(tier.price)) ||
-        !Number.isInteger(Number(tier.price)) ||
-        Number(tier.price) <= 0
-      ) {
+      } else if (!isPositiveWeiInteger(tier.price)) {
         errors[`tier-${index}-price`] =
-          `Tier ${tierNumber} price must be a positive integer.`;
+          `Tier ${tierNumber} price must be a positive integer in wei.`;
       }
 
       if (tier.supply.trim() === "") {
@@ -386,15 +387,15 @@ export const CreateEvent: React.FC = () => {
       const parsedTicketingStart = parseOptionalDateTime(ticketingStartAt);
       const parsedTicketingEnd = parseOptionalDateTime(ticketingEndAt);
 
-      const normalizedTiers = ticketTiers
-        .filter(
-          (tier) => tier.name.trim() || tier.price.trim() || tier.supply.trim(),
-        )
-        .map((tier) => ({
-          name: tier.name.trim(),
-          price: Number(tier.price),
-          totalSupply: Number(tier.supply),
-        }));
+      const filledTiers = ticketTiers.filter(
+        (tier) => tier.name.trim() || tier.price.trim() || tier.supply.trim(),
+      );
+      const normalizedTiers = filledTiers.map((tier) => ({
+        name: tier.name.trim(),
+        price: Number.parseInt(tier.price.trim(), 10),
+        totalSupply: Number(tier.supply),
+      }));
+      const primaryTicketPriceWei = filledTiers[0]?.price.trim() || "";
 
       const totalTickets = normalizedTiers.reduce(
         (sum, tier) => sum + tier.totalSupply,
@@ -423,7 +424,7 @@ export const CreateEvent: React.FC = () => {
         ticketingStartAt: parsedTicketingStart?.toISOString(),
         ticketingEndAt: parsedTicketingEnd?.toISOString(),
         totalTickets,
-        ticketPrice: String(normalizedTiers[0].price),
+        ticketPrice: primaryTicketPriceWei,
         venue: {
           address: location.trim() || "TBA",
         },
@@ -872,13 +873,14 @@ export const CreateEvent: React.FC = () => {
                     htmlFor={`tier-price-${index}`}
                     className="text-slate-300"
                   >
-                    Price (ETH)
+                    Price (wei)
                   </Label>
                   <Input
                     id={`tier-price-${index}`}
-                    type="number"
-                    step="0.01"
-                    placeholder="0.00"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    placeholder="e.g. 1000000000000000"
                     value={tier.price}
                     onChange={(e) => updateTier(index, "price", e.target.value)}
                     className={`mt-1.5 bg-slate-800 text-white ${
@@ -892,6 +894,9 @@ export const CreateEvent: React.FC = () => {
                       {fieldErrors[`tier-${index}-price`]}
                     </p>
                   )}
+                  <p className="mt-1 text-xs text-slate-500">
+                    Enter wei as an integer string.
+                  </p>
                 </div>
 
                 <div>
@@ -1066,7 +1071,7 @@ export const CreateEvent: React.FC = () => {
           )}
 
           <p className="text-xs text-slate-500">
-            Stake and funding fields are stored as integer strings in wei.
+            Stake, funding, and ticket tier price fields use integer wei values.
             Minimum organizer stake is used as the on-chain stake threshold.
           </p>
         </CardContent>

@@ -258,7 +258,7 @@ export const MyEvents: React.FC = () => {
                             {tier.name}
                           </p>
                           <p className="text-lg font-semibold text-white">
-                            {tier.price} ETH
+                            {tier.price} wei
                           </p>
                           <p className="text-xs text-slate-500 mt-1">
                             {tier.totalSupply || 0} available

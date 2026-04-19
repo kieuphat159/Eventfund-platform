@@ -18,12 +18,12 @@ import { Button } from "../../components/ui/button";
 import { useAuth } from "../../contexts/AuthContext";
 import { getUserTickets, type ApiTicket } from "../../services/tickets.service";
 import {
-  cancelListing,
+  cancelListingOnchain,
   getListings,
-  listTicket,
+  listTicketOnchain,
 } from "@/app/services/listings.service";
 import { QRCodeCanvas } from "qrcode.react";
-import { ethers, formatEther } from "ethers";
+import { useWeb3Auth } from "@web3auth/modal/react";
 
 const ETH_ADDRESS_REGEX = /^0x[a-fA-F0-9]{40}$/;
 
@@ -41,8 +41,14 @@ const formatTicketType = (type?: string) => {
   return type.charAt(0).toUpperCase() + type.slice(1);
 };
 
+const isPositiveWeiInteger = (value: string) => {
+  const trimmed = value.trim();
+  return /^[0-9]+$/.test(trimmed) && BigInt(trimmed) > 0n;
+};
+
 export const MyTickets: React.FC = () => {
-  const { user } = useAuth();
+  const { user, connectWallet } = useAuth();
+  const { web3Auth } = useWeb3Auth();
   const [listingPopup, setListingPopup] = useState<{
     type: "success" | "error";
     message: string;
@@ -127,21 +133,6 @@ export const MyTickets: React.FC = () => {
     );
   }, [tickets]);
 
-  const formatEth = (wei: string | bigint | number) => {
-    if (!wei || wei === "0" || wei === "0x0") return "0";
-
-    try {
-      // formatEther nhận string hoặc bigint
-      const ethString = formatEther(wei.toString());
-
-      return parseFloat(ethString)
-        .toFixed(3)
-        .replace(/\.?0+$/, "");
-    } catch (error) {
-      return "0";
-    }
-  };
-
   const downloadTicketQR = (ticket: ApiTicket) => {
     const canvasId = getTicketQrCanvasId(ticket);
     const canvas = document.getElementById(
@@ -192,7 +183,20 @@ export const MyTickets: React.FC = () => {
 
     return null;
   };
-  console.log("Tickets:", tickets);
+
+  const formatWei = (wei: string | bigint | number) => {
+    try {
+      return BigInt(String(wei || "0")).toLocaleString();
+    } catch {
+      return "0";
+    }
+  };
+
+  const walletProvider = web3Auth?.provider as
+    | {
+        request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
+      }
+    | undefined;
   return (
     <div className="space-y-6">
       {listingPopup && (
@@ -234,7 +238,7 @@ export const MyTickets: React.FC = () => {
           <CardContent className="p-6">
             <p className="text-sm text-slate-400 mb-1">Total Value</p>
             <p className="text-3xl font-bold text-white">
-              {formatEth(totalValue)} ETH
+              {formatWei(totalValue)} wei
             </p>
           </CardContent>
         </Card>
@@ -314,7 +318,7 @@ export const MyTickets: React.FC = () => {
                       Purchase Price
                     </span>
                     <span className="text-sm font-semibold text-purple-400">
-                      {formatEth(purchasePrice)} ETH
+                      {formatWei(purchasePrice)} wei
                     </span>
                   </div>
                 </div>
@@ -432,9 +436,24 @@ export const MyTickets: React.FC = () => {
               List Ticket #{listingTicket.tokenId}
             </h3>
 
+            {(() => {
+              const originalPriceWei = BigInt(listingTicket.originalPrice || "0");
+              const maxAllowedWei = (originalPriceWei * 150n) / 100n;
+              return (
+                <div className="mb-3 rounded-md border border-slate-700 bg-slate-800/60 p-3 text-xs text-slate-300">
+                  <p>Original price: {formatWei(originalPriceWei)} wei</p>
+                  <p>
+                    Max resale (150% cap): {formatWei(maxAllowedWei)} wei
+                  </p>
+                </div>
+              );
+            })()}
+
             <input
-              type="number"
-              placeholder="Enter price (ETH)"
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              placeholder="Enter price (wei)"
               value={listingPrice}
               onChange={(e) => setListingPrice(e.target.value)}
               className="w-full mb-4 p-2 rounded bg-slate-800 text-white border border-slate-700"
@@ -450,26 +469,59 @@ export const MyTickets: React.FC = () => {
                 onClick={async () => {
                   setListingError(null);
 
-                  if (!listingPrice || Number(listingPrice) <= 0) {
-                    setListingError("Price must be greater than 0");
+                  if (!isPositiveWeiInteger(listingPrice)) {
+                    setListingError("Price must be a positive integer in wei");
                     showListingPopup(
                       "error",
-                      "Listing failed: price must be greater than 0.",
+                      "Listing failed: price must be a positive integer in wei.",
                     );
                     return;
                   }
 
+                  const normalizedPriceWei = listingPrice.trim();
+                  const originalPriceWei = BigInt(listingTicket.originalPrice || "0");
+                  const maxAllowedWei = (originalPriceWei * 150n) / 100n;
+                  if (BigInt(normalizedPriceWei) > maxAllowedWei) {
+                    const message = `Price exceeds maximum allowed (${maxAllowedWei.toString()} wei)`;
+                    setListingError(message);
+                    showListingPopup("error", `Listing failed: ${message}`);
+                    return;
+                  }
+
                   try {
+                    if (!user?.walletAddress) {
+                      await connectWallet();
+                      showListingPopup(
+                        "success",
+                        "Wallet connected. Please click Confirm again.",
+                      );
+                      return;
+                    }
+
+                    if (!walletProvider?.request) {
+                      throw new Error(
+                        "Wallet provider is not ready. Please reconnect wallet and try again.",
+                      );
+                    }
+
+                    if (!listingTicket._id) {
+                      throw new Error("Ticket ID is missing");
+                    }
+
                     setListingLoading(true);
 
-                    await listTicket({
-                      ticketId: listingTicket._id,
-                      price: ethers.parseEther(listingPrice).toString(),
-                      expiresAt: new Date(
-                        Date.now() + 7 * 24 * 60 * 60 * 1000,
-                      ).toISOString(),
-                    });
-                    showListingPopup("success", "Ticket listed successfully.");
+                    const result = await listTicketOnchain(
+                      walletProvider,
+                      {
+                        ticketId: listingTicket._id,
+                        price: normalizedPriceWei,
+                      },
+                      user.walletAddress,
+                    );
+                    showListingPopup(
+                      "success",
+                      `Ticket listed on-chain. Tx: ${result.txHash}`,
+                    );
                     setTickets((prevTickets) =>
                       prevTickets.map((ticket) =>
                         ticket._id === listingTicket._id
@@ -519,6 +571,21 @@ export const MyTickets: React.FC = () => {
                 disabled={cancelLoading}
                 onClick={async () => {
                   try {
+                    if (!user?.walletAddress) {
+                      await connectWallet();
+                      showListingPopup(
+                        "success",
+                        "Wallet connected. Please click Confirm again.",
+                      );
+                      return;
+                    }
+
+                    if (!walletProvider?.request) {
+                      throw new Error(
+                        "Wallet provider is not ready. Please reconnect wallet and try again.",
+                      );
+                    }
+
                     setCancelLoading(true);
 
                     const listingId =
@@ -528,7 +595,11 @@ export const MyTickets: React.FC = () => {
                       throw new Error("Listing not found");
                     }
 
-                    await cancelListing(listingId);
+                    const result = await cancelListingOnchain(
+                      walletProvider,
+                      listingId,
+                      user.walletAddress,
+                    );
 
                     setTickets((prevTickets) =>
                       prevTickets.map((ticket) =>
@@ -539,7 +610,7 @@ export const MyTickets: React.FC = () => {
                     );
                     showListingPopup(
                       "success",
-                      `Cancelled listing for ticket #${cancelTicket.tokenId}.`,
+                      `Cancelled on-chain listing for ticket #${cancelTicket.tokenId}. Tx: ${result.txHash}`,
                     );
                     setCancelTicket(null);
                   } catch (err: any) {

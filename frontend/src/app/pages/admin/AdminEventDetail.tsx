@@ -211,7 +211,7 @@ export const AdminEventDetail: React.FC = () => {
               <p className="text-xs text-slate-500 mt-1">
                 {typeof event.totalTickets === 'number'
                   ? `${event.totalTickets} tickets planned`
-                  : `From ${event.ticketTiers?.[0]?.price ?? 0} ETH ticket price`}
+                  : `From ${event.ticketTiers?.[0]?.price ?? 0} wei ticket price`}
               </p>
             </div>
 
@@ -271,7 +271,7 @@ export const AdminEventDetail: React.FC = () => {
                       )}
                     </div>
 
-                    <div className="text-white font-semibold">{tier.price ?? 0} ETH</div>
+                    <div className="text-white font-semibold">{tier.price ?? 0} wei</div>
                   </div>
                 ))}
               </div>

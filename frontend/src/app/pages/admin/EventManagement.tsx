@@ -290,7 +290,7 @@ export const EventManagement: React.FC = () => {
                         <span>
                           {typeof event.totalTickets === "number"
                             ? `${event.totalTickets} tickets`
-                            : `From ${event.ticketTiers?.[0]?.price ?? 0} ETH`}
+                            : `From ${event.ticketTiers?.[0]?.price ?? 0} wei`}
                         </span>
                       </div>
                     </div>
