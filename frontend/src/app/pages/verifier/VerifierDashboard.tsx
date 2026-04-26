@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import QrReader from "react-qr-scanner";
+import { useWeb3Auth } from "@web3auth/modal/react";
 import {
   AlertCircle,
   Calendar,
@@ -38,9 +39,9 @@ import { useAuth } from "../../contexts/AuthContext";
 import {
   getTicketByTokenId,
   getTickets,
-  markTicketAsUsed,
   type ApiTicket,
   verifyTicket,
+  useTicketOnChain,
 } from "../../services/tickets.service";
 
 interface ApiEventItem {
@@ -49,6 +50,7 @@ interface ApiEventItem {
   startDate?: string;
   endDate?: string;
   status?: string;
+  contractEventId?: string;
   verifiers?: string[];
   venue?: {
     address?: string;
@@ -207,6 +209,7 @@ function getEventCheckInState(event?: ApiEventItem | null): {
 
 export const VerifierDashboard: React.FC = () => {
   const { user } = useAuth();
+  const { web3Auth } = useWeb3Auth();
   const [selectedEvent, setSelectedEvent] = useState<string>("");
   const [showScanner, setShowScanner] = useState(false);
   const [manualTicketId, setManualTicketId] = useState("");
@@ -269,15 +272,18 @@ export const VerifierDashboard: React.FC = () => {
                   )
                 : false,
             );
-        setEvents(filteredDocs);
+        const onchainDocs = filteredDocs.filter((event) =>
+          Boolean(event.contractEventId),
+        );
+        setEvents(onchainDocs);
 
-        if (!selectedEvent && filteredDocs.length > 0) {
-          setSelectedEvent(filteredDocs[0]._id);
+        if (!selectedEvent && onchainDocs.length > 0) {
+          setSelectedEvent(onchainDocs[0]._id);
         } else if (
           selectedEvent &&
-          !filteredDocs.some((event) => event._id === selectedEvent)
+          !onchainDocs.some((event) => event._id === selectedEvent)
         ) {
-          setSelectedEvent(filteredDocs[0]?._id || "");
+          setSelectedEvent(onchainDocs[0]?._id || "");
         }
       } catch (err) {
         const message =
@@ -484,8 +490,51 @@ export const VerifierDashboard: React.FC = () => {
           return;
         }
 
-        await markTicketAsUsed(normalizedTokenId, selectedEvent);
-        await loadSelectedEventData(selectedEvent);
+        if (!selectedEventData?.contractEventId) {
+          throw new Error("Selected event is not available for on-chain check-in.");
+        }
+
+        try {
+          const provider = web3Auth?.provider as
+            | {
+                request: (args: {
+                  method: string;
+                  params?: unknown[];
+                }) => Promise<unknown>;
+              }
+            | undefined;
+          if (!provider) {
+            throw new Error(
+              "Wallet provider is not ready. Please reconnect wallet and try again.",
+            );
+          }
+
+          const result = await useTicketOnChain(
+            provider as any,
+            normalizedTokenId,
+            user?.walletAddress,
+          );
+
+          if (result?.confirmation?.synced || result?.confirmation?.alreadySynced) {
+            setManualRecords((prev) => [
+              createManualRecord(normalizedTokenId, "valid", ticket.currentOwner),
+              ...prev,
+            ]);
+            await loadSelectedEventData(selectedEvent);
+          } else {
+            throw new Error(
+              "On-chain check-in transaction was sent but confirmation did not sync.",
+            );
+          }
+        } catch (err) {
+          const message =
+            err instanceof Error ? err.message : "On-chain check-in failed";
+          setActionError(message);
+          setManualRecords((prev) => [
+            createManualRecord(normalizedTokenId, "invalid", ticket.currentOwner),
+            ...prev,
+          ]);
+        }
       } catch (err) {
         const message =
           err instanceof Error ? err.message : "Failed to verify ticket";
@@ -498,7 +547,15 @@ export const VerifierDashboard: React.FC = () => {
         setIsSubmitting(false);
       }
     },
-    [createManualRecord, eventCheckInState, loadSelectedEventData, selectedEvent],
+    [
+      createManualRecord,
+      eventCheckInState,
+      loadSelectedEventData,
+      selectedEvent,
+      selectedEventData?.contractEventId,
+      user?.walletAddress,
+      web3Auth?.provider,
+    ],
   );
 
   const handleScanTicket = () => {
@@ -882,8 +939,8 @@ export const VerifierDashboard: React.FC = () => {
             </h3>
             <p className="mx-auto max-w-md text-slate-400">
               {events.length > 0
-                ? "Choose an event from the dropdown above to start managing check-ins and scanning tickets"
-                : "This account has not been assigned to any event yet, so there is nothing to scan right now."}
+                ? "Choose an on-chain event from the dropdown above to start managing check-ins and scanning tickets"
+                : "This account has no on-chain event assignment yet, so there is nothing to scan right now."}
             </p>
           </CardContent>
         </Card>

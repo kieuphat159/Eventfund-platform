@@ -26,6 +26,7 @@ export type EventStatus =
 export interface EventItem {
   _id?: string;
   id?: string;
+  contractEventId?: string;
   title?: string;
   description?: string;
   category?: string;
@@ -818,12 +819,12 @@ export async function deleteEvent(eventId: string): Promise<boolean> {
   return true;
 }
 
-export async function assignEventVerifier(
+export async function assignEventVerifierOnChain(
   eventId: string,
   verifierWallet: string,
 ): Promise<EventItem | null> {
   const response = await api.post<CreateEventResponse>(
-    `/events/${eventId}/assign-verifier`,
+    `/events/${eventId}/assign-verifier/onchain`,
     { verifier: verifierWallet },
   );
 

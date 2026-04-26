@@ -473,4 +473,11 @@ router.post(
   controller.assignVerifier,
 );
 
+router.post(
+  "/:id/assign-verifier/onchain",
+  authenticate,
+  requireAdmin,
+  controller.assignVerifierOnChain,
+);
+
 export default router;

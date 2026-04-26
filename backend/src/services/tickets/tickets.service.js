@@ -423,11 +423,22 @@ export async function createUseTicketIntent(tokenId, verifierWallet, repos = {})
   const ticketContract = getTicket();
   const chainTokenId = BigInt(ticket.tokenId);
 
-  const [chainStatus, contractAddress, network] = await Promise.all([
+  if (!event.contractEventId) {
+    throw new BadRequestError('Event is not configured for on-chain check-in');
+  }
+
+  const chainEventId = BigInt(event.contractEventId);
+
+  const [chainStatus, isVerifierOnChain, contractAddress, network] = await Promise.all([
     ticketContract.getTicketStatus(chainTokenId),
+    ticketContract.isEventVerifier(chainEventId, verifierWallet),
     ticketContract.getAddress(),
     provider.getNetwork(),
   ]);
+
+  if (!isVerifierOnChain) {
+    throw new ForbiddenError('Verifier wallet is not authorized on-chain for this event');
+  }
 
   if (chainStatus !== ONCHAIN_TICKET_STATUS.SOLD) {
     throw new BadRequestError('Ticket is not in sold state on-chain');
@@ -655,10 +666,9 @@ export async function markTicketAsUsed(tokenId, verifierWallet, repos = {}) {
   }
 
   if (event.contractEventId) {
-    const chainSnapshot = await getOnChainTicketSnapshot(ticket.tokenId, event);
-    if (chainSnapshot.status !== ONCHAIN_TICKET_STATUS.SOLD) {
-      throw new BadRequestError('Ticket is not in sold state on-chain');
-    }
+    throw new BadRequestError(
+      'This event requires on-chain check-in. Use the use-intent and confirm flow instead.',
+    );
   }
 
   const usageData = {

@@ -239,6 +239,25 @@ class EventsController {
       data: event,
     });
   });
+
+  /**
+   * POST /events/:id/assign-verifier/onchain
+   * Assign verifier on-chain and sync DB
+   */
+  assignVerifierOnChain = asyncHandler(async (req, res) => {
+    const { verifier } = req.body;
+
+    const event = await this.eventsService.assignVerifierOnChain(
+      req.params.id,
+      verifier,
+      req.user,
+    );
+
+    res.status(200).json({
+      success: true,
+      data: event,
+    });
+  });
 }
 
 export default EventsController;

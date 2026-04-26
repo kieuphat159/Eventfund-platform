@@ -22,7 +22,7 @@ import {
 } from '../../components/ui/select';
 import { StatusBadge } from '../../components/StatusBadge';
 import {
-  assignEventVerifier,
+  assignEventVerifierOnChain,
   getAdminEventById,
   getAdminEventInvestments,
   getVerifierUsers,
@@ -44,9 +44,9 @@ export const AdminEventDetail: React.FC = () => {
   const [error, setError] = useState('');
   const [verifierWallet, setVerifierWallet] = useState('');
   const [loadingVerifiers, setLoadingVerifiers] = useState(false);
-  const [assigningVerifier, setAssigningVerifier] = useState(false);
-  const [assignError, setAssignError] = useState('');
-  const [assignSuccess, setAssignSuccess] = useState('');
+  const [assigningVerifierOnChain, setAssigningVerifierOnChain] = useState(false);
+  const [assignOnChainError, setAssignOnChainError] = useState('');
+  const [assignOnChainSuccess, setAssignOnChainSuccess] = useState('');
 
   useEffect(() => {
     const fetchEvent = async () => {
@@ -136,36 +136,38 @@ export const AdminEventDetail: React.FC = () => {
     }
   }, [availableVerifierUsers, verifierWallet]);
 
-  const handleAssignVerifier = async () => {
+  const handleAssignVerifierOnChain = async () => {
     const eventId = event?._id || event?.id;
     if (!eventId) {
-      setAssignError('Invalid event id.');
+      setAssignOnChainError('Invalid event id.');
       return;
     }
 
     const normalizedWallet = verifierWallet.trim().toLowerCase();
     if (!normalizedWallet) {
-      setAssignError('Please select a verifier.');
+      setAssignOnChainError('Please select a verifier.');
       return;
     }
 
     try {
-      setAssigningVerifier(true);
-      setAssignError('');
-      setAssignSuccess('');
+      setAssigningVerifierOnChain(true);
+      setAssignOnChainError('');
+      setAssignOnChainSuccess('');
 
-      const updatedEvent = await assignEventVerifier(eventId, normalizedWallet);
+      const updatedEvent = await assignEventVerifierOnChain(eventId, normalizedWallet);
       if (!updatedEvent) {
-        throw new Error('Assign verifier returned no data.');
+        throw new Error('Assign verifier on-chain returned no data.');
       }
 
       setEvent(updatedEvent);
       setVerifierWallet('');
-      setAssignSuccess('Verifier assigned successfully.');
+      setAssignOnChainSuccess('Verifier assigned on-chain successfully.');
     } catch (err) {
-      setAssignError(err instanceof Error ? err.message : 'Failed to assign verifier.');
+      setAssignOnChainError(
+        err instanceof Error ? err.message : 'Failed to assign verifier on-chain.',
+      );
     } finally {
-      setAssigningVerifier(false);
+      setAssigningVerifierOnChain(false);
     }
   };
 
@@ -463,16 +465,37 @@ export const AdminEventDetail: React.FC = () => {
               </SelectContent>
             </Select>
             <Button
-              onClick={handleAssignVerifier}
-              disabled={assigningVerifier || !verifierWallet}
-              className="bg-blue-600 hover:bg-blue-700 text-white"
+              onClick={handleAssignVerifierOnChain}
+              disabled={assigningVerifierOnChain || !verifierWallet || !event.contractEventId}
+              variant="outline"
+              className="border-cyan-600 text-cyan-300 hover:bg-cyan-950/40 hover:text-cyan-200"
+              title={event.contractEventId ? 'Assign verifier on-chain' : 'Event is not synced to chain yet'}
             >
-              {assigningVerifier ? 'Assigning...' : 'Assign Verifier'}
+              {assigningVerifierOnChain ? 'On-chain...' : 'Assign On-chain'}
             </Button>
           </div>
 
-          {assignError && <p className="text-sm text-red-400">{assignError}</p>}
-          {assignSuccess && <p className="text-sm text-emerald-400">{assignSuccess}</p>}
+          {assignOnChainError && <p className="text-sm text-red-400">{assignOnChainError}</p>}
+          {assignOnChainSuccess && <p className="text-sm text-emerald-400">{assignOnChainSuccess}</p>}
+
+          {event.contractEventId ? (
+            <p className="text-sm text-cyan-300">
+              This event is on-chain, so verifier assignment is handled only on-chain.
+            </p>
+          ) : (
+            <p className="text-sm text-yellow-300">
+              Sync this event on-chain first before assigning verifiers.
+            </p>
+          )}
+
+          <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-4 text-sm text-slate-300">
+            <div className="flex items-center justify-between gap-3">
+              <span>On-chain Event ID</span>
+              <span className="break-all font-medium text-white">
+                {event.contractEventId || 'Not synced yet'}
+              </span>
+            </div>
+          </div>
 
           <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-4">
             <p className="mb-3 text-sm font-medium text-slate-300">Current Verifiers</p>
