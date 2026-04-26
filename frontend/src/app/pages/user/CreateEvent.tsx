@@ -16,6 +16,7 @@ import { Label } from "../../components/ui/label";
 import Loading from "../../components/ui/loading";
 import { createEventOnChain } from "../../services/events.service";
 import { useAuth } from "../../contexts/AuthContext";
+import { cn } from "@/app/lib/utils";
 
 type TicketTierForm = {
   name: string;
@@ -683,10 +684,13 @@ export const CreateEvent: React.FC = () => {
                     return next;
                   });
                 }}
-                className={getInputClass(
-                  !!fieldErrors.startAt ||
-                    !!fieldErrors.ticketingStartAt ||
-                    !!fieldErrors.ticketingEndAt,
+                className={cn(
+                  getInputClass(
+                    !!fieldErrors.startAt ||
+                      !!fieldErrors.ticketingStartAt ||
+                      !!fieldErrors.ticketingEndAt,
+                  ),
+                  "[color-scheme:dark]",
                 )}
               />
               {fieldErrors.startAt && (
@@ -712,7 +716,7 @@ export const CreateEvent: React.FC = () => {
                     return next;
                   });
                 }}
-                className={getInputClass(!!fieldErrors.endAt)}
+                className={cn(getInputClass(!!fieldErrors.endAt), "[color-scheme:dark]")}
               />
               {fieldErrors.endAt && (
                 <p className="mt-1 text-sm text-red-400">{fieldErrors.endAt}</p>
@@ -738,9 +742,12 @@ export const CreateEvent: React.FC = () => {
                     return next;
                   });
                 }}
-                className={getInputClass(
-                  !!fieldErrors.ticketingStartAt ||
-                    !!fieldErrors.ticketingEndAt,
+                className={cn(
+                  getInputClass(
+                    !!fieldErrors.ticketingStartAt ||
+                      !!fieldErrors.ticketingEndAt,
+                  ),
+                  "[color-scheme:dark]",
                 )}
               />
               {fieldErrors.ticketingStartAt && (
@@ -766,7 +773,7 @@ export const CreateEvent: React.FC = () => {
                     return next;
                   });
                 }}
-                className={getInputClass(!!fieldErrors.ticketingEndAt)}
+                className={cn(getInputClass(!!fieldErrors.ticketingEndAt), "[color-scheme:dark]")}
               />
               {fieldErrors.ticketingEndAt && (
                 <p className="mt-1 text-sm text-red-400">
