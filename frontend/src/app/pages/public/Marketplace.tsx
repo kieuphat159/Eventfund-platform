@@ -22,6 +22,7 @@ import {
 } from "../../components/ui/select";
 import { Badge } from "../../components/ui/badge";
 import { listingService, ApiListing } from "../../services/listings.service";
+import Loading from "../../components/ui/loading";
 import { ImageWithFallback } from "../../components/figma/ImageWithFallback";
 
 export const Marketplace: React.FC = () => {
@@ -35,6 +36,14 @@ export const Marketplace: React.FC = () => {
 
   const [listings, setListings] = React.useState<ApiListing[]>([]);
   const [loading, setLoading] = React.useState(true);
+  const [buyLoading, setBuyLoading] = React.useState(false);
+  const [buyMessage, setBuyMessage] = React.useState<string | undefined>(
+    undefined
+  );
+
+  // Fake loading controls for testing long-running flows
+  const [fakeLoadingEnabled, setFakeLoadingEnabled] = React.useState(true);
+  const [fakeLoadingMs, setFakeLoadingMs] = React.useState<number>(3000);
 
   React.useEffect(() => {
     const fetchListings = async () => {
@@ -92,9 +101,7 @@ export const Marketplace: React.FC = () => {
   };
 
   if (loading) {
-    return (
-      <div className="text-white p-10 text-center">Loading marketplace...</div>
-    );
+    return <Loading visible={true} message="Loading marketplace..." />;
   }
 
   const filteredListings = listings.filter((listing) => {
@@ -302,6 +309,22 @@ export const Marketplace: React.FC = () => {
           )}
 
           {/* Results Count */}
+          <div className="mb-4 flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2 text-sm text-slate-300">
+                <label className="text-slate-300">Simulate long loading</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    value={String(fakeLoadingMs)}
+                    onChange={(e) => setFakeLoadingMs(Number(e.target.value || 0))}
+                    className="bg-slate-800 border-slate-700 text-white px-2 py-1 w-28 rounded"
+                  />
+                  <span className="text-sm text-slate-400">ms</span>
+                </div>
+              </div>
+            </div>
+          </div>
           <div className="flex items-center justify-between">
             <p className="text-slate-400">
               Showing{" "}
@@ -368,11 +391,21 @@ export const Marketplace: React.FC = () => {
                   </div>
 
                   <Button
-                    onClick={(e) => {
+                    onClick={async (e) => {
                       e.stopPropagation();
+                      if (buyLoading) return;
+                      setBuyMessage("Processing purchase...");
+                      setBuyLoading(true);
+                      const delay = fakeLoadingEnabled ? fakeLoadingMs : 600;
+                      await new Promise((r) => setTimeout(r, delay));
+                      setBuyLoading(false);
+                      setBuyMessage(undefined);
                       navigate(`/tickets/${listingId}`);
                     }}
-                    className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white"
+                    disabled={buyLoading}
+                    className={`w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white ${
+                      buyLoading ? "opacity-60 cursor-wait" : ""
+                    }`}
                   >
                     <ShoppingCart className="w-4 h-4 mr-2" />
                     Buy Now
@@ -382,6 +415,9 @@ export const Marketplace: React.FC = () => {
             );
           })}
         </div>
+
+        {/* Global buy-loading overlay */}
+        <Loading visible={buyLoading} message={buyMessage || "Processing purchase..."} />
 
         {/* Empty State Placeholder */}
         {filteredListings.length === 0 && (

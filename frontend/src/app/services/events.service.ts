@@ -350,7 +350,7 @@ export async function createEvent(
     const response = await api.post<CreateEventResponse>("/events", payload);
     return response.data || null;
   } catch (error) {
-    console.error("createEvent failed:", error);
+    console.debug("createEvent failed:", error);
     throw error;
   }
 }
@@ -381,7 +381,7 @@ export async function confirmCreateEventTransaction(
     } catch (error: any) {
       const isNotMined = error?.message?.includes("Transaction not mined yet");
       if (isNotMined && attempt < maxRetries) {
-        console.warn(
+        console.debug(
           `[CreateEvent] Transaction not yet mined, retrying check in ${retryDelayMs}ms (attempt ${attempt}/${maxRetries})...`,
         );
         await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
@@ -708,8 +708,8 @@ async function estimateTransactionGas(
     if (estimatedGas && estimatedGas > 0n) {
       return toSafeGasHex(estimatedGas, fallbackGasLimit);
     }
-  } catch (error) {
-    console.warn(
+    } catch (error) {
+    console.debug(
       "[CreateEvent] Failed to estimate gas via wallet provider, retrying via public RPC.",
       error,
     );
@@ -728,8 +728,8 @@ async function estimateTransactionGas(
       value: BigInt(transaction.value || "0"),
     });
     return toSafeGasHex(estimatedGas, fallbackGasLimit);
-  } catch (error) {
-    console.warn(
+    } catch (error) {
+    console.debug(
       `[CreateEvent] Failed to pre-estimate gas; using fallback gas limit ${fallbackGasLimit.toString()}.`,
       error,
     );

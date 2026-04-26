@@ -13,6 +13,7 @@ import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Textarea } from "../../components/ui/textarea";
 import { Label } from "../../components/ui/label";
+import Loading from "../../components/ui/loading";
 import { createEventOnChain } from "../../services/events.service";
 import { useAuth } from "../../contexts/AuthContext";
 
@@ -55,6 +56,15 @@ export const CreateEvent: React.FC = () => {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+
+  // Fake submit/loading helpers for long on-chain create flows (always enabled in dev)
+  const [fakeSubmitEnabled, setFakeSubmitEnabled] = useState(true);
+  const [fakeSubmitMs, setFakeSubmitMs] = useState<number>(3000);
+  const [fakeStepIndex, setFakeStepIndex] = useState(0);
+  const [fakeTxHash, setFakeTxHash] = useState<string | null>(null);
+  const [fakeStepMessage, setFakeStepMessage] = useState<string | undefined>(
+    undefined,
+  );
 
   const [ticketTiers, setTicketTiers] = useState<TicketTierForm[]>([
     { name: "General", price: "", supply: "" },
@@ -517,6 +527,50 @@ export const CreateEvent: React.FC = () => {
       submitInFlightRef.current = false;
     }
   };
+
+  // Fake progress simulation while submitting (does not interfere with actual flow)
+  React.useEffect(() => {
+    if (!submitting || !fakeSubmitEnabled) {
+      setFakeStepIndex(0);
+      setFakeTxHash(null);
+      setFakeStepMessage(undefined);
+      return;
+    }
+
+    // generate fake tx hash once
+    const genHash = () => {
+      const hex = Array.from({ length: 64 })
+        .map(() => "0123456789abcdef"[Math.floor(Math.random() * 16)])
+        .join("");
+      return `0x${hex}`;
+    };
+
+    const tx = genHash();
+    setFakeTxHash(tx);
+
+    const steps = [
+      "Preparing event metadata...",
+      "Uploading metadata to IPFS...",
+      "Estimating gas and preparing transaction...",
+      `Sending transaction ${tx.slice(0, 10)}...`,
+      "Waiting for transaction to be mined (0/3 confirmations)...",
+      "Confirming on-chain and syncing database...",
+    ];
+
+    let idx = 0;
+    setFakeStepIndex(0);
+    setFakeStepMessage(steps[0]);
+
+    const iv = setInterval(() => {
+      idx = Math.min(idx + 1, steps.length - 1);
+      setFakeStepIndex(idx);
+      setFakeStepMessage(steps[idx]);
+    }, Math.max(500, fakeSubmitMs));
+
+    return () => {
+      clearInterval(iv);
+    };
+  }, [submitting, fakeSubmitEnabled, fakeSubmitMs]);
 
   const handleSubmit = async () => {
     await submitEvent();
@@ -1152,6 +1206,25 @@ export const CreateEvent: React.FC = () => {
           {submitting ? "Submitting..." : "Submit"}
         </Button>
       </div>
+      <Loading
+        visible={submitting}
+        message={fakeSubmitEnabled ? fakeStepMessage || "Creating event..." : "Creating event..."}
+      >
+        {fakeSubmitEnabled && (
+          <div className="w-full text-left">
+            <p className="text-xs text-slate-400 mb-2">Tx: <span className="font-mono text-sm text-white break-all">{fakeTxHash}</span></p>
+            <div className="space-y-1">
+              <p className="text-sm text-slate-300 font-medium">{fakeStepMessage}</p>
+              <div className="h-2 bg-slate-800 rounded overflow-hidden mt-2">
+                <div
+                  className="bg-purple-400 h-2 rounded"
+                  style={{ width: `${Math.min(100, (fakeStepIndex + 1) * 16)}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+      </Loading>
     </div>
   );
 };
