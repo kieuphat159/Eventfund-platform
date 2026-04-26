@@ -59,6 +59,18 @@ export const CreateEvent: React.FC = () => {
     { name: "General", price: "", supply: "" },
   ]);
 
+  // Image upload state
+  const [selectedImages, setSelectedImages] = useState<File[]>([]);
+  const [imagePreviewUrls, setImagePreviewUrls] = useState<string[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Cleanup preview URLs on unmount
+  React.useEffect(() => {
+    return () => {
+      imagePreviewUrls.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [imagePreviewUrls]);
+
   const resetForm = () => {
     setTitle("");
     setDescription("");
@@ -71,6 +83,8 @@ export const CreateEvent: React.FC = () => {
     setOrganizerStake("");
     setInvestmentEnabled(true);
     setTicketTiers([{ name: "General", price: "", supply: "" }]);
+    setSelectedImages([]);
+    setImagePreviewUrls([]);
     setFieldErrors({});
     setError("");
     setSuccess("");
@@ -113,6 +127,68 @@ export const CreateEvent: React.FC = () => {
   const buildStartDate = () => {
     if (!date || !time) return null;
     return new Date(`${date}T${time}`);
+  };
+
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const maxImages = 10;
+    const maxSizeMB = 5;
+    const maxSizeBytes = maxSizeMB * 1024 * 1024;
+    const validTypes = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+
+    const newFiles: File[] = [];
+    const errors: string[] = [];
+
+    // Check total count
+    if (selectedImages.length + files.length > maxImages) {
+      setError(`Maximum ${maxImages} images allowed`);
+      return;
+    }
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+
+      // Validate file type
+      if (!validTypes.includes(file.type)) {
+        errors.push(`${file.name}: Invalid file type. Only JPEG, PNG, GIF, and WebP are allowed.`);
+        continue;
+      }
+
+      // Validate file size
+      if (file.size > maxSizeBytes) {
+        errors.push(`${file.name}: File size exceeds ${maxSizeMB}MB limit.`);
+        continue;
+      }
+
+      newFiles.push(file);
+    }
+
+    if (errors.length > 0) {
+      setError(errors.join(" "));
+      return;
+    }
+
+    // Create preview URLs
+    const newPreviewUrls = newFiles.map((file) => URL.createObjectURL(file));
+
+    setSelectedImages((prev) => [...prev, ...newFiles]);
+    setImagePreviewUrls((prev) => [...prev, ...newPreviewUrls]);
+    setError("");
+
+    // Reset file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const removeImage = (index: number) => {
+    // Revoke object URL to free memory
+    URL.revokeObjectURL(imagePreviewUrls[index]);
+
+    setSelectedImages((prev) => prev.filter((_, i) => i !== index));
+    setImagePreviewUrls((prev) => prev.filter((_, i) => i !== index));
   };
 
   const getInputClass = (hasError?: boolean) =>
@@ -375,7 +451,11 @@ export const CreateEvent: React.FC = () => {
         },
         user.walletAddress,
         user.smartAccountAddress,
+        selectedImages.length > 0 ? selectedImages : undefined,
       );
+
+      console.log('[CreateEvent] Selected images count:', selectedImages.length);
+      console.log('[CreateEvent] Passing images to createEventOnChain:', selectedImages.length > 0 ? 'YES' : 'NO');
 
       if (!created) {
         setError("Failed to create event.");
@@ -649,19 +729,66 @@ export const CreateEvent: React.FC = () => {
         <CardHeader>
           <CardTitle className="text-white">Event Image</CardTitle>
           <CardDescription className="text-slate-400">
-            Upload a cover image for your event
+            Upload cover images for your event (max 10 images, 5MB each)
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="border-2 border-dashed border-slate-700 rounded-lg p-12 text-center opacity-90">
-            <Upload className="w-12 h-12 text-fuchsia-300 mx-auto mb-4" />
-            <p className="text-white mb-2">
-              Image upload is not connected yet.
-            </p>
-            <p className="text-sm text-slate-400">
-              The backend already supports image upload, but this form is not
-              sending FormData yet.
-            </p>
+          <div className="space-y-4">
+            {/* Upload Area */}
+            <div
+              onClick={() => fileInputRef.current?.click()}
+              className="border-2 border-dashed border-slate-700 rounded-lg p-8 text-center cursor-pointer hover:border-cyan-500 transition-colors"
+            >
+              <Upload className="w-12 h-12 text-cyan-300 mx-auto mb-4" />
+              <p className="text-white mb-2">
+                Click to upload event images
+              </p>
+              <p className="text-sm text-slate-400">
+                JPEG, PNG, GIF, or WebP (max 5MB each)
+              </p>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/gif,image/webp"
+                multiple
+                onChange={handleImageSelect}
+                className="hidden"
+              />
+            </div>
+
+            {/* Image Previews */}
+            {imagePreviewUrls.length > 0 && (
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {imagePreviewUrls.map((url, index) => (
+                  <div
+                    key={index}
+                    className="relative aspect-video rounded-lg overflow-hidden bg-slate-800 group"
+                  >
+                    <img
+                      src={url}
+                      alt={`Preview ${index + 1}`}
+                      className="w-full h-full object-cover"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeImage(index)}
+                      className="absolute top-2 right-2 p-1.5 bg-red-500 hover:bg-red-600 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <Trash2 className="w-4 h-4 text-white" />
+                    </button>
+                    <div className="absolute bottom-2 left-2 px-2 py-1 bg-black/60 rounded text-xs text-white">
+                      {selectedImages[index]?.name}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {selectedImages.length > 0 && (
+              <p className="text-sm text-slate-400">
+                {selectedImages.length} image(s) selected
+              </p>
+            )}
           </div>
         </CardContent>
       </Card>

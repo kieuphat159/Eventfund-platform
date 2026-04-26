@@ -23,6 +23,81 @@ const MAX_IMAGE_SIZE_BYTES = MAX_IMAGE_SIZE_MB * 1024 * 1024;
 const MAX_EVENT_IMAGES = parseInt(process.env.MAX_EVENT_IMAGES || '10', 10);
 
 /**
+ * Parse JSON strings from FormData fields
+ * Middleware to handle JSON-stringified fields in multipart/form-data
+ * Only runs when Content-Type is multipart/form-data
+ */
+function parseFormDataJSON(req, _res, next) {
+  const contentType = req.headers['content-type'] || '';
+
+  console.log('[parseFormDataJSON] Content-Type:', contentType);
+  console.log('[parseFormDataJSON] req.body keys:', Object.keys(req.body || {}));
+  console.log('[parseFormDataJSON] req.body:', req.body);
+  console.log('[parseFormDataJSON] req.files:', req.files ? req.files.length : 0);
+
+  // Only parse if this is multipart/form-data (has FormData)
+  if (!contentType.includes('multipart/form-data')) {
+    console.log('[parseFormDataJSON] Skipping - not multipart');
+    // Log if body is empty for JSON requests to help debug
+    if (contentType.includes('application/json') && (!req.body || Object.keys(req.body).length === 0)) {
+      console.log('[parseFormDataJSON] WARNING: JSON request with empty body detected');
+    }
+    return next();
+  }
+
+  if (!req.body) {
+    console.log('[parseFormDataJSON] No body to parse');
+    return next();
+  }
+
+  console.log('[parseFormDataJSON] Parsing FormData fields...');
+
+  const fieldsToParseAsJSON = ['venue', 'ticketTiers', 'imageUrls'];
+
+  fieldsToParseAsJSON.forEach((field) => {
+    if (req.body[field] && typeof req.body[field] === 'string') {
+      try {
+        req.body[field] = JSON.parse(req.body[field]);
+        console.log(`[parseFormDataJSON] Parsed ${field} from JSON string`);
+      } catch (error) {
+        logger.warn(`Failed to parse ${field} as JSON`, {
+          field,
+          value: req.body[field],
+          error: error.message,
+        });
+      }
+    }
+  });
+
+  // Convert string numbers to actual numbers for validation
+  const numericFields = ['totalTickets', 'ticketUsageThreshold', 'organizerShareBps', 'usedThreshold'];
+  numericFields.forEach((field) => {
+    if (req.body[field] && typeof req.body[field] === 'string') {
+      const parsed = Number(req.body[field]);
+      if (!Number.isNaN(parsed)) {
+        req.body[field] = parsed;
+      }
+    }
+  });
+
+  // Convert boolean strings to actual booleans
+  const booleanFields = ['investmentEnabled', 'syncOnChain'];
+  booleanFields.forEach((field) => {
+    if (req.body[field] !== undefined) {
+      if (req.body[field] === 'true') {
+        req.body[field] = true;
+      } else if (req.body[field] === 'false') {
+        req.body[field] = false;
+      }
+    }
+  });
+
+  console.log('[parseFormDataJSON] After parsing - body keys:', Object.keys(req.body));
+
+  next();
+}
+
+/**
  * Validate file type using file-type library
  * More robust than manual magic bytes checking
  * @param {Buffer} buffer - File buffer
@@ -106,6 +181,27 @@ const uploadEventImages = multer({
   },
   fileFilter: imageFileFilter
 }).array('images', MAX_EVENT_IMAGES);
+
+/**
+ * Optional wrapper for uploadEventImages
+ * Only applies multer if Content-Type is multipart/form-data
+ */
+const uploadEventImagesOptional = (req, res, next) => {
+  const contentType = req.headers['content-type'] || '';
+
+  console.log('[uploadEventImagesOptional] Content-Type:', contentType);
+  console.log('[uploadEventImagesOptional] Has multipart:', contentType.includes('multipart/form-data'));
+
+  // Only apply multer if Content-Type is multipart/form-data
+  if (contentType.includes('multipart/form-data')) {
+    console.log('[uploadEventImagesOptional] Applying multer...');
+    return uploadEventImages(req, res, next);
+  }
+
+  // Otherwise, skip multer and continue
+  console.log('[uploadEventImagesOptional] Skipping multer (not multipart)');
+  next();
+};
 
 /**
  * Middleware to validate single image after multer processing
@@ -238,8 +334,10 @@ export function handleMulterError(err, _req, _res, next) {
 export {
   uploadAvatar,
   uploadEventImages,
+  uploadEventImagesOptional,
   validateSingleImage,
   validateMultipleImages,
+  parseFormDataJSON,
   imageFileFilter,
   validateFileType,
   VALID_MIME_TYPES,

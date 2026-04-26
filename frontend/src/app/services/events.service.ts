@@ -290,7 +290,55 @@ export async function createEvent(
 
 export async function createEventIntent(
   payload: CreateEventPayload,
+  images?: File[],
 ): Promise<CreateEventIntentData | null> {
+  console.log('[createEventIntent] Called with images:', images ? images.length : 0);
+  console.log('[createEventIntent] Images array:', images);
+  console.log('[createEventIntent] Payload:', payload);
+  console.log('[createEventIntent] Payload keys:', Object.keys(payload || {}));
+
+  // Only use FormData if images are actually provided
+  if (images && images.length > 0) {
+    console.log('[createEventIntent] Using FormData - images provided');
+    const formData = new FormData();
+
+    // Append all images
+    images.forEach((image) => {
+      formData.append('images', image);
+    });
+
+    // Append JSON data as individual fields
+    // Handle nested objects and arrays properly
+    Object.entries(payload).forEach(([key, value]) => {
+      if (value !== undefined && value !== null) {
+        if (key === 'venue' || key === 'ticketTiers') {
+          // Stringify complex objects/arrays
+          formData.append(key, JSON.stringify(value));
+        } else if (typeof value === 'object' && !Array.isArray(value)) {
+          // For other objects, stringify them
+          formData.append(key, JSON.stringify(value));
+        } else if (Array.isArray(value)) {
+          // For arrays, stringify them
+          formData.append(key, JSON.stringify(value));
+        } else {
+          // For primitives, convert to string
+          formData.append(key, String(value));
+        }
+      }
+    });
+
+    // Don't set Content-Type manually - browser will set it with boundary automatically
+    const response = await api.post<CreateEventIntentResponse>(
+      "/events/create-intent",
+      formData,
+    );
+
+    return response.data || null;
+  }
+
+  // If no images, send as JSON (original behavior)
+  console.log('[createEventIntent] Using JSON - no images');
+  console.log('[createEventIntent] Sending payload:', JSON.stringify(payload, null, 2));
   const response = await api.post<CreateEventIntentResponse>(
     "/events/create-intent",
     payload,
@@ -596,12 +644,13 @@ export async function createEventOnChain(
   payload: CreateEventPayload,
   organizerWallet?: string,
   smartAccountAddress?: string,
+  images?: File[],
 ): Promise<CreateEventOnChainResult> {
   if (!provider?.request) {
     throw new Error("Wallet provider is unavailable");
   }
 
-  const intent = await createEventIntent(payload);
+  const intent = await createEventIntent(payload, images);
   if (!intent?.transaction) {
     throw new Error("Unable to create event intent");
   }

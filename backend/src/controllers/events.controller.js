@@ -37,9 +37,12 @@ class EventsController {
    */
   createEventIntent = asyncHandler(async (req, res) => {
     const eventData = req.validated?.body || req.body;
+    const uploadedFiles = req.files || [];
+
     const intent = await this.eventsService.createCreateEventIntent(
       eventData,
       req.user,
+      uploadedFiles,
     );
 
     res.status(200).json({
