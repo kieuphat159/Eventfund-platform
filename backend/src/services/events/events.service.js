@@ -957,9 +957,27 @@ export async function createEvent(eventData, user, repos = {}) {
 /**
  * Build user-signed create-event intent and persist draft event.
  */
-export async function createCreateEventIntent(eventData, user, repos = {}) {
+export async function createCreateEventIntent(eventData, user, uploadedFiles = [], repos = {}) {
   const repository = repos.eventRepo || eventRepo;
   const fund = getFund();
+
+  // Upload images to Cloudinary if files are provided
+  let uploadedImageUrls = eventData.imageUrls || [];
+  if (uploadedFiles && uploadedFiles.length > 0) {
+    const uploadService = getDefaultUploadService();
+    try {
+      const uploadResult = await uploadService.uploadEventImages(
+        uploadedFiles,
+        'temp-' + Date.now(), // Temporary ID, will be replaced with actual event ID
+      );
+      uploadedImageUrls = [...uploadedImageUrls, ...uploadResult.imageUrls];
+    } catch (error) {
+      throw new BadRequestError(
+        `Failed to upload images: ${error.message}`,
+      );
+    }
+  }
+
   const { investmentEnabled, fundingGoal, fundingDeadlineDate } =
     resolveFundingConfig(eventData);
   const { ticketingStartAt, ticketingEndAt } = resolveTicketingTimeline(
@@ -1016,7 +1034,7 @@ export async function createCreateEventIntent(eventData, user, repos = {}) {
       venue: eventData.venue,
       startDate: eventData.startDate,
       endDate: eventData.endDate,
-      imageUrls: eventData.imageUrls || [],
+      imageUrls: uploadedImageUrls,
       ticketTiers: eventData.ticketTiers || [],
       fundingGoal: fundingGoal.toString(),
       minStakeRequired: minStakeRequired.toString(),
@@ -1050,6 +1068,7 @@ export async function createCreateEventIntent(eventData, user, repos = {}) {
     ticketsSold: 0,
     totalTicketsUsed: 0,
     metadataUri,
+    imageUrls: uploadedImageUrls,
   });
 
   const [fundAddress, network] = await Promise.all([

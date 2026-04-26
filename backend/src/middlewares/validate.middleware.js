@@ -10,6 +10,23 @@ export function validate(schema) {
     const errors = [];
     const validated = {};
 
+    // Check if body is expected but empty
+    if (schema.body && (!req.body || Object.keys(req.body).length === 0)) {
+      const contentType = req.headers['content-type'] || '';
+      console.log('[validate] Empty body detected. Content-Type:', contentType);
+      console.log('[validate] req.body:', req.body);
+
+      // Provide a more helpful error message
+      const error = new BadRequestError('Request body is empty or not properly formatted');
+      error.code = 'EMPTY_BODY';
+      error.details = [{
+        field: 'body',
+        message: 'Request body is required but was empty. Ensure you are sending data in the correct format.',
+        type: 'any.required'
+      }];
+      return next(error);
+    }
+
     // 1. Kỹ thuật DRY: Dùng vòng lặp thay vì viết lại 3 lần
     const validationTargets = ['body', 'params', 'query'];
 

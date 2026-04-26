@@ -23,6 +23,65 @@ const MAX_IMAGE_SIZE_BYTES = MAX_IMAGE_SIZE_MB * 1024 * 1024;
 const MAX_EVENT_IMAGES = parseInt(process.env.MAX_EVENT_IMAGES || '10', 10);
 
 /**
+ * Parse JSON strings from FormData fields
+ * Middleware to handle JSON-stringified fields in multipart/form-data
+ * Only runs when Content-Type is multipart/form-data
+ */
+function parseFormDataJSON(req, _res, next) {
+  const contentType = req.headers['content-type'] || '';
+
+  // Only parse if this is multipart/form-data (has FormData)
+  if (!contentType.includes('multipart/form-data')) {
+    return next();
+  }
+
+  if (!req.body) {
+    return next();
+  }
+
+  const fieldsToParseAsJSON = ['venue', 'ticketTiers', 'imageUrls'];
+
+  fieldsToParseAsJSON.forEach((field) => {
+    if (req.body[field] && typeof req.body[field] === 'string') {
+      try {
+        req.body[field] = JSON.parse(req.body[field]);
+      } catch (error) {
+        logger.warn(`Failed to parse ${field} as JSON`, {
+          field,
+          value: req.body[field],
+          error: error.message,
+        });
+      }
+    }
+  });
+
+  // Convert string numbers to actual numbers for validation
+  const numericFields = ['totalTickets', 'ticketUsageThreshold', 'organizerShareBps', 'usedThreshold'];
+  numericFields.forEach((field) => {
+    if (req.body[field] && typeof req.body[field] === 'string') {
+      const parsed = Number(req.body[field]);
+      if (!Number.isNaN(parsed)) {
+        req.body[field] = parsed;
+      }
+    }
+  });
+
+  // Convert boolean strings to actual booleans
+  const booleanFields = ['investmentEnabled', 'syncOnChain'];
+  booleanFields.forEach((field) => {
+    if (req.body[field] !== undefined) {
+      if (req.body[field] === 'true') {
+        req.body[field] = true;
+      } else if (req.body[field] === 'false') {
+        req.body[field] = false;
+      }
+    }
+  });
+
+  next();
+}
+
+/**
  * Validate file type using file-type library
  * More robust than manual magic bytes checking
  * @param {Buffer} buffer - File buffer
@@ -106,6 +165,22 @@ const uploadEventImages = multer({
   },
   fileFilter: imageFileFilter
 }).array('images', MAX_EVENT_IMAGES);
+
+/**
+ * Optional wrapper for uploadEventImages
+ * Only applies multer if Content-Type is multipart/form-data
+ */
+const uploadEventImagesOptional = (req, res, next) => {
+  const contentType = req.headers['content-type'] || '';
+
+  // Only apply multer if Content-Type is multipart/form-data
+  if (contentType.includes('multipart/form-data')) {
+    return uploadEventImages(req, res, next);
+  }
+
+  // Otherwise, skip multer and continue
+  next();
+};
 
 /**
  * Middleware to validate single image after multer processing
@@ -238,8 +313,10 @@ export function handleMulterError(err, _req, _res, next) {
 export {
   uploadAvatar,
   uploadEventImages,
+  uploadEventImagesOptional,
   validateSingleImage,
   validateMultipleImages,
+  parseFormDataJSON,
   imageFileFilter,
   validateFileType,
   VALID_MIME_TYPES,

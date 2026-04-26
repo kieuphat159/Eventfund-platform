@@ -6,8 +6,9 @@ import { validate } from "../middlewares/validate.middleware.js";
 import { eventSchemas } from "../validators/event.validator.js";
 import { requireAdmin } from "../middlewares/roles.middleware.js";
 import {
-  uploadEventImages,
+  uploadEventImagesOptional,
   validateMultipleImages,
+  parseFormDataJSON,
 } from "../middlewares/image.middleware.js";
 
 const router = express.Router();
@@ -177,7 +178,8 @@ router.post(
   "/",
   authenticate,
   requireEventCreator,
-  uploadEventImages,
+  uploadEventImagesOptional,
+  parseFormDataJSON,
   validateMultipleImages,
   validate({ body: eventSchemas.createEvent }),
   controller.createEvent,
@@ -187,7 +189,8 @@ router.post(
   "/create-intent",
   authenticate,
   requireEventCreator,
-  uploadEventImages,
+  uploadEventImagesOptional,
+  parseFormDataJSON,
   validateMultipleImages,
   validate({ body: eventSchemas.createEventIntent }),
   controller.createEventIntent,
@@ -294,7 +297,8 @@ router.patch(
   "/:id",
   authenticate,
   requireEventCreator,
-  uploadEventImages,
+  uploadEventImagesOptional,
+  parseFormDataJSON,
   validateMultipleImages,
   validate({ body: eventSchemas.updateEvent }),
   controller.updateEvent,

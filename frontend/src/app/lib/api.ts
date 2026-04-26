@@ -43,7 +43,10 @@ async function request<T>(
     requestHeaders.set("Authorization", `Bearer ${token}`);
   }
 
-  if (body !== undefined && !requestHeaders.has("Content-Type")) {
+  // Only set Content-Type and stringify if body is not FormData
+  const isFormData = body instanceof FormData;
+
+  if (body !== undefined && !isFormData && !requestHeaders.has("Content-Type")) {
     requestHeaders.set("Content-Type", "application/json");
   }
 
@@ -51,7 +54,9 @@ async function request<T>(
     method,
     ...rest,
     headers: requestHeaders,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    body: body !== undefined
+      ? (isFormData ? body : JSON.stringify(body))
+      : undefined,
   });
 
   const contentType = response.headers.get("content-type") || "";
