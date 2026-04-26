@@ -717,8 +717,8 @@ export async function createRefundIntent(tokenId, buyerWallet, repos = {}) {
     throw new NotFoundError('Event not found');
   }
 
-  if (event.status !== 'cancelled') {
-    throw new BadRequestError('Ticket refund is only available for cancelled events');
+  if (event.status !== 'cancelled' && event.status !== 'failed') {
+    throw new BadRequestError('Ticket refund is only available for cancelled or failed events');
   }
 
   const ticketContract = getTicket();

@@ -274,7 +274,7 @@ describe("admin.service updateEventStatus", () => {
       updateById: jest.fn().mockResolvedValue({
         ...ticketingEvent,
         status: "cancelled",
-        cancellationReason: "ticket_sales_not_met",
+        cancellationReason: "organizer_cancelled",
         cancellationNote: "sales too low",
       }),
     };
@@ -291,19 +291,98 @@ describe("admin.service updateEventStatus", () => {
       { eventRepo: repository },
     );
 
-    expect(mockFundWithSigner.cancelEvent).toHaveBeenCalledWith(9n, 2);
+    expect(mockFundWithSigner.cancelEvent).toHaveBeenCalledWith(9n, 1);
     expect(repository.updateById).toHaveBeenCalledWith(
       ticketingEvent._id,
       expect.objectContaining({
         status: "cancelled",
-        cancellationReason: "ticket_sales_not_met",
+        cancellationReason: "organizer_cancelled",
         cancellationNote: "sales too low",
         cancelledBy: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       }),
     );
     expect(result).toMatchObject({
       status: "cancelled",
+      cancellationReason: "organizer_cancelled",
+    });
+  });
+
+  test("marks ticketing event as failed on-chain when ticket sales are not met", async () => {
+    const ticketingEvent = {
+      _id: "507f1f77bcf86cd799439055",
+      title: "Failed ticketing",
+      organizer: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      status: "ticketing",
+      contractEventId: "9",
+      fundingGoal: "1000",
+      currentFunding: "1000",
+    };
+
+    const repository = {
+      findById: jest.fn().mockResolvedValue(ticketingEvent),
+      updateById: jest.fn().mockResolvedValue({
+        ...ticketingEvent,
+        status: "failed",
+        cancellationReason: "ticket_sales_not_met",
+      }),
+    };
+
+    const result = await updateEventStatus(
+      ticketingEvent._id,
+      "failed",
+      {},
+      { eventRepo: repository },
+    );
+
+    expect(mockFundWithSigner.cancelEvent).toHaveBeenCalledWith(9n, 2);
+    expect(repository.updateById).toHaveBeenCalledWith(
+      ticketingEvent._id,
+      expect.objectContaining({
+        status: "failed",
+        cancellationReason: "ticket_sales_not_met",
+      }),
+    );
+    expect(result).toMatchObject({
+      status: "failed",
       cancellationReason: "ticket_sales_not_met",
+    });
+  });
+
+  test("moves ticketing event to ongoing without an on-chain status change", async () => {
+    const ticketingEvent = {
+      _id: "507f1f77bcf86cd799439066",
+      title: "Ready to start",
+      organizer: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      status: "ticketing",
+      contractEventId: "9",
+      fundingGoal: "1000",
+      currentFunding: "1000",
+    };
+
+    const repository = {
+      findById: jest.fn().mockResolvedValue(ticketingEvent),
+      updateById: jest.fn().mockResolvedValue({
+        ...ticketingEvent,
+        status: "ongoing",
+      }),
+    };
+
+    const result = await updateEventStatus(
+      ticketingEvent._id,
+      "ongoing",
+      {},
+      { eventRepo: repository },
+    );
+
+    expect(mockFundWithSigner.cancelEvent).not.toHaveBeenCalled();
+    expect(mockFundWithSigner.finalizeFunding).not.toHaveBeenCalled();
+    expect(mockFundWithSigner.startTicketing).not.toHaveBeenCalled();
+    expect(repository.updateById).toHaveBeenCalledWith(
+      ticketingEvent._id,
+      { status: "ongoing" },
+    );
+    expect(result).toMatchObject({
+      status: "ongoing",
     });
   });
 });

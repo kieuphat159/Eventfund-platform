@@ -31,8 +31,10 @@ const EVENT_STATUSES: EventStatus[] = [
   'funding',
   'funded',
   'ticketing',
+  'ongoing',
   'completed',
   'cancelled',
+  'failed',
 ];
 
 type TicketTierForm = {
@@ -385,6 +387,11 @@ export const AdminEditEvent: React.FC = () => {
                     ))}
                   </SelectContent>
                 </Select>
+                <p className="text-xs text-slate-500">
+                  `cancelled` is for manual admin/organizer cancellation. `failed`
+                  is for terminal auto-failure cases such as ticket sales not
+                  meeting threshold.
+                </p>
               </div>
             </div>
 

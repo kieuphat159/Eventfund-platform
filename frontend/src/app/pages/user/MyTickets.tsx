@@ -332,7 +332,8 @@ export const MyTickets: React.FC = () => {
               .join(" - ") || "Unknown venue";
           const purchasePrice = ticket.originalPrice || "0";
           const canClaimRefund =
-            ticket.status === "sold" && event?.status === "cancelled";
+            ticket.status === "sold" &&
+            ["cancelled", "failed"].includes(event?.status || "");
 
           return (
             <Card

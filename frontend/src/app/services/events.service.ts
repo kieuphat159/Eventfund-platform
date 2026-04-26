@@ -41,6 +41,7 @@ export interface EventItem {
 
   organizer?: string;
   organizerWallet?: string;
+  onChainOrganizer?: string;
   organizerStake?: string | number;
   investmentEnabled?: boolean;
 
@@ -57,6 +58,12 @@ export interface EventItem {
   ticketsSold?: number;
   totalTicketsUsed?: number;
   ticketUsageThreshold?: number;
+  usedThreshold?: number;
+  escrowedRevenue?: string | number;
+  ticketRevenueDeposited?: string | number;
+  royaltyRevenueDeposited?: string | number;
+  sharesFinalized?: boolean;
+  revenueReleased?: boolean;
 
   ticketTiers?: EventTicketTier[];
   adminSummary?: {
@@ -132,6 +139,7 @@ export interface UpdateEventPayload {
   status?: EventStatus;
   reason?: string;
   txHash?: string;
+  releaseTxHash?: string;
 }
 
 export interface CreateEventResponse {
@@ -204,6 +212,88 @@ const FUND_CANCEL_ABI = [
     stateMutability: "nonpayable",
     inputs: [{ name: "eventId", type: "uint256" }],
     outputs: [],
+  },
+] as const;
+
+const FUND_READONLY_ABI = [
+  {
+    type: "function",
+    name: "ticket",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+  },
+] as const;
+
+const FUND_COMPLETE_ABI = [
+  {
+    type: "error",
+    name: "AlreadyFinalized",
+    inputs: [],
+  },
+  {
+    type: "error",
+    name: "BadParam",
+    inputs: [],
+  },
+  {
+    type: "error",
+    name: "EventNotFound",
+    inputs: [],
+  },
+  {
+    type: "error",
+    name: "NotCompleted",
+    inputs: [],
+  },
+  {
+    type: "error",
+    name: "NotOrganizer",
+    inputs: [],
+  },
+  {
+    type: "error",
+    name: "NotTicketing",
+    inputs: [],
+  },
+  {
+    type: "error",
+    name: "TicketContractNotSet",
+    inputs: [],
+  },
+  {
+    type: "error",
+    name: "Unsafe",
+    inputs: [],
+  },
+  {
+    type: "function",
+    name: "setCompletedIfThresholdMet",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "eventId", type: "uint256" }],
+    outputs: [],
+  },
+  {
+    type: "function",
+    name: "releaseRevenue",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "eventId", type: "uint256" }],
+    outputs: [],
+  },
+] as const;
+
+const TICKET_USAGE_ABI = [
+  {
+    type: "function",
+    name: "getUsageStats",
+    stateMutability: "view",
+    inputs: [{ name: "eventId", type: "uint256" }],
+    outputs: [
+      { name: "totalMinted", type: "uint256" },
+      { name: "totalSold", type: "uint256" },
+      { name: "totalUsed", type: "uint256" },
+      { name: "usageRatio", type: "uint256" },
+    ],
   },
 ] as const;
 
@@ -615,6 +705,271 @@ function shouldFallbackToWalletCancellation(message: string): boolean {
     .includes("organizer wallet signature required");
 }
 
+function getPublicClient() {
+  return createPublicClient({
+    chain: sepolia,
+    transport: http(PUBLIC_RPC_URL),
+  });
+}
+
+function extractErrorName(error: unknown): string | null {
+  const queue: unknown[] = [error];
+  const seen = new Set<unknown>();
+
+  while (queue.length) {
+    const current = queue.shift();
+    if (!current || typeof current !== "object" || seen.has(current)) {
+      continue;
+    }
+    seen.add(current);
+
+    const candidate = current as {
+      errorName?: string;
+      name?: string;
+      message?: string;
+      shortMessage?: string;
+      cause?: unknown;
+      details?: string;
+      metaMessages?: string[];
+    };
+
+    if (typeof candidate.errorName === "string") {
+      return candidate.errorName;
+    }
+
+    const textCandidates = [
+      candidate.shortMessage,
+      candidate.message,
+      candidate.details,
+      ...(Array.isArray(candidate.metaMessages) ? candidate.metaMessages : []),
+    ].filter((value): value is string => typeof value === "string");
+
+    for (const text of textCandidates) {
+      const match = text.match(/\b([A-Z][A-Za-z0-9_]+)\(\)/);
+      if (match?.[1]) {
+        return match[1];
+      }
+    }
+
+    if (candidate.cause) {
+      queue.push(candidate.cause);
+    }
+
+    for (const value of Object.values(candidate)) {
+      if (value && typeof value === "object") {
+        queue.push(value);
+      }
+    }
+  }
+
+  return null;
+}
+
+async function validateCompletionReadiness(
+  event: EventItem,
+  fundAddress: string,
+  fromAddress: string,
+): Promise<void> {
+  if (!event.contractEventId) {
+    throw new Error("Event has not been synced on-chain yet.");
+  }
+
+  const normalizedFrom = normalizeAddress(fromAddress);
+  const normalizedOrganizer = normalizeAddress(
+    event.onChainOrganizer || event.organizerWallet || event.organizer,
+  );
+
+  if (normalizedOrganizer && normalizedFrom !== normalizedOrganizer) {
+    throw new Error(
+      `Connected wallet ${fromAddress} is not the on-chain organizer ${normalizedOrganizer}. Please switch to the organizer wallet used to create this event on-chain.`,
+    );
+  }
+
+  const publicClient = getPublicClient();
+  const chainEventId = BigInt(event.contractEventId);
+
+  let totalUsed = BigInt(event.totalTicketsUsed ?? 0);
+  let totalSold = BigInt(event.ticketsSold ?? 0);
+  const usedThreshold = BigInt(
+    event.usedThreshold ?? event.totalTickets ?? event.ticketUsageThreshold ?? 0,
+  );
+
+  try {
+    const ticketAddress = await publicClient.readContract({
+      address: fundAddress as `0x${string}`,
+      abi: FUND_READONLY_ABI,
+      functionName: "ticket",
+    });
+
+    if (!ticketAddress || /^0x0{40}$/i.test(ticketAddress)) {
+      throw new Error(
+        "Fund contract has no ticket contract configured on-chain yet.",
+      );
+    }
+
+    const usageStats = await publicClient.readContract({
+      address: ticketAddress,
+      abi: TICKET_USAGE_ABI,
+      functionName: "getUsageStats",
+      args: [chainEventId],
+    });
+
+    totalSold = usageStats[1];
+    totalUsed = usageStats[2];
+  } catch (error) {
+    console.warn(
+      "[CompleteEvent] Failed to fetch on-chain ticket usage stats before completion.",
+      error,
+    );
+  }
+
+  if (usedThreshold > 0n && totalUsed < usedThreshold) {
+    throw new Error(
+      `Event chưa đủ điều kiện completed on-chain: mới check-in ${totalUsed.toString()}/${usedThreshold.toString()} vé. Tổng vé đã bán hiện tại: ${totalSold.toString()}.`,
+    );
+  }
+
+  try {
+    await publicClient.simulateContract({
+      account: fromAddress as `0x${string}`,
+      address: fundAddress as `0x${string}`,
+      abi: FUND_COMPLETE_ABI,
+      functionName: "setCompletedIfThresholdMet",
+      args: [chainEventId],
+    });
+  } catch (error) {
+    const errorName = extractErrorName(error);
+
+    if (errorName === "NotOrganizer") {
+      throw new Error(
+        "Connected wallet is not authorized on-chain for this event. Please switch to the organizer wallet that created the event.",
+      );
+    }
+
+    if (errorName === "NotTicketing") {
+      throw new Error(
+        "Event is not in `ticketing` state on-chain, so it cannot be marked completed. The app status may be ahead of the contract state.",
+      );
+    }
+
+    if (errorName === "Unsafe") {
+      if (usedThreshold > 0n && totalUsed < usedThreshold) {
+        throw new Error(
+          `Event chưa đủ điều kiện completed on-chain: mới check-in ${totalUsed.toString()}/${usedThreshold.toString()} vé.`,
+        );
+      }
+
+      throw new Error(
+        "On-chain completion conditions are not satisfied yet. The event may already be finalized, cancelled, or still missing required ticket usage/revenue state.",
+      );
+    }
+
+    if (errorName === "TicketContractNotSet") {
+      throw new Error(
+        "Fund contract has not been linked to the Ticket contract on-chain.",
+      );
+    }
+
+    if (errorName === "EventNotFound") {
+      throw new Error("Event was not found on-chain.");
+    }
+
+    throw new Error(
+      `On-chain completion preflight failed: ${mapBundlerAuthError(getRpcErrorMessage(error))}`,
+    );
+  }
+}
+
+async function validateRevenueReleaseReadiness(
+  event: EventItem,
+  fundAddress: string,
+  fromAddress: string,
+): Promise<void> {
+  if (!event.contractEventId) {
+    throw new Error("Event has not been synced on-chain yet.");
+  }
+
+  const publicClient = getPublicClient();
+
+  try {
+    await publicClient.simulateContract({
+      account: fromAddress as `0x${string}`,
+      address: fundAddress as `0x${string}`,
+      abi: FUND_COMPLETE_ABI,
+      functionName: "releaseRevenue",
+      args: [BigInt(event.contractEventId)],
+    });
+  } catch (error) {
+    const errorName = extractErrorName(error);
+
+    if (errorName === "NotOrganizer") {
+      throw new Error(
+        "Connected wallet is not authorized to release revenue for this event on-chain.",
+      );
+    }
+
+    if (errorName === "NotCompleted") {
+      throw new Error(
+        "Event has not reached `completed` state on-chain yet, so revenue cannot be released.",
+      );
+    }
+
+    if (errorName === "BadParam") {
+      throw new Error(
+        "Event is completed on-chain but there is no escrowed revenue in Fund to distribute yet.",
+      );
+    }
+
+    if (errorName === "AlreadyFinalized") {
+      throw new Error("Revenue for this event has already been released.");
+    }
+
+    if (errorName === "Unsafe") {
+      throw new Error(
+        "Revenue cannot be released on-chain yet. Shares may not be finalized, refunds may be enabled, or revenue state is not ready.",
+      );
+    }
+
+    throw new Error(
+      `On-chain revenue release preflight failed: ${mapBundlerAuthError(getRpcErrorMessage(error))}`,
+    );
+  }
+}
+
+function buildCompletionTransaction(event: EventItem): TransactionRequestShape {
+  if (!event.contractEventId) {
+    throw new Error("Event has not been synced on-chain yet.");
+  }
+
+  return {
+    to: "",
+    data: encodeFunctionData({
+      abi: FUND_COMPLETE_ABI,
+      functionName: "setCompletedIfThresholdMet",
+      args: [BigInt(event.contractEventId)],
+    }),
+    value: "0",
+  };
+}
+
+function buildReleaseRevenueTransaction(
+  event: EventItem,
+): TransactionRequestShape {
+  if (!event.contractEventId) {
+    throw new Error("Event has not been synced on-chain yet.");
+  }
+
+  return {
+    to: "",
+    data: encodeFunctionData({
+      abi: FUND_COMPLETE_ABI,
+      functionName: "releaseRevenue",
+      args: [BigInt(event.contractEventId)],
+    }),
+    value: "0",
+  };
+}
+
 function resolveCancellationReason(
   event: EventItem,
   requestedReason?: string,
@@ -741,6 +1096,13 @@ async function estimateTransactionGas(
       ).toString(),
     );
   }
+}
+
+async function waitForPublicTransactionReceipt(txHash: string) {
+  const publicClient = getPublicClient();
+  return publicClient.waitForTransactionReceipt({
+    hash: txHash as `0x${string}`,
+  });
 }
 
 async function getSenderCandidates(
@@ -1042,6 +1404,174 @@ export async function cancelEventWithWalletFallback(
     return await updateEvent(eventId, {
       ...cancelPayload,
       txHash,
+    });
+  }
+}
+
+export async function completeEventWithWalletFallback(
+  provider: Eip1193Provider | undefined,
+  eventId: string,
+  payload: UpdateEventPayload = { status: "completed" },
+  organizerWallet?: string,
+  smartAccountAddress?: string,
+): Promise<EventItem | null> {
+  const currentEvent = await getEventById(eventId);
+  if (!currentEvent) {
+    throw new Error("Event not found.");
+  }
+
+  const completePayload: UpdateEventPayload = {
+    ...payload,
+    status: "completed",
+  };
+
+  try {
+    return await updateEvent(eventId, completePayload);
+  } catch (error) {
+    const message = getErrorMessage(error);
+    if (!shouldFallbackToWalletCancellation(message)) {
+      throw error;
+    }
+
+    if (!provider?.request) {
+      throw new Error(
+        `${message}. Wallet provider is unavailable for organizer-signed completion.`,
+      );
+    }
+
+    if (!currentEvent.contractEventId) {
+      throw error;
+    }
+
+    const config = await getEventBlockchainConfig();
+    const completionTransaction = buildCompletionTransaction(currentEvent);
+    const releaseTransaction = buildReleaseRevenueTransaction(currentEvent);
+    completionTransaction.to = config.fundAddress;
+    releaseTransaction.to = config.fundAddress;
+
+    await ensureProviderChain(provider, config.chainId);
+
+    const fromAddress = await resolveSignerAddress(
+      provider,
+      organizerWallet,
+      smartAccountAddress,
+    );
+
+    await validateCompletionReadiness(
+      currentEvent,
+      config.fundAddress,
+      fromAddress,
+    );
+
+    const completionGas = await estimateTransactionGas(
+      provider,
+      fromAddress,
+      completionTransaction,
+      350_000n,
+    );
+    const txParamsBase = {
+      from: fromAddress,
+      to: completionTransaction.to,
+      value: toHexValue(completionTransaction.value),
+    };
+
+    let completionTxHash = "";
+    try {
+      completionTxHash = (await provider.request({
+        method: "eth_sendTransaction",
+        params: [
+          {
+            ...txParamsBase,
+            data: completionTransaction.data,
+            gas: completionGas,
+          },
+        ],
+      })) as string;
+    } catch (sendError) {
+      const firstErrorMessage = getRpcErrorMessage(sendError);
+      if (completionGas && isGasLimitTooHighError(firstErrorMessage)) {
+        const fallbackGas = toHexValue("350000");
+        completionTxHash = (await provider.request({
+          method: "eth_sendTransaction",
+          params: [
+            {
+              ...txParamsBase,
+              data: completionTransaction.data,
+              gas: fallbackGas,
+            },
+          ],
+        })) as string;
+      } else {
+        throw new Error(
+          `Complete event transaction failed with signer ${fromAddress}: ${mapBundlerAuthError(firstErrorMessage)}`,
+        );
+      }
+    }
+
+    if (!completionTxHash) {
+      throw new Error("Failed to send complete event transaction.");
+    }
+
+    const completionReceipt =
+      await waitForPublicTransactionReceipt(completionTxHash);
+    if (completionReceipt.status !== "success") {
+      throw new Error("Complete event transaction failed on-chain.");
+    }
+
+    await validateRevenueReleaseReadiness(
+      currentEvent,
+      config.fundAddress,
+      fromAddress,
+    );
+
+    const releaseGas = await estimateTransactionGas(
+      provider,
+      fromAddress,
+      releaseTransaction,
+      500_000n,
+    );
+
+    let releaseTxHash = "";
+    try {
+      releaseTxHash = (await provider.request({
+        method: "eth_sendTransaction",
+        params: [
+          {
+            ...txParamsBase,
+            data: releaseTransaction.data,
+            gas: releaseGas,
+          },
+        ],
+      })) as string;
+    } catch (sendError) {
+      const firstErrorMessage = getRpcErrorMessage(sendError);
+      if (releaseGas && isGasLimitTooHighError(firstErrorMessage)) {
+        const fallbackGas = toHexValue("500000");
+        releaseTxHash = (await provider.request({
+          method: "eth_sendTransaction",
+          params: [
+            {
+              ...txParamsBase,
+              data: releaseTransaction.data,
+              gas: fallbackGas,
+            },
+          ],
+        })) as string;
+      } else {
+        throw new Error(
+          `Release revenue transaction failed with signer ${fromAddress}: ${mapBundlerAuthError(firstErrorMessage)}`,
+        );
+      }
+    }
+
+    if (!releaseTxHash) {
+      throw new Error("Failed to send release revenue transaction.");
+    }
+
+    return await updateEvent(eventId, {
+      ...completePayload,
+      txHash: completionTxHash,
+      releaseTxHash,
     });
   }
 }

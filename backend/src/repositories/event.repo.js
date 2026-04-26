@@ -280,6 +280,75 @@ export async function findByOnChainIdentity(
 }
 
 /**
+ * Find on-chain funding events whose deadline has passed and need finalization.
+ * @param {Date} now
+ * @param {number} limit
+ * @param {Object} models - Injected models (optional)
+ * @returns {Promise<Array<Object>>}
+ */
+export async function findDueFundingFinalizationEvents(
+  now = new Date(),
+  limit = 50,
+  models = {},
+) {
+  const Event = models.Event || DefaultEvent;
+  return await Event.find({
+    contractEventId: { $exists: true, $ne: null },
+    status: "funding",
+    fundingDeadline: { $lte: now },
+  })
+    .sort({ fundingDeadline: 1, createdAt: 1 })
+    .limit(limit)
+    .lean();
+}
+
+/**
+ * Find funded on-chain events whose ticketing window has started.
+ * @param {Date} now
+ * @param {number} limit
+ * @param {Object} models - Injected models (optional)
+ * @returns {Promise<Array<Object>>}
+ */
+export async function findDueTicketingStartEvents(
+  now = new Date(),
+  limit = 50,
+  models = {},
+) {
+  const Event = models.Event || DefaultEvent;
+  return await Event.find({
+    contractEventId: { $exists: true, $ne: null },
+    status: "funded",
+    ticketingStartAt: { $lte: now },
+  })
+    .sort({ ticketingStartAt: 1, createdAt: 1 })
+    .limit(limit)
+    .lean();
+}
+
+/**
+ * Find ticketing events whose ticket sales window has ended and need resolution.
+ * @param {Date} now
+ * @param {number} limit
+ * @param {Object} models - Injected models (optional)
+ * @returns {Promise<Array<Object>>}
+ */
+export async function findDueTicketingResolutionEvents(
+  now = new Date(),
+  limit = 50,
+  models = {},
+) {
+  const Event = models.Event || DefaultEvent;
+  return await Event.find({
+    contractEventId: { $exists: true, $ne: null },
+    status: "ticketing",
+    ticketingEndAt: { $lte: now },
+  })
+    .sort({ ticketingEndAt: 1, createdAt: 1 })
+    .limit(limit)
+    .lean();
+}
+
+/**
  * Find latest draft owned by organizer that matches on-chain creation params.
  */
 export async function findMatchingDraftForOnChainEvent(match, models = {}) {
@@ -369,4 +438,26 @@ export async function clearProcessedTxHashes(txHashes, models = {}) {
   );
 }
 
-export default { createEvent, findById, findEvents, updateById, deleteById, updateFundingStatus, incrementTicketCounters, countEvents, getRevenueStats, upsertByContractEventId, findByContractEventId, findByOnChainIdentity, findMatchingDraftForOnChainEvent, isTxHashProcessed, markTxHashProcessed, applyIdempotentDeltaByTxHash, updateByContractEventId, clearProcessedTxHashes };
+export default {
+  createEvent,
+  findById,
+  findEvents,
+  updateById,
+  deleteById,
+  updateFundingStatus,
+  incrementTicketCounters,
+  countEvents,
+  getRevenueStats,
+  upsertByContractEventId,
+  findByContractEventId,
+  findByOnChainIdentity,
+  findDueFundingFinalizationEvents,
+  findDueTicketingStartEvents,
+  findDueTicketingResolutionEvents,
+  findMatchingDraftForOnChainEvent,
+  isTxHashProcessed,
+  markTxHashProcessed,
+  applyIdempotentDeltaByTxHash,
+  updateByContractEventId,
+  clearProcessedTxHashes,
+};

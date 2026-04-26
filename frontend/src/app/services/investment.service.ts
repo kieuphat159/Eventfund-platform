@@ -22,6 +22,9 @@ export interface Eip1193Provider {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
 }
 
+const WEB3AUTH_TX_GAS_CAP = 16_777_216n;
+const INVESTMENT_FALLBACK_GAS_LIMIT = 500_000n;
+
 export interface InvestmentIntentTransaction {
   to: string;
   data: string;
@@ -86,10 +89,10 @@ export interface InvestOnChainResult {
 function normalizeInvestment(detail: InvestmentDetail): InvestmentDetail {
   return {
     ...detail,
-    contributionAmount: String(detail.contributionAmount || '0'),
+    contributionAmount: String(detail.contributionAmount || "0"),
     sharePercentage: Number(detail.sharePercentage || 0),
-    claimedReward: String(detail.claimedReward || '0'),
-    pendingReward: String(detail.pendingReward || '0'),
+    claimedReward: String(detail.claimedReward || "0"),
+    pendingReward: String(detail.pendingReward || "0"),
   };
 }
 
@@ -139,6 +142,64 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
+function parseHexToBigInt(value: unknown): bigint | null {
+  if (typeof value !== "string") return null;
+
+  try {
+    return BigInt(value);
+  } catch {
+    return null;
+  }
+}
+
+function toSafeGasHex(estimatedGas: bigint): string {
+  const paddedGas = estimatedGas + estimatedGas / 5n + 15_000n;
+  const boundedGas =
+    paddedGas > WEB3AUTH_TX_GAS_CAP ? WEB3AUTH_TX_GAS_CAP : paddedGas;
+
+  return toHexValue(boundedGas.toString());
+}
+
+async function estimateInvestmentGasLimit(
+  provider: Eip1193Provider,
+  tx: {
+    from: string;
+    to: string;
+    data: string;
+    value: string;
+  },
+): Promise<string> {
+  const txRequest = {
+    from: tx.from,
+    to: tx.to,
+    data: tx.data,
+    value: tx.value,
+  };
+
+  try {
+    const estimated = await provider.request({
+      method: "eth_estimateGas",
+      params: [txRequest],
+    });
+
+    const estimatedGas = parseHexToBigInt(estimated);
+    if (estimatedGas && estimatedGas > 0n) {
+      return toSafeGasHex(estimatedGas);
+    }
+  } catch (error) {
+    console.warn(
+      "[Investment] Failed to estimate gas via wallet provider. Falling back to safe default gas limit.",
+      error,
+    );
+  }
+
+  const safeFallback =
+    INVESTMENT_FALLBACK_GAS_LIMIT > WEB3AUTH_TX_GAS_CAP
+      ? WEB3AUTH_TX_GAS_CAP
+      : INVESTMENT_FALLBACK_GAS_LIMIT;
+  return toHexValue(safeFallback.toString());
+}
+
 async function sendInvestmentTransactionWithRetry(
   provider: Eip1193Provider,
   tx: {
@@ -150,6 +211,7 @@ async function sendInvestmentTransactionWithRetry(
   maxRetries = 4,
 ): Promise<string> {
   let lastError: unknown;
+  const gas = await estimateInvestmentGasLimit(provider, tx);
 
   for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
     try {
@@ -161,6 +223,7 @@ async function sendInvestmentTransactionWithRetry(
             to: tx.to,
             data: tx.data,
             value: tx.value,
+            gas,
           },
         ],
       })) as string;

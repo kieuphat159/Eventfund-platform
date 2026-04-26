@@ -16,6 +16,7 @@ import { Label } from "../../components/ui/label";
 import { StatusBadge } from "../../components/StatusBadge";
 import {
   cancelEventWithWalletFallback,
+  completeEventWithWalletFallback,
   getEventById,
   updateEvent,
   type EventItem,
@@ -292,6 +293,16 @@ export const EditEvent: React.FC = () => {
         return;
       }
 
+      if (
+        status === "completed" &&
+        currentStatus !== "completed" &&
+        !window.confirm(
+          'Bạn có chắc muốn hoàn tất sự kiện này không?\n\nHệ thống sẽ cần ký ví organizer để gọi on-chain completion và release revenue.',
+        )
+      ) {
+        return;
+      }
+
       setSubmitting(true);
       const updatePayload = {
         title: title.trim(),
@@ -320,6 +331,16 @@ export const EditEvent: React.FC = () => {
         }
       }
 
+      if (status === "completed" && currentStatus !== "completed") {
+        if (!web3Auth?.provider) {
+          await connectWallet();
+          setError(
+            "Ví đã được kết nối. Vui lòng bấm cập nhật lại một lần nữa để ký giao dịch hoàn tất sự kiện và chia doanh thu bằng ví organizer.",
+          );
+          return;
+        }
+      }
+
       const updated =
         status === "cancelled" && currentStatus !== "cancelled"
           ? await cancelEventWithWalletFallback(
@@ -336,6 +357,21 @@ export const EditEvent: React.FC = () => {
               user?.walletAddress,
               user?.smartAccountAddress,
             )
+          : status === "completed" && currentStatus !== "completed"
+            ? await completeEventWithWalletFallback(
+                web3Auth?.provider as
+                  | {
+                      request: (args: {
+                        method: string;
+                        params?: unknown[];
+                      }) => Promise<unknown>;
+                    }
+                  | undefined,
+                id,
+                updatePayload,
+                user?.walletAddress,
+                user?.smartAccountAddress,
+              )
           : await updateEvent(id, updatePayload);
 
       if (!updated) {
@@ -543,6 +579,12 @@ export const EditEvent: React.FC = () => {
                 Event sẽ được gửi theo flow hủy hiện có của backend. Nếu event
                 đang ở `ticketing`, hệ thống sẽ xử lý theo nhánh hủy ticketing
                 tương ứng.
+              </div>
+            )}
+            {status === "completed" && currentStatus !== "completed" && (
+              <div className="mt-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+                Khi hoàn tất event, organizer wallet sẽ ký 2 giao dịch on-chain:
+                đánh dấu `completed` và `release revenue` để hệ thống chia tiền.
               </div>
             )}
           </div>
