@@ -47,12 +47,10 @@ function formatWei(value?: string | number) {
 }
 
 function buildTicketQrPayload(ticket: ApiTicket, eventId: string) {
-  return JSON.stringify({
-    type: "eventfund-ticket",
-    tokenId: String(ticket.tokenId),
-    walletAddress: ticket.currentOwner?.toLowerCase(),
-    eventId,
-  });
+  const tokenId = String(ticket.tokenId).trim();
+  const normalizedEventId = eventId.trim();
+
+  return `eft1:${tokenId}:${normalizedEventId}`;
 }
 
 function getTicketQrCanvasId(ticket: ApiTicket) {
@@ -580,7 +578,10 @@ export const MyEvents: React.FC = () => {
                         selectedQrTicket,
                         ticketDialogEvent._id,
                       )}
-                      size={220}
+                      size={280}
+                      level="L"
+                      bgColor="#ffffff"
+                      fgColor="#111111"
                       includeMargin
                     />
                   </div>

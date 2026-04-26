@@ -42,6 +42,34 @@ function toTokenIdString(value) {
   return typeof value === 'bigint' ? value.toString() : String(value);
 }
 
+function normalizeWalletAddress(value) {
+  return value ? String(value).toLowerCase() : '';
+}
+
+async function getOnChainTicketSnapshot(tokenId, event = null) {
+  const ticketContract = getTicket();
+  const chainTokenId = BigInt(tokenId);
+
+  const [owner, chainStatus, chainEventId] = await Promise.all([
+    ticketContract.ownerOf(chainTokenId),
+    ticketContract.getTicketStatus(chainTokenId),
+    ticketContract.getEventId(chainTokenId),
+  ]);
+
+  if (
+    event?.contractEventId &&
+    String(chainEventId) !== String(event.contractEventId)
+  ) {
+    throw new BadRequestError('Ticket does not belong to this on-chain event');
+  }
+
+  return {
+    owner: normalizeWalletAddress(owner),
+    status: chainStatus,
+    eventId: String(chainEventId),
+  };
+}
+
 function validateTransactionHash(txHash) {
   if (!txHash || !ethers.isHexString(txHash, 32)) {
     throw new BadRequestError('Invalid transaction hash');
@@ -626,6 +654,13 @@ export async function markTicketAsUsed(tokenId, verifierWallet, repos = {}) {
     throw new BadRequestError('Current time must be within event dates');
   }
 
+  if (event.contractEventId) {
+    const chainSnapshot = await getOnChainTicketSnapshot(ticket.tokenId, event);
+    if (chainSnapshot.status !== ONCHAIN_TICKET_STATUS.SOLD) {
+      throw new BadRequestError('Ticket is not in sold state on-chain');
+    }
+  }
+
   const usageData = {
     usedAt: now,
     verifiedBy: verifierWallet.toLowerCase(),
@@ -724,10 +759,26 @@ export async function verifyTicket(tokenId, eventId, walletAddress, verifierWall
     throw new BadRequestError('Current time must be within event dates');
   }
 
-  const isOwner = ticket.currentOwner.toLowerCase() === walletAddress.toLowerCase();
+  let resolvedOwner = normalizeWalletAddress(ticket.currentOwner);
+
+  if (event.contractEventId) {
+    const chainSnapshot = await getOnChainTicketSnapshot(ticket.tokenId, event);
+
+    if (chainSnapshot.status !== ONCHAIN_TICKET_STATUS.SOLD) {
+      throw new BadRequestError('Ticket is not in sold state on-chain');
+    }
+
+    resolvedOwner = chainSnapshot.owner;
+  }
+
+  const normalizedWallet = normalizeWalletAddress(walletAddress);
+  const isOwner = normalizedWallet
+    ? resolvedOwner === normalizedWallet
+    : !!resolvedOwner;
 
   return {
     isOwner,
+    ownerWallet: resolvedOwner,
     ticket,
   };
 }

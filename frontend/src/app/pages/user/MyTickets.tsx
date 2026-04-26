@@ -37,12 +37,10 @@ const resolveTicketEventId = (ticket: ApiTicket): string | null => {
 };
 
 const buildQR = (ticket: ApiTicket) => {
-  return JSON.stringify({
-    type: "eventfund-ticket",
-    tokenId: String(ticket.tokenId),
-    walletAddress: ticket.currentOwner?.toLowerCase(),
-    eventId: resolveTicketEventId(ticket) || undefined,
-  });
+  const tokenId = String(ticket.tokenId).trim();
+  const eventId = (resolveTicketEventId(ticket) || "").trim();
+
+  return `eft1:${tokenId}:${eventId}`;
 };
 
 const getTicketQrCanvasId = (ticket: ApiTicket) => {
@@ -343,6 +341,9 @@ export const MyTickets: React.FC = () => {
                       id={getTicketQrCanvasId(ticket)}
                       value={buildQR(ticket)}
                       size={800}
+                      level="L"
+                      bgColor="#ffffff"
+                      fgColor="#111111"
                       includeMargin
                     />
                   </div>
@@ -423,13 +424,20 @@ export const MyTickets: React.FC = () => {
       )}
       {selectedTicket && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-          <div className="bg-slate-900 p-6 rounded-xl border border-slate-700 text-center w-[300px]">
+          <div className="bg-slate-900 p-6 rounded-xl border border-slate-700 text-center w-[380px] max-w-[92vw]">
             <h3 className="text-white mb-4 font-semibold">
               Ticket #{selectedTicket.tokenId}
             </h3>
 
             <div className="flex justify-center items-center">
-              <QRCodeCanvas value={buildQR(selectedTicket)} size={200} />
+              <QRCodeCanvas
+                value={buildQR(selectedTicket)}
+                size={280}
+                level="L"
+                bgColor="#ffffff"
+                fgColor="#111111"
+                includeMargin
+              />
             </div>
 
             <p className="text-slate-400 text-xs mt-3">

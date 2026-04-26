@@ -1,6 +1,7 @@
 import { isValidObjectId } from "mongoose";
 import { ethers } from "ethers";
 import * as eventRepo from "../../repositories/event.repo.js";
+import * as userRepo from "../../repositories/user.repo.js";
 import * as shareRepo from "../../repositories/share.repo.js";
 import {
   addBigInt,
@@ -1132,6 +1133,21 @@ export async function assignVerifier(eventId, verifier, user) {
   }
 
   const normalizedVerifier = verifier.toLowerCase();
+  const verifierUser = await (userRepo.findByWalletAddress
+    ? userRepo.findByWalletAddress(normalizedVerifier)
+    : null);
+
+  if (!verifierUser) {
+    throw new NotFoundError("Verifier user not found");
+  }
+
+  if (verifierUser.role !== "verifier") {
+    throw new BadRequestError("Selected user must have verifier role");
+  }
+
+  if (verifierUser.isActive === false) {
+    throw new BadRequestError("Selected verifier is inactive");
+  }
 
   if (!event.verifiers) {
     event.verifiers = [];

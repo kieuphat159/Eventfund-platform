@@ -47,6 +47,7 @@ interface ApiEventItem {
   _id: string;
   title?: string;
   startDate?: string;
+  endDate?: string;
   status?: string;
   verifiers?: string[];
   venue?: {
@@ -93,6 +94,8 @@ interface TicketQrPayload {
   walletAddress?: string;
   eventId?: string;
 }
+
+type ScanResult = string | { text?: string | null } | null;
 
 const EMPTY_STATS: EventStats = {
   totalTickets: 0,
@@ -143,12 +146,63 @@ function parseTicketQrPayload(rawValue: string): TicketQrPayload {
     // Fallback for legacy QR formats.
   }
 
+  const compactParts = trimmed.split(":");
+  if (compactParts[0]?.toLowerCase() === "eft1" && compactParts.length >= 3) {
+    return {
+      tokenId: decodeURIComponent(compactParts[1] || "").trim(),
+      eventId: decodeURIComponent(compactParts[2] || "").trim() || undefined,
+      walletAddress:
+        compactParts.length >= 4
+          ? decodeURIComponent(compactParts.slice(3).join(":") || "").trim() || undefined
+          : undefined,
+    };
+  }
+
   const legacyMatch = trimmed.match(/\/tickets\/verify\/([^/?#]+)/i);
   if (legacyMatch?.[1]) {
     return { tokenId: decodeURIComponent(legacyMatch[1]) };
   }
 
   return { tokenId: trimmed };
+}
+
+function getEventCheckInState(event?: ApiEventItem | null): {
+  ready: boolean;
+  label: string;
+} {
+  if (!event) {
+    return { ready: false, label: "Select an event to start check-in" };
+  }
+
+  if (event.status !== "ongoing") {
+    return {
+      ready: false,
+      label: `Check-in opens when the event status becomes ongoing. Current status: ${event.status || "unknown"}.`,
+    };
+  }
+
+  const now = Date.now();
+  const startTime = event.startDate ? new Date(event.startDate).getTime() : null;
+  const endTime = event.endDate ? new Date(event.endDate).getTime() : null;
+
+  if (startTime && Number.isFinite(startTime) && now < startTime) {
+    return {
+      ready: false,
+      label: "This event has not started yet.",
+    };
+  }
+
+  if (endTime && Number.isFinite(endTime) && now > endTime) {
+    return {
+      ready: false,
+      label: "This event has already ended.",
+    };
+  }
+
+  return {
+    ready: true,
+    label: "Check-in is open for this event.",
+  };
 }
 
 export const VerifierDashboard: React.FC = () => {
@@ -171,6 +225,11 @@ export const VerifierDashboard: React.FC = () => {
   const selectedEventData = useMemo(
     () => events.find((event) => event._id === selectedEvent),
     [events, selectedEvent],
+  );
+
+  const eventCheckInState = useMemo(
+    () => getEventCheckInState(selectedEventData),
+    [selectedEventData],
   );
 
   const checkInRecords = useMemo(() => {
@@ -307,21 +366,24 @@ export const VerifierDashboard: React.FC = () => {
 
   const stats = [
     {
-      title: "Total Check-Ins",
+      title: "Checked In",
       value: eventStats.usedTickets.toString(),
       icon: Users,
       bgColor: "bg-blue-500/10",
       textColor: "text-blue-400",
     },
     {
-      title: "Valid Tickets",
-      value: eventStats.usedTickets.toString(),
+      title: "Remaining Valid",
+      value: Math.max(
+        eventStats.soldTickets - eventStats.usedTickets,
+        0,
+      ).toString(),
       icon: CheckCircle,
       bgColor: "bg-green-500/10",
       textColor: "text-green-400",
     },
     {
-      title: "Duplicates",
+      title: "Session Duplicates",
       value: manualRecords
         .filter((record) => record.status === "duplicate")
         .length.toString(),
@@ -330,7 +392,7 @@ export const VerifierDashboard: React.FC = () => {
       textColor: "text-yellow-400",
     },
     {
-      title: "Invalid Tickets",
+      title: "Session Invalid",
       value: manualRecords
         .filter((record) => record.status === "invalid")
         .length.toString(),
@@ -349,6 +411,11 @@ export const VerifierDashboard: React.FC = () => {
       const normalizedTokenId = tokenId.trim();
 
       if (!normalizedTokenId || !selectedEvent) {
+        return;
+      }
+
+      if (!eventCheckInState.ready) {
+        setActionError(eventCheckInState.label);
         return;
       }
 
@@ -399,15 +466,10 @@ export const VerifierDashboard: React.FC = () => {
           return;
         }
 
-        const ownerWallet = walletAddressFromQr?.trim() || ticket.currentOwner;
-        if (!ownerWallet) {
-          throw new Error("QR code does not include ticket owner information");
-        }
-
         const verification = await verifyTicket({
           tokenId: normalizedTokenId,
           eventId: selectedEvent,
-          walletAddress: ownerWallet,
+          walletAddress: walletAddressFromQr?.trim() || undefined,
         });
 
         if (!verification?.isOwner) {
@@ -436,7 +498,7 @@ export const VerifierDashboard: React.FC = () => {
         setIsSubmitting(false);
       }
     },
-    [createManualRecord, loadSelectedEventData, selectedEvent],
+    [createManualRecord, eventCheckInState, loadSelectedEventData, selectedEvent],
   );
 
   const handleScanTicket = () => {
@@ -452,10 +514,17 @@ export const VerifierDashboard: React.FC = () => {
   };
 
   const handleQRScan = useCallback(
-    async (data: string | null) => {
-      if (!data || isSubmitting) return;
+    async (data: ScanResult) => {
+      const rawValue =
+        typeof data === "string"
+          ? data
+          : typeof data?.text === "string"
+            ? data.text
+            : null;
 
-      const trimmedData = data.trim();
+      if (!rawValue || isSubmitting) return;
+
+      const trimmedData = rawValue.trim();
       if (!trimmedData || trimmedData === lastScannedValue) {
         return;
       }
@@ -592,7 +661,7 @@ export const VerifierDashboard: React.FC = () => {
                 <Button
                   onClick={handleScanTicket}
                   className="h-32 w-full text-lg"
-                  disabled={!selectedEvent || isSubmitting}
+                  disabled={!selectedEvent || isSubmitting || !eventCheckInState.ready}
                 >
                   <QrCode className="mr-3 h-8 w-8" />
                   {isSubmitting ? "Processing..." : "Scan QR Code"}
@@ -624,11 +693,17 @@ export const VerifierDashboard: React.FC = () => {
                   <Button
                     onClick={handleManualCheckIn}
                     variant="outline"
-                    disabled={!selectedEvent || isSubmitting}
+                    disabled={!selectedEvent || isSubmitting || !eventCheckInState.ready}
                   >
                     Check In
                   </Button>
                 </div>
+
+                {!eventCheckInState.ready && (
+                  <div className="rounded-lg border border-yellow-700 bg-yellow-500/10 p-3 text-sm text-yellow-300">
+                    {eventCheckInState.label}
+                  </div>
+                )}
               </CardContent>
             </Card>
 
@@ -641,6 +716,12 @@ export const VerifierDashboard: React.FC = () => {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Status</span>
+                    <span className="font-medium capitalize text-white">
+                      {selectedEventData?.status || "unknown"}
+                    </span>
+                  </div>
                   <div className="flex items-center justify-between">
                     <span className="text-slate-400">Event Name</span>
                     <span className="font-medium text-white">
@@ -669,6 +750,12 @@ export const VerifierDashboard: React.FC = () => {
                       {selectedEventData?.totalTickets ||
                         eventStats.totalTickets ||
                         "N/A"}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Sold Tickets</span>
+                    <span className="font-medium text-white">
+                      {eventStats.soldTickets}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
@@ -790,10 +877,13 @@ export const VerifierDashboard: React.FC = () => {
         <Card className="border-slate-800 bg-slate-900">
           <CardContent className="p-12 text-center">
             <Calendar className="mx-auto mb-4 h-16 w-16 text-slate-600" />
-            <h3 className="mb-2 text-xl font-bold text-white">Select an Event</h3>
+            <h3 className="mb-2 text-xl font-bold text-white">
+              {events.length > 0 ? "Select an Event" : "No Managed Event Yet"}
+            </h3>
             <p className="mx-auto max-w-md text-slate-400">
-              Choose an event from the dropdown above to start managing
-              check-ins and scanning tickets
+              {events.length > 0
+                ? "Choose an event from the dropdown above to start managing check-ins and scanning tickets"
+                : "This account has not been assigned to any event yet, so there is nothing to scan right now."}
             </p>
           </CardContent>
         </Card>
@@ -810,11 +900,11 @@ export const VerifierDashboard: React.FC = () => {
           <div className="space-y-4">
             <div className="overflow-hidden rounded-lg border border-slate-700 bg-slate-800">
               <QrReader
-                delay={300}
+                delay={150}
                 facingMode="rear"
                 onError={handleScannerError}
                 onScan={handleQRScan}
-                style={{ width: "100%" }}
+                style={{ width: "100%", minHeight: 320, objectFit: "cover" }}
               />
             </div>
 

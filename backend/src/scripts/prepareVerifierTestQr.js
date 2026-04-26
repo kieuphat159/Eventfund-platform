@@ -13,12 +13,7 @@ function normalizeWallet(value) {
 }
 
 function buildVerifierQrPayload(ticket, eventId) {
-  return {
-    type: "eventfund-ticket",
-    tokenId: String(ticket.tokenId),
-    walletAddress: normalizeWallet(ticket.currentOwner),
-    eventId: String(eventId),
-  };
+  return `eft1:${String(ticket.tokenId).trim()}:${String(eventId).trim()}`;
 }
 
 function createFarFutureDate() {
@@ -197,8 +192,7 @@ async function run() {
       verifier.walletAddress,
     );
 
-    const payload = buildVerifierQrPayload(ticket, event._id);
-    const payloadString = JSON.stringify(payload);
+    const payloadString = buildVerifierQrPayload(ticket, event._id);
     const { svgPath, jsonPath } = await writeQrFiles(
       ticket.tokenId,
       payloadString,

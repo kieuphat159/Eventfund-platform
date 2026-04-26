@@ -48,6 +48,7 @@ interface VerifyTicketResponse {
   success: boolean;
   data?: {
     isOwner: boolean;
+    ownerWallet?: string;
     ticket?: ApiTicket;
   };
   message?: string;
@@ -109,7 +110,7 @@ export interface EventTicketStats {
 export interface VerifyTicketPayload {
   tokenId: string;
   eventId: string;
-  walletAddress: string;
+  walletAddress?: string;
 }
 
 export interface VerifyTicketResult {

@@ -13,12 +13,20 @@ import {
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
-import { Input } from '../../components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../../components/ui/select';
 import { StatusBadge } from '../../components/StatusBadge';
 import {
   assignEventVerifier,
   getAdminEventById,
   getAdminEventInvestments,
+  getVerifierUsers,
+  type AdminUserItem,
   type AdminEventInvestmentsData,
   type EventItem,
 } from '../../services/events.service';
@@ -31,9 +39,11 @@ export const AdminEventDetail: React.FC = () => {
   const { id } = useParams();
   const [event, setEvent] = useState<EventItem | null>(null);
   const [investmentData, setInvestmentData] = useState<AdminEventInvestmentsData | null>(null);
+  const [verifierUsers, setVerifierUsers] = useState<AdminUserItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [verifierWallet, setVerifierWallet] = useState('');
+  const [loadingVerifiers, setLoadingVerifiers] = useState(false);
   const [assigningVerifier, setAssigningVerifier] = useState(false);
   const [assignError, setAssignError] = useState('');
   const [assignSuccess, setAssignSuccess] = useState('');
@@ -48,11 +58,13 @@ export const AdminEventDetail: React.FC = () => {
 
       try {
         setLoading(true);
+        setLoadingVerifiers(true);
         setError('');
 
-        const [eventData, investments] = await Promise.all([
+        const [eventData, investments, verifierOptions] = await Promise.all([
           getAdminEventById(id),
           getAdminEventInvestments(id, { limit: 10, sort: '-contributionAmount' }),
+          getVerifierUsers(),
         ]);
 
         if (!eventData) {
@@ -62,10 +74,12 @@ export const AdminEventDetail: React.FC = () => {
 
         setEvent(eventData);
         setInvestmentData(investments);
+        setVerifierUsers(verifierOptions.filter((item) => item.isActive !== false));
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load event details');
       } finally {
         setLoading(false);
+        setLoadingVerifiers(false);
       }
     };
 
@@ -79,6 +93,49 @@ export const AdminEventDetail: React.FC = () => {
     );
   }, [event?.currentFunding, event?.fundingGoal]);
 
+  const assignedVerifiers = useMemo(
+    () => new Set((event?.verifiers || []).map((wallet) => wallet.toLowerCase())),
+    [event?.verifiers],
+  );
+
+  const availableVerifierUsers = useMemo(
+    () =>
+      verifierUsers.filter(
+        (verifier) => !assignedVerifiers.has(verifier.walletAddress.toLowerCase()),
+      ),
+    [assignedVerifiers, verifierUsers],
+  );
+
+  const verifierMap = useMemo(
+    () =>
+      new Map(
+        verifierUsers.map((verifier) => [
+          verifier.walletAddress.toLowerCase(),
+          verifier,
+        ]),
+      ),
+    [verifierUsers],
+  );
+
+  const formatVerifierOption = (verifier: AdminUserItem) => {
+    const identity = verifier.username || verifier.email || 'Unnamed verifier';
+    return `${identity} - ${verifier.walletAddress}`;
+  };
+
+  useEffect(() => {
+    if (!verifierWallet && availableVerifierUsers.length > 0) {
+      setVerifierWallet(availableVerifierUsers[0].walletAddress.toLowerCase());
+    } else if (
+      verifierWallet &&
+      !availableVerifierUsers.some(
+        (verifier) =>
+          verifier.walletAddress.toLowerCase() === verifierWallet.toLowerCase(),
+      )
+    ) {
+      setVerifierWallet(availableVerifierUsers[0]?.walletAddress.toLowerCase() || '');
+    }
+  }, [availableVerifierUsers, verifierWallet]);
+
   const handleAssignVerifier = async () => {
     const eventId = event?._id || event?.id;
     if (!eventId) {
@@ -87,8 +144,8 @@ export const AdminEventDetail: React.FC = () => {
     }
 
     const normalizedWallet = verifierWallet.trim().toLowerCase();
-    if (!/^0x[a-f0-9]{40}$/.test(normalizedWallet)) {
-      setAssignError('Verifier wallet must be a valid Ethereum address.');
+    if (!normalizedWallet) {
+      setAssignError('Please select a verifier.');
       return;
     }
 
@@ -371,21 +428,43 @@ export const AdminEventDetail: React.FC = () => {
         <CardHeader>
           <CardTitle className="text-white">Verifier Assignment</CardTitle>
           <CardDescription className="text-slate-400">
-            Admin can assign verifier wallet addresses for this event
+            Choose from active accounts that already have verifier role
           </CardDescription>
         </CardHeader>
 
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_auto]">
-            <Input
+            <Select
               value={verifierWallet}
-              onChange={(e) => setVerifierWallet(e.target.value)}
-              placeholder="0x... verifier wallet"
-              className="bg-slate-800 border-slate-700 text-white"
-            />
+              onValueChange={setVerifierWallet}
+              disabled={loadingVerifiers || availableVerifierUsers.length === 0}
+            >
+              <SelectTrigger className="bg-slate-800 border-slate-700 text-white">
+                <SelectValue
+                  placeholder={
+                    loadingVerifiers
+                      ? 'Loading verifier accounts...'
+                      : availableVerifierUsers.length > 0
+                        ? 'Select verifier account'
+                        : 'No unassigned verifier account available'
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent className="bg-slate-800 border-slate-700">
+                {availableVerifierUsers.map((verifier) => (
+                  <SelectItem
+                    key={verifier.walletAddress}
+                    value={verifier.walletAddress.toLowerCase()}
+                    className="text-white hover:bg-slate-700"
+                  >
+                    {formatVerifierOption(verifier)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <Button
               onClick={handleAssignVerifier}
-              disabled={assigningVerifier}
+              disabled={assigningVerifier || !verifierWallet}
               className="bg-blue-600 hover:bg-blue-700 text-white"
             >
               {assigningVerifier ? 'Assigning...' : 'Assign Verifier'}
@@ -400,14 +479,20 @@ export const AdminEventDetail: React.FC = () => {
 
             {Array.isArray(event.verifiers) && event.verifiers.length > 0 ? (
               <div className="space-y-2">
-                {event.verifiers.map((wallet) => (
-                  <div
-                    key={wallet}
-                    className="rounded-md bg-slate-900/70 px-3 py-2 text-sm text-slate-300 break-all"
-                  >
-                    {wallet}
-                  </div>
-                ))}
+                {event.verifiers.map((wallet) => {
+                  const verifier = verifierMap.get(wallet.toLowerCase());
+                  return (
+                    <div
+                      key={wallet}
+                      className="rounded-md bg-slate-900/70 px-3 py-2 text-sm text-slate-300"
+                    >
+                      <p className="font-medium text-white">
+                        {verifier?.username || verifier?.email || 'Verifier account'}
+                      </p>
+                      <p className="mt-1 break-all text-xs text-slate-400">{wallet}</p>
+                    </div>
+                  );
+                })}
               </div>
             ) : (
               <p className="text-sm text-slate-500">No verifier assigned yet.</p>

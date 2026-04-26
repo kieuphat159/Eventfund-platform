@@ -83,6 +83,24 @@ export interface EventDetailResponse {
   message?: string;
 }
 
+export interface AdminUserItem {
+  _id?: string;
+  walletAddress: string;
+  username?: string;
+  email?: string;
+  role?: "user" | "organizer" | "verifier" | "admin";
+  isActive?: boolean;
+  createdAt?: string;
+}
+
+interface AdminUsersResponse {
+  success: boolean;
+  data?: {
+    docs?: AdminUserItem[];
+  };
+  message?: string;
+}
+
 export interface CreateEventPayload {
   title: string;
   description: string;
@@ -810,6 +828,19 @@ export async function assignEventVerifier(
   );
 
   return response.data || null;
+}
+
+export async function getVerifierUsers(): Promise<AdminUserItem[]> {
+  const response = await api.get<AdminUsersResponse>(
+    "/admin/users?role=verifier&limit=100",
+  );
+
+  const docs = response.data?.docs || [];
+  return docs.sort((a, b) => {
+    const left = (a.username || a.email || a.walletAddress || "").toLowerCase();
+    const right = (b.username || b.email || b.walletAddress || "").toLowerCase();
+    return left.localeCompare(right);
+  });
 }
 
 export async function getEventStats(eventId: string) {
