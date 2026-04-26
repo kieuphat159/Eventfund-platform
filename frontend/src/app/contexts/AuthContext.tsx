@@ -137,13 +137,13 @@ const connectWallet = useCallback(async () => {
   setIsLoading(true);
   setError(null);
 
-  // Bắt đầu watch trước khi mở modal
+  // Start watching before opening the modal
   const stopWatching = watchAndCleanWeb3AuthModal();
 
   try {
     await connect();
 
-    // connect() resolve → force close ngay lập tức
+    // connect() resolves → force close immediately
     forceCloseWeb3AuthModal();
     stopWatching();
 
@@ -162,7 +162,7 @@ const connectWallet = useCallback(async () => {
     await loginToBackend(idToken, smartAccountAddress, eoaAddress);
     await refreshProfile();
   } catch (err: any) {
-    forceCloseWeb3AuthModal(); // cleanup cả khi lỗi
+    forceCloseWeb3AuthModal(); // cleanup even on error
     stopWatching();
     setError(err.message || "Login failed");
     clearAuth();

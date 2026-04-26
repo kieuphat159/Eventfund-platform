@@ -71,7 +71,7 @@ export const MyEvents: React.FC = () => {
     if (!eventId) return;
 
     const ok = window.confirm(
-      `Bạn có chắc muốn xoá sự kiện "${event.title || "Untitled event"}" không?\n\nChỉ nên xoá draft vì backend đang giới hạn xoá draft only.`,
+      `Are you sure you want to delete the event "${event.title || "Untitled event"}"?\n\nOnly delete drafts because the backend currently restricts deletion to drafts.`,
     );
     if (!ok) return;
 
@@ -81,7 +81,7 @@ export const MyEvents: React.FC = () => {
       setEvents((prev) => prev.filter((e) => (e._id || e.id) !== eventId));
     } catch (err: any) {
       alert(
-        err?.response?.data?.message || err?.message || "Xoá sự kiện thất bại",
+        err?.response?.data?.message || err?.message || "Failed to delete event",
       );
     } finally {
       setDeletingId("");
@@ -93,7 +93,7 @@ export const MyEvents: React.FC = () => {
     if (!eventId) return;
 
     const ok = window.confirm(
-      `Bạn có chắc muốn hủy sự kiện "${event.title || "Untitled event"}" không?\n\nEvent sẽ được chuyển sang trạng thái cancelled theo flow backend hiện tại.`,
+      `Are you sure you want to cancel the event "${event.title || "Untitled event"}"?\n\nThe event will be moved to the cancelled state according to the backend flow.`,
     );
     if (!ok) return;
 
@@ -102,7 +102,7 @@ export const MyEvents: React.FC = () => {
       if (!web3Auth?.provider) {
         await connectWallet();
         alert(
-          "Ví đã được kết nối. Vui lòng bấm Cancel Event thêm một lần nữa để ký giao dịch hủy bằng ví organizer.",
+          "Wallet connected. Please press Cancel Event again to sign the cancellation transaction with the organizer wallet.",
         );
         return;
       }
@@ -122,7 +122,7 @@ export const MyEvents: React.FC = () => {
         user?.smartAccountAddress,
       );
       if (!updated) {
-        throw new Error("Không thể hủy sự kiện");
+        throw new Error("Unable to cancel the event");
       }
 
       setEvents((prev) =>
@@ -132,7 +132,7 @@ export const MyEvents: React.FC = () => {
       alert(
         err?.response?.data?.message ||
           err?.message ||
-          "Hủy sự kiện thất bại",
+          "Failed to cancel event",
       );
     } finally {
       setCancellingId("");

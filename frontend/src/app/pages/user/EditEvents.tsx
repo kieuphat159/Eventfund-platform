@@ -105,7 +105,7 @@ export const EditEvent: React.FC = () => {
     const fetchEvent = async () => {
       try {
         if (!id) {
-          setError("Không tìm thấy event id");
+          setError("Event ID not found");
           return;
         }
 
@@ -115,7 +115,7 @@ export const EditEvent: React.FC = () => {
         const data = await getEventById(id);
 
         if (!data) {
-          setError("Không tìm thấy sự kiện");
+          setError("Event not found");
           return;
         }
 
@@ -147,7 +147,7 @@ export const EditEvent: React.FC = () => {
         setError(
           err?.response?.data?.message ||
             err?.message ||
-            "Không tải được dữ liệu sự kiện",
+            "Failed to load event data",
         );
       } finally {
         setLoading(false);
@@ -201,32 +201,32 @@ export const EditEvent: React.FC = () => {
       setSuccess("");
 
       if (!id) {
-        setError("Thiếu event id");
+        setError("Missing event id");
         return;
       }
 
       if (!title.trim()) {
-        setError("Vui lòng nhập tên sự kiện");
+        setError("Please enter event title");
         return;
       }
 
       if (!description.trim()) {
-        setError("Vui lòng nhập mô tả sự kiện");
+        setError("Please enter event description");
         return;
       }
 
       if (!date || !time) {
-        setError("Vui lòng chọn ngày và giờ sự kiện");
+        setError("Please select event date and time");
         return;
       }
 
       if (!location.trim()) {
-        setError("Vui lòng nhập địa điểm");
+        setError("Please enter the location");
         return;
       }
 
       if (!category) {
-        setError("Vui lòng chọn danh mục");
+        setError("Please select a category");
         return;
       }
 
@@ -241,7 +241,7 @@ export const EditEvent: React.FC = () => {
       }));
 
       if (!normalizedTiers.length) {
-        setError("Vui lòng tạo ít nhất 1 hạng vé hợp lệ");
+        setError("Please create at least one valid ticket tier");
         return;
       }
 
@@ -254,7 +254,7 @@ export const EditEvent: React.FC = () => {
       );
 
       if (hasInvalidTier) {
-        setError("Giá vé (wei) hoặc số lượng vé không hợp lệ");
+        setError("Ticket price (wei) or ticket quantity is invalid");
         return;
       }
 

@@ -1,7 +1,7 @@
 let observer: MutationObserver | null = null;
 
 export function watchAndCleanWeb3AuthModal() {
-  // Web3Auth v10 mount modal vào #w3a-modal hoặc #w3a-container
+  // Web3Auth v10 mounts modal into #w3a-modal or #w3a-container
   const selectors = ["#w3a-modal", "#w3a-container", "[id^='w3a-']"];
 
   const cleanup = () => {
@@ -9,7 +9,7 @@ export function watchAndCleanWeb3AuthModal() {
       document.querySelectorAll(sel).forEach((el) => el.remove());
     });
 
-    // Xóa overflow:hidden mà Web3Auth set trên body khi mở modal
+    // Remove overflow:hidden that Web3Auth sets on body when modal opens
     document.body.style.overflow = "";
     document.body.style.removeProperty("overflow");
     document.documentElement.style.removeProperty("overflow");
@@ -24,7 +24,7 @@ export function watchAndCleanWeb3AuthModal() {
     const modalRoot = document.querySelector("#w3a-modal");
     if (!modalRoot) return;
 
-    // Nếu modal root tồn tại nhưng rỗng (màn trắng) → cleanup
+    // If modal root exists but is empty (blank screen) → cleanup
     const isEmpty =
       !modalRoot.hasChildNodes() ||
       (modalRoot as HTMLElement).innerHTML.trim() === "";
@@ -39,7 +39,7 @@ export function watchAndCleanWeb3AuthModal() {
     subtree: true,
   });
 
-  // Safety timeout: nếu sau 30s modal vẫn còn → force remove
+  // Safety timeout: if modal still present after 30s → force remove
   const safetyTimer = setTimeout(cleanup, 30_000);
 
   return () => {
