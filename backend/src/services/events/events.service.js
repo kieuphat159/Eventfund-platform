@@ -734,6 +734,10 @@ export async function createCreateEventIntent(eventData, user, uploadedFiles = [
     organizerStake,
     fundingDeadlineDate,
   } = resolveFundingConfig(eventData);
+
+  const { ticketingStartAt, ticketingEndAt } = resolveTicketingTimeline(
+    eventData,
+  );
   if (investmentEnabled && !fundingDeadlineDate) {
     throw new BadRequestError(
       "Funding goal and funding deadline are required for on-chain event creation",
