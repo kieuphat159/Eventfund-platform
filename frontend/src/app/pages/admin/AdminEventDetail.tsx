@@ -13,8 +13,10 @@ import {
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
+import { Input } from '../../components/ui/input';
 import { StatusBadge } from '../../components/StatusBadge';
 import {
+  assignEventVerifier,
   getAdminEventById,
   getAdminEventInvestments,
   type AdminEventInvestmentsData,
@@ -31,6 +33,10 @@ export const AdminEventDetail: React.FC = () => {
   const [investmentData, setInvestmentData] = useState<AdminEventInvestmentsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [verifierWallet, setVerifierWallet] = useState('');
+  const [assigningVerifier, setAssigningVerifier] = useState(false);
+  const [assignError, setAssignError] = useState('');
+  const [assignSuccess, setAssignSuccess] = useState('');
 
   useEffect(() => {
     const fetchEvent = async () => {
@@ -72,6 +78,39 @@ export const AdminEventDetail: React.FC = () => {
       100,
     );
   }, [event?.currentFunding, event?.fundingGoal]);
+
+  const handleAssignVerifier = async () => {
+    const eventId = event?._id || event?.id;
+    if (!eventId) {
+      setAssignError('Invalid event id.');
+      return;
+    }
+
+    const normalizedWallet = verifierWallet.trim().toLowerCase();
+    if (!/^0x[a-f0-9]{40}$/.test(normalizedWallet)) {
+      setAssignError('Verifier wallet must be a valid Ethereum address.');
+      return;
+    }
+
+    try {
+      setAssigningVerifier(true);
+      setAssignError('');
+      setAssignSuccess('');
+
+      const updatedEvent = await assignEventVerifier(eventId, normalizedWallet);
+      if (!updatedEvent) {
+        throw new Error('Assign verifier returned no data.');
+      }
+
+      setEvent(updatedEvent);
+      setVerifierWallet('');
+      setAssignSuccess('Verifier assigned successfully.');
+    } catch (err) {
+      setAssignError(err instanceof Error ? err.message : 'Failed to assign verifier.');
+    } finally {
+      setAssigningVerifier(false);
+    }
+  };
 
   if (loading) {
     return <div className="text-white">Loading event details...</div>;
@@ -325,6 +364,55 @@ export const AdminEventDetail: React.FC = () => {
               ))}
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      <Card className="bg-slate-900 border-slate-800">
+        <CardHeader>
+          <CardTitle className="text-white">Verifier Assignment</CardTitle>
+          <CardDescription className="text-slate-400">
+            Admin can assign verifier wallet addresses for this event
+          </CardDescription>
+        </CardHeader>
+
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_auto]">
+            <Input
+              value={verifierWallet}
+              onChange={(e) => setVerifierWallet(e.target.value)}
+              placeholder="0x... verifier wallet"
+              className="bg-slate-800 border-slate-700 text-white"
+            />
+            <Button
+              onClick={handleAssignVerifier}
+              disabled={assigningVerifier}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              {assigningVerifier ? 'Assigning...' : 'Assign Verifier'}
+            </Button>
+          </div>
+
+          {assignError && <p className="text-sm text-red-400">{assignError}</p>}
+          {assignSuccess && <p className="text-sm text-emerald-400">{assignSuccess}</p>}
+
+          <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-4">
+            <p className="mb-3 text-sm font-medium text-slate-300">Current Verifiers</p>
+
+            {Array.isArray(event.verifiers) && event.verifiers.length > 0 ? (
+              <div className="space-y-2">
+                {event.verifiers.map((wallet) => (
+                  <div
+                    key={wallet}
+                    className="rounded-md bg-slate-900/70 px-3 py-2 text-sm text-slate-300 break-all"
+                  >
+                    {wallet}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-slate-500">No verifier assigned yet.</p>
+            )}
+          </div>
         </CardContent>
       </Card>
     </div>

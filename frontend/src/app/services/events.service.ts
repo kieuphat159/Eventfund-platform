@@ -800,6 +800,18 @@ export async function deleteEvent(eventId: string): Promise<boolean> {
   return true;
 }
 
+export async function assignEventVerifier(
+  eventId: string,
+  verifierWallet: string,
+): Promise<EventItem | null> {
+  const response = await api.post<CreateEventResponse>(
+    `/events/${eventId}/assign-verifier`,
+    { verifier: verifierWallet },
+  );
+
+  return response.data || null;
+}
+
 export async function getEventStats(eventId: string) {
   return api.get(`/events/${eventId}/stats`);
 }
