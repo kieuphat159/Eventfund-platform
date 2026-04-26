@@ -600,7 +600,7 @@ export const EventDetail: React.FC = () => {
                     onChange={(e) =>
                       setInvestmentAmount(e.target.value.replace(/[^0-9]/g, ""))
                     }
-                    className="w-full border-slate-700 bg-slate-900"
+                    className="w-full border-slate-700 bg-slate-900 text-white"
                     placeholder="1000000000000000000"
                   />
 
