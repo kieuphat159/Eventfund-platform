@@ -44,6 +44,15 @@ interface TicketDetailResponse {
   message?: string;
 }
 
+interface VerifyTicketResponse {
+  success: boolean;
+  data?: {
+    isOwner: boolean;
+    ticket?: ApiTicket;
+  };
+  message?: string;
+}
+
 export interface PurchaseIntentPayload {
   eventId?: string;
   tokenId?: string;
@@ -95,6 +104,17 @@ export interface EventTicketStats {
   usedTickets: number;
   mintedTickets: number;
   availableTickets: number;
+}
+
+export interface VerifyTicketPayload {
+  tokenId: string;
+  eventId: string;
+  walletAddress: string;
+}
+
+export interface VerifyTicketResult {
+  isOwner: boolean;
+  ticket: ApiTicket | null;
 }
 
 interface EventTicketStatsResponse {
@@ -296,6 +316,25 @@ export async function getTicketStats(
   return payload.data || null;
 }
 
+export async function verifyTicket(
+  payload: VerifyTicketPayload,
+): Promise<VerifyTicketResult | null> {
+  const response = await api.post<VerifyTicketResponse>(
+    "/tickets/verify",
+    payload,
+    { headers: getAuthHeaders() },
+  );
+
+  return response.data
+    ? {
+        isOwner: !!response.data.isOwner,
+        ticket: response.data.ticket
+          ? normalizeTicket(response.data.ticket)
+          : null,
+      }
+    : null;
+}
+
 export async function markTicketAsUsed(
   tokenId: string,
   eventId?: string,
@@ -392,6 +431,7 @@ export const ticketsService = {
   getTickets,
   getTicketByTokenId,
   getTicketStats,
+  verifyTicket,
   markTicketAsUsed,
   createPurchaseIntent,
   confirmPurchaseTransaction,

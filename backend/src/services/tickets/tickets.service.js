@@ -694,7 +694,7 @@ export async function getTicketStats(eventId, repos = {}) {
 /**
  * Verify ticket ownership and return ticket details
  */
-export async function verifyTicket(tokenId, walletAddress, verifierWallet, repos = {}) {
+export async function verifyTicket(tokenId, eventId, walletAddress, verifierWallet, repos = {}) {
   const ticketRepository = repos.ticketRepo || ticketRepo;
   const eventRepository = repos.eventRepo || eventRepo;
 
@@ -702,6 +702,10 @@ export async function verifyTicket(tokenId, walletAddress, verifierWallet, repos
 
   if (!ticket) {
     throw new NotFoundError('Ticket not found');
+  }
+
+  if (eventId && String(ticket.eventId) !== String(eventId)) {
+    throw new BadRequestError('Ticket does not belong to this event');
   }
 
   const event = await eventRepository.findById(ticket.eventId);

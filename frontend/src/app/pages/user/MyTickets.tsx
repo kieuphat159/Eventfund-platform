@@ -27,8 +27,22 @@ import { useWeb3Auth } from "@web3auth/modal/react";
 
 const ETH_ADDRESS_REGEX = /^0x[a-fA-F0-9]{40}$/;
 
+const resolveTicketEventId = (ticket: ApiTicket): string | null => {
+  if (ticket.eventIdRaw) return ticket.eventIdRaw;
+  if (typeof ticket.eventId === "string") return ticket.eventId;
+  if (typeof ticket.eventId === "object" && ticket.eventId?._id) {
+    return ticket.eventId._id;
+  }
+  return null;
+};
+
 const buildQR = (ticket: ApiTicket) => {
-  return `http://localhost:3000/tickets/verify/${ticket.tokenId}`;
+  return JSON.stringify({
+    type: "eventfund-ticket",
+    tokenId: String(ticket.tokenId),
+    walletAddress: ticket.currentOwner?.toLowerCase(),
+    eventId: resolveTicketEventId(ticket) || undefined,
+  });
 };
 
 const getTicketQrCanvasId = (ticket: ApiTicket) => {
@@ -418,7 +432,9 @@ export const MyTickets: React.FC = () => {
               <QRCodeCanvas value={buildQR(selectedTicket)} size={200} />
             </div>
 
-            <p className="text-slate-400 text-xs mt-3">Scan to verify ticket</p>
+            <p className="text-slate-400 text-xs mt-3">
+              Verifier sẽ quét mã này để xác thực vé
+            </p>
 
             <Button
               className="mt-4 w-full"

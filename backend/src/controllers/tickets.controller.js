@@ -69,11 +69,12 @@ class TicketsController {
   });
 
   verifyTicket = asyncHandler(async (req, res) => {
-    const { tokenId, walletAddress } = req.validated?.body || req.body;
+    const { tokenId, eventId, walletAddress } = req.validated?.body || req.body;
 
     // NEW: truyền thêm verifier đang đăng nhập
     const result = await this.ticketsService.verifyTicket(
       tokenId,
+      eventId,
       walletAddress,
       req.user.walletAddress
     );

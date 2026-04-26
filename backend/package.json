@@ -16,6 +16,7 @@
     "test:mongo": "node src/config/testMongoDB.js",
     "test:cloudinary": "node src/config/testCloudinary.js",
     "seed": "node src/scripts/seed.js",
+    "verifier:test-qr": "node src/scripts/prepareVerifierTestQr.js",
     "processor:fund": "node src/services/blockchain/processors/fund.run.js",
     "processor:marketplace": "node src/services/blockchain/processors/marketplace.run.js",
     "migrate:event-fund-scope": "node src/scripts/migrateEventFundScope.js"

@@ -30,6 +30,7 @@ export interface EventItem {
   description?: string;
   category?: string;
   status?: EventStatus;
+  verifiers?: string[];
 
   startDate?: string;
   endDate?: string;
@@ -243,6 +244,24 @@ export async function getEventById(eventId: string): Promise<EventItem | null> {
 export async function getMyEvents(walletAddress: string): Promise<EventItem[]> {
   if (!walletAddress) return [];
   return getEvents({ organizer: walletAddress });
+}
+
+export async function getManagedEvents(
+  walletAddress: string,
+): Promise<EventItem[]> {
+  if (!walletAddress) return [];
+
+  const normalizedWallet = walletAddress.toLowerCase();
+  const events = await getEvents({ limit: 100 });
+
+  return events.filter((event) =>
+    Array.isArray(event.verifiers)
+      ? event.verifiers.some(
+          (verifierWallet) =>
+            verifierWallet?.toLowerCase() === normalizedWallet,
+        )
+      : false,
+  );
 }
 
 export async function getAdminEvents(params?: {
