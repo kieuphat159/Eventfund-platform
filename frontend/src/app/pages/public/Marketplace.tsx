@@ -309,22 +309,6 @@ export const Marketplace: React.FC = () => {
           )}
 
           {/* Results Count */}
-          <div className="mb-4 flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2 text-sm text-slate-300">
-                <label className="text-slate-300">Simulate long loading</label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    value={String(fakeLoadingMs)}
-                    onChange={(e) => setFakeLoadingMs(Number(e.target.value || 0))}
-                    className="bg-slate-800 border-slate-700 text-white px-2 py-1 w-28 rounded"
-                  />
-                  <span className="text-sm text-slate-400">ms</span>
-                </div>
-              </div>
-            </div>
-          </div>
           <div className="flex items-center justify-between">
             <p className="text-slate-400">
               Showing{" "}
