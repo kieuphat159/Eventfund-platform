@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -15,6 +15,12 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import {
+  getAdminPlatformStats,
+  getAdminSystemHealth,
+  type AdminPlatformStats,
+  type AdminSystemHealth,
+} from '../../services/admin.service';
 
 interface SidebarProps {
   collapsed: boolean;
@@ -23,6 +29,27 @@ interface SidebarProps {
 
 export const AdminSidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
   const location = useLocation();
+  const [stats, setStats] = useState<AdminPlatformStats | null>(null);
+  const [health, setHealth] = useState<AdminSystemHealth | null>(null);
+
+  useEffect(() => {
+    const fetchSidebarData = async () => {
+      try {
+        const [statsData, healthData] = await Promise.all([
+          getAdminPlatformStats(),
+          getAdminSystemHealth(),
+        ]);
+
+        setStats(statsData);
+        setHealth(healthData);
+      } catch {
+        setStats(null);
+        setHealth(null);
+      }
+    };
+
+    fetchSidebarData();
+  }, []);
 
   const adminNavItems = [
     { icon: LayoutDashboard, label: 'Dashboard', path: '/admin/dashboard' },
@@ -73,16 +100,28 @@ export const AdminSidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) =>
             <h3 className="text-xs font-semibold text-slate-400 uppercase mb-3">System Status</h3>
             <div className="space-y-2 text-sm">
               <div className="flex items-center justify-between">
-                <span className="text-slate-500">Uptime</span>
-                <span className="text-green-400 font-medium">99.9%</span>
+                <span className="text-slate-500">Database</span>
+                <span
+                  className={
+                    health?.database.connected
+                      ? 'text-green-400 font-medium'
+                      : 'text-red-400 font-medium'
+                  }
+                >
+                  {health?.database.status || 'unknown'}
+                </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-slate-500">Active Users</span>
-                <span className="text-white font-medium">2,543</span>
+                <span className="text-slate-500">Total Users</span>
+                <span className="text-white font-medium">
+                  {stats?.users.total ?? '--'}
+                </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-slate-500">Pending Reviews</span>
-                <span className="text-purple-400 font-medium">12</span>
+                <span className="text-slate-500">Active Events</span>
+                <span className="text-purple-400 font-medium">
+                  {stats?.events.active ?? '--'}
+                </span>
               </div>
             </div>
           </div>

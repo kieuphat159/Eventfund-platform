@@ -23,48 +23,41 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../../components/ui/select';
+import {
+  getAdminSystemHealth,
+  getAdminUsers,
+  type AdminSystemHealth,
+  type AdminUserItem,
+} from '../../services/admin.service';
+import { mockPlatformSettingsData } from '../../data/adminMockData';
 
 export const PlatformSettings: React.FC = () => {
-  const [platformFee, setPlatformFee] = React.useState('2.5');
-  const [marketplaceFee, setMarketplaceFee] = React.useState('1.5');
+  const [platformFee, setPlatformFee] = React.useState(mockPlatformSettingsData.fees.platformFee);
+  const [marketplaceFee, setMarketplaceFee] = React.useState(mockPlatformSettingsData.fees.marketplaceFee);
   const [autoApproval, setAutoApproval] = React.useState(false);
   const [verificationRequired, setVerificationRequired] = React.useState(true);
   const [twoFactorRequired, setTwoFactorRequired] = React.useState(true);
+  const [adminUsers, setAdminUsers] = React.useState<AdminUserItem[]>([]);
+  const [health, setHealth] = React.useState<AdminSystemHealth | null>(null);
 
-  const adminUsers = [
-    {
-      id: 1,
-      name: 'Sarah Johnson',
-      email: 'sarah@eventchain.io',
-      role: 'Super Admin',
-      wallet: '0x742d35Cc6634C0532925a3b844Bc9e7595bEb5',
-      status: 'active',
-    },
-    {
-      id: 2,
-      name: 'Mike Chen',
-      email: 'mike@eventchain.io',
-      role: 'Admin',
-      wallet: '0x8ba1f109551bD432803012645Ac136ddd64DBA72',
-      status: 'active',
-    },
-    {
-      id: 3,
-      name: 'Emily Rodriguez',
-      email: 'emily@eventchain.io',
-      role: 'Finance Admin',
-      wallet: '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC',
-      status: 'active',
-    },
-    {
-      id: 4,
-      name: 'David Park',
-      email: 'david@eventchain.io',
-      role: 'Support Admin',
-      wallet: '0x90F79bf6EB2c4f870365E785982E1f101E93b906',
-      status: 'inactive',
-    },
-  ];
+  React.useEffect(() => {
+    const fetchSettingsData = async () => {
+      try {
+        const [admins, healthData] = await Promise.all([
+          getAdminUsers({ role: 'admin', limit: 100, sort: '-createdAt' }),
+          getAdminSystemHealth(),
+        ]);
+
+        setAdminUsers(admins?.docs || []);
+        setHealth(healthData);
+      } catch {
+        setAdminUsers([]);
+        setHealth(null);
+      }
+    };
+
+    fetchSettingsData();
+  }, []);
 
   return (
     <div className="space-y-6">
@@ -166,7 +159,7 @@ export const PlatformSettings: React.FC = () => {
               </Label>
               <Input
                 id="ticket-contract"
-                value="0x5FbDB2315678afecb367f032d93F642f64180aa3"
+                value={mockPlatformSettingsData.contractAddresses.ticket}
                 readOnly
                 className="bg-slate-800 border-slate-700 text-white font-mono text-sm"
               />
@@ -182,7 +175,7 @@ export const PlatformSettings: React.FC = () => {
               </Label>
               <Input
                 id="marketplace-contract"
-                value="0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512"
+                value={mockPlatformSettingsData.contractAddresses.marketplace}
                 readOnly
                 className="bg-slate-800 border-slate-700 text-white font-mono text-sm"
               />
@@ -198,7 +191,7 @@ export const PlatformSettings: React.FC = () => {
               </Label>
               <Input
                 id="payment-contract"
-                value="0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0"
+                value={mockPlatformSettingsData.contractAddresses.payment}
                 readOnly
                 className="bg-slate-800 border-slate-700 text-white font-mono text-sm"
               />
@@ -395,9 +388,9 @@ export const PlatformSettings: React.FC = () => {
           <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4 flex items-start space-x-3">
             <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
             <div>
-              <p className="text-sm text-red-400 font-medium">Security Alert</p>
+              <p className="text-sm text-red-400 font-medium">Security Status</p>
               <p className="text-xs text-slate-400 mt-1">
-                2 failed admin login attempts detected in the last hour. Review security logs.
+                Database is currently {health?.database.status || 'unknown'} and API service is {health?.services.api || 'unknown'}.
               </p>
               <Button size="sm" variant="outline" className="mt-3 border-red-500 text-red-400 hover:bg-red-500/10">
                 View Security Logs
@@ -447,17 +440,19 @@ export const PlatformSettings: React.FC = () => {
               </thead>
               <tbody>
                 {adminUsers.map((admin) => (
-                  <tr key={admin.id} className="border-b border-slate-800 hover:bg-slate-800/30">
+                  <tr key={admin._id} className="border-b border-slate-800 hover:bg-slate-800/30">
                     <td className="py-4 px-4">
-                      <span className="text-sm font-medium text-white">{admin.name}</span>
+                      <span className="text-sm font-medium text-white">
+                        {admin.username || 'Unnamed admin'}
+                      </span>
                     </td>
                     <td className="py-4 px-4">
-                      <span className="text-sm text-slate-400">{admin.email}</span>
+                      <span className="text-sm text-slate-400">{admin.email || 'No email attached'}</span>
                     </td>
                     <td className="py-4 px-4">
                       <Badge 
                         className={
-                          admin.role === 'Super Admin'
+                          admin.role === 'admin'
                             ? 'bg-purple-500/10 text-purple-400 border-purple-500/20'
                             : 'bg-blue-500/10 text-blue-400 border-blue-500/20'
                         }
@@ -467,34 +462,39 @@ export const PlatformSettings: React.FC = () => {
                     </td>
                     <td className="py-4 px-4">
                       <span className="text-sm text-slate-400 font-mono">
-                        {admin.wallet.slice(0, 10)}...{admin.wallet.slice(-6)}
+                        {admin.walletAddress.slice(0, 10)}...{admin.walletAddress.slice(-6)}
                       </span>
                     </td>
                     <td className="py-4 px-4">
                       <Badge
                         className={
-                          admin.status === 'active'
-                            ? 'bg-green-500/10 text-green-400 border-green-500/20'
-                            : 'bg-slate-500/10 text-slate-400 border-slate-500/20'
+                          admin.isActive === false
+                            ? 'bg-slate-500/10 text-slate-400 border-slate-500/20'
+                            : 'bg-green-500/10 text-green-400 border-green-500/20'
                         }
                       >
-                        {admin.status}
+                        {admin.isActive === false ? 'inactive' : 'active'}
                       </Badge>
                     </td>
                     <td className="py-4 px-4">
                       <div className="flex space-x-2">
                         <Button size="sm" variant="outline" className="border-slate-700 text-slate-300 hover:bg-slate-800">
-                          Edit
+                          View
                         </Button>
-                        {admin.role !== 'Super Admin' && (
-                          <Button size="sm" variant="outline" className="border-red-500 text-red-400 hover:bg-red-500/10">
-                            Remove
-                          </Button>
-                        )}
+                        <Button size="sm" variant="outline" className="border-slate-700 text-slate-300 hover:bg-slate-800">
+                          Manage
+                        </Button>
                       </div>
                     </td>
                   </tr>
                 ))}
+                {adminUsers.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="py-6 px-4 text-center text-slate-500">
+                      No admin accounts returned by the backend yet.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>

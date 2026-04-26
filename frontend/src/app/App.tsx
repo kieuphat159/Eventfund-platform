@@ -193,7 +193,14 @@ const AppRoutes: React.FC = () => {
         <Route path="events/my-events" element={<MyEvents />} />
         <Route path="events/create" element={<CreateEvent />} />
         <Route path="events/edit/:id" element={<EditEvent />} />
-        <Route path="tickets/my-tickets" element={<MyTickets />} />
+        <Route
+          path="tickets/my-tickets"
+          element={
+            <ProtectedRoute allowRoles={["user", "admin"]}>
+              <MyTickets />
+            </ProtectedRoute>
+          }
+        />
         <Route path="investments" element={<MyInvestments />} />
         <Route path="investments/:id" element={<InvestmentDetail />} />
         <Route path="wallet" element={<Wallet />} />

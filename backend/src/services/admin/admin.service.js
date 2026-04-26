@@ -6,11 +6,64 @@ import * as shareRepo from "../../repositories/share.repo.js";
 import mongoose from "mongoose";
 import { ethers } from "ethers";
 import Contribution from "../../models/Contribution.model.js";
+import Event from "../../models/Event.model.js";
+import Listing from "../../models/Listing.model.js";
+import User from "../../models/User.model.js";
+import { ChainLog } from "../../models/ChainLog.js";
 import UploadService from "../upload/upload.service.js";
 import { NotFoundError, BadRequestError } from "../../utils/customErrors.js";
 import { getFund, getTicket, provider } from "../blockchain/index.js";
 import { persistLogsFromReceipt } from "../blockchain/core/receiptChainLog.js";
 import { addBigInt, compareBigInt } from "../../utils/bigint.js";
+
+const WEI_PER_ETH = 10n ** 18n;
+
+function toBigIntSafe(value, fallback = 0n) {
+  if (value === undefined || value === null || value === "") return fallback;
+  try {
+    return BigInt(value);
+  } catch {
+    return fallback;
+  }
+}
+
+function weiToEthNumber(value, precision = 4) {
+  const wei = toBigIntSafe(value, 0n);
+  const scaled = Number((wei * 10n ** 6n) / WEI_PER_ETH) / 10 ** 6;
+  const factor = 10 ** Math.max(0, precision);
+  return Math.round(scaled * factor) / factor;
+}
+
+function resolveAlertAgeLabel(dateValue) {
+  const timestamp = new Date(dateValue || Date.now()).getTime();
+  if (!Number.isFinite(timestamp)) return "Unknown";
+
+  const diffMs = Math.max(Date.now() - timestamp, 0);
+  const minutes = Math.floor(diffMs / 60000);
+  if (minutes < 1) return "Just now";
+  if (minutes < 60) return `${minutes} minutes ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hours ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} days ago`;
+}
+
+function resolveStartOfToday() {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+}
+
+function monthKeyFromDate(dateValue) {
+  const date = new Date(dateValue);
+  if (!Number.isFinite(date.getTime())) return null;
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function labelFromMonthKey(key) {
+  const [year, month] = key.split("-").map(Number);
+  const date = new Date(year, (month || 1) - 1, 1);
+  return date.toLocaleString("en-US", { month: "short" });
+}
 
 // Default upload service instance (lazy initialization for future use)
 let defaultUploadService = null;
@@ -364,6 +417,476 @@ export async function getPlatformStats(repos = {}) {
     revenue: {
       total: revenueStats.totalRevenue,
       funding: revenueStats.totalFunding,
+    },
+  };
+}
+
+/**
+ * Get admin fraud monitoring overview from existing platform data.
+ */
+export async function getFraudOverview(options = {}) {
+  const now = new Date();
+  const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const startOfToday = resolveStartOfToday();
+
+  const [
+    suspiciousContributors,
+    suspiciousSellers,
+    malformedEvents,
+    blockedContributions,
+    totalRecentContributions,
+    resolvedTodayCount,
+  ] = await Promise.all([
+    Contribution.aggregate([
+      {
+        $match: {
+          status: "confirmed",
+          timestamp: { $gte: oneDayAgo },
+        },
+      },
+      {
+        $group: {
+          _id: "$contributor",
+          txCount: { $sum: 1 },
+          totalAmountWei: { $sum: { $toDecimal: "$amount" } },
+          lastSeenAt: { $max: "$timestamp" },
+        },
+      },
+      { $match: { txCount: { $gte: 5 } } },
+      { $sort: { txCount: -1, lastSeenAt: -1 } },
+      { $limit: 10 },
+    ]),
+    Listing.aggregate([
+      {
+        $match: {
+          listedAt: { $gte: sevenDaysAgo },
+          status: "active",
+        },
+      },
+      {
+        $group: {
+          _id: "$seller",
+          activeListings: { $sum: 1 },
+          lastListedAt: { $max: "$listedAt" },
+        },
+      },
+      { $match: { activeListings: { $gte: 8 } } },
+      { $sort: { activeListings: -1, lastListedAt: -1 } },
+      { $limit: 10 },
+    ]),
+    Event.find({
+      $or: [
+        { totalTickets: { $lt: 1 } },
+        {
+          $expr: {
+            $gt: ["$ticketsSold", "$totalTickets"],
+          },
+        },
+      ],
+    })
+      .select("title organizer updatedAt")
+      .sort({ updatedAt: -1 })
+      .limit(10)
+      .lean(),
+    Contribution.find({
+      status: "refunded",
+      refundedAt: { $gte: sevenDaysAgo },
+    })
+      .select("contributor amount refundedAt")
+      .sort({ refundedAt: -1 })
+      .limit(20)
+      .lean(),
+    Contribution.countDocuments({
+      timestamp: { $gte: sevenDaysAgo },
+    }),
+    ChainLog.countDocuments({
+      createdAt: { $gte: startOfToday },
+      eventName: {
+        $in: ["PenaltyApplied", "TicketCancelled", "ListingCancelled"],
+      },
+    }),
+  ]);
+
+  const alerts = [
+    ...suspiciousContributors.map((item, index) => ({
+      id: `contributor-${index + 1}`,
+      type: "Suspicious Activity",
+      severity: item.txCount >= 10 ? "high" : "medium",
+      user: String(item._id || "").toLowerCase(),
+      description: `${item.txCount} contributions in the last 24 hours`,
+      time: resolveAlertAgeLabel(item.lastSeenAt),
+      status: "pending",
+      createdAt: item.lastSeenAt || now,
+    })),
+    ...suspiciousSellers.map((item, index) => ({
+      id: `seller-${index + 1}`,
+      type: "Price Manipulation Risk",
+      severity: item.activeListings >= 15 ? "high" : "medium",
+      user: String(item._id || "").toLowerCase(),
+      description: `${item.activeListings} active listings created recently`,
+      time: resolveAlertAgeLabel(item.lastListedAt),
+      status: "investigating",
+      createdAt: item.lastListedAt || now,
+    })),
+    ...malformedEvents.map((event, index) => ({
+      id: `event-${index + 1}`,
+      type: "Event Integrity Issue",
+      severity: "high",
+      user: String(event.organizer || "").toLowerCase(),
+      description: `Event \"${event.title || "Untitled"}\" has inconsistent ticket counters`,
+      time: resolveAlertAgeLabel(event.updatedAt),
+      status: "pending",
+      createdAt: event.updatedAt || now,
+    })),
+  ]
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .slice(0, 20);
+
+  const blockedTransactions = blockedContributions.map((item) => ({
+    wallet: String(item.contributor || "").toLowerCase(),
+    reason: "Refunded after risk validation",
+    amountWei: String(item.amount || "0"),
+    amountEth: weiToEthNumber(item.amount || "0", 4),
+    time: resolveAlertAgeLabel(item.refundedAt),
+    createdAt: item.refundedAt || now,
+  }));
+
+  const activeAlerts = alerts.filter((alert) => alert.status !== "resolved").length;
+  const blockedCount = blockedTransactions.length;
+  const totalSignals = Math.max(Number(totalRecentContributions || 0), 1);
+  const detectionRate = Math.max(
+    0,
+    Math.min(100, Number((((totalSignals - blockedCount) / totalSignals) * 100).toFixed(2))),
+  );
+
+  return {
+    stats: {
+      activeAlerts,
+      resolvedToday: Number(resolvedTodayCount || 0),
+      blockedTransactions: blockedCount,
+      detectionRate,
+    },
+    alerts,
+    blockedTransactions,
+    generatedAt: now,
+  };
+}
+
+/**
+ * Get admin finance dashboard overview from platform data.
+ */
+export async function getFinanceOverview(repos = {}) {
+  const eventRepository = repos.eventRepo || eventRepo;
+  const listingRepository = repos.listingRepo || listingRepo;
+
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth();
+  const pastSixMonths = Array.from({ length: 6 }, (_, idx) => {
+    const date = new Date(currentYear, currentMonth - (5 - idx), 1);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+  });
+
+  const [allEvents, soldListings, revenueStats] = await Promise.all([
+    Event.find({})
+      .select("title organizer category createdAt totalRevenue platformFee escrowedRevenue organizerShare escrowStatus")
+      .sort({ createdAt: -1 })
+      .lean(),
+    Listing.find({ status: "sold" })
+      .select("price soldAt")
+      .lean(),
+    eventRepository.getRevenueStats(),
+  ]);
+
+  const ticketRevenueWei = allEvents.reduce(
+    (sum, event) => sum + toBigIntSafe(event.totalRevenue, 0n),
+    0n,
+  );
+  const platformFeeWei = allEvents.reduce(
+    (sum, event) => sum + toBigIntSafe(event.platformFee, 0n),
+    0n,
+  );
+  const marketplaceVolumeWei = soldListings.reduce(
+    (sum, listing) => sum + toBigIntSafe(listing.price, 0n),
+    0n,
+  );
+  const marketplaceFeeWei = (marketplaceVolumeWei * 2n) / 100n;
+  const pendingWithdrawalsWei = allEvents
+    .filter((event) => ["holding", "holding_revenue"].includes(event.escrowStatus))
+    .reduce(
+      (sum, event) => sum + toBigIntSafe(event.organizerShare, 0n),
+      0n,
+    );
+
+  const monthlyAccumulator = Object.fromEntries(
+    pastSixMonths.map((monthKey) => [monthKey, { ticket: 0n, marketplace: 0n }]),
+  );
+
+  for (const event of allEvents) {
+    const key = monthKeyFromDate(event.createdAt);
+    if (!key || !monthlyAccumulator[key]) continue;
+    monthlyAccumulator[key].ticket += toBigIntSafe(event.totalRevenue, 0n);
+  }
+
+  for (const listing of soldListings) {
+    const key = monthKeyFromDate(listing.soldAt);
+    if (!key || !monthlyAccumulator[key]) continue;
+    monthlyAccumulator[key].marketplace += (toBigIntSafe(listing.price, 0n) * 2n) / 100n;
+  }
+
+  const monthlyRevenue = pastSixMonths.map((monthKey) => {
+    const item = monthlyAccumulator[monthKey] || { ticket: 0n, marketplace: 0n };
+    return {
+      month: labelFromMonthKey(monthKey),
+      ticket: weiToEthNumber(item.ticket, 3),
+      marketplace: weiToEthNumber(item.marketplace, 3),
+      total: weiToEthNumber(item.ticket + item.marketplace, 3),
+    };
+  });
+
+  const categoryRevenueMap = new Map();
+  for (const event of allEvents) {
+    const category = String(event.category || "Other").trim() || "Other";
+    const current = categoryRevenueMap.get(category) || 0n;
+    categoryRevenueMap.set(category, current + toBigIntSafe(event.totalRevenue, 0n));
+  }
+
+  const categoryRevenue = Array.from(categoryRevenueMap.entries())
+    .map(([category, revenueWei]) => ({
+      category,
+      revenue: weiToEthNumber(revenueWei, 3),
+      revenueWei: revenueWei.toString(),
+    }))
+    .sort((a, b) => b.revenue - a.revenue)
+    .slice(0, 8);
+
+  const withdrawalRequests = allEvents
+    .filter((event) => toBigIntSafe(event.organizerShare, 0n) > 0n)
+    .slice(0, 10)
+    .map((event, index) => ({
+      id: `WR-${String(index + 1).padStart(3, "0")}`,
+      organizer: event.title || "Untitled event",
+      wallet: String(event.organizer || "").toLowerCase(),
+      amountWei: String(event.organizerShare || "0"),
+      amountEth: weiToEthNumber(event.organizerShare || "0", 4),
+      date: event.createdAt,
+      status:
+        event.escrowStatus === "released"
+          ? "completed"
+          : event.escrowStatus === "holding_revenue"
+            ? "approved"
+            : "pending",
+    }));
+
+  return {
+    stats: {
+      totalPlatformRevenueWei: String(
+        toBigIntSafe(revenueStats?.totalRevenue, 0n) + marketplaceFeeWei,
+      ),
+      ticketSalesRevenueWei: ticketRevenueWei.toString(),
+      marketplaceFeesWei: marketplaceFeeWei.toString(),
+      pendingWithdrawalsWei: pendingWithdrawalsWei.toString(),
+      totalPlatformRevenueEth: weiToEthNumber(
+        toBigIntSafe(revenueStats?.totalRevenue, 0n) + marketplaceFeeWei,
+      ),
+      ticketSalesRevenueEth: weiToEthNumber(ticketRevenueWei),
+      marketplaceFeesEth: weiToEthNumber(marketplaceFeeWei),
+      pendingWithdrawalsEth: weiToEthNumber(pendingWithdrawalsWei),
+    },
+    monthlyRevenue,
+    categoryRevenue,
+    withdrawalRequests,
+    summary: {
+      totalProcessedWei: (
+        toBigIntSafe(revenueStats?.totalRevenue, 0n) + marketplaceFeeWei - pendingWithdrawalsWei
+      ).toString(),
+      pendingApprovalWei: pendingWithdrawalsWei.toString(),
+      platformFeeRatePercent: 2.5,
+    },
+  };
+}
+
+/**
+ * Get admin analytics dashboard overview.
+ */
+export async function getAnalyticsOverview(repos = {}) {
+  const userRepository = repos.userRepo || userRepo;
+  const eventRepository = repos.eventRepo || eventRepo;
+  const ticketRepository = repos.ticketRepo || ticketRepo;
+
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth();
+  const pastSixMonths = Array.from({ length: 6 }, (_, idx) => {
+    const date = new Date(currentYear, currentMonth - (5 - idx), 1);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+  });
+
+  const [platformStats, allUsers, allEvents, soldListings, contributions] =
+    await Promise.all([
+      getPlatformStats({
+        userRepo: userRepository,
+        eventRepo: eventRepository,
+        ticketRepo: ticketRepository,
+        listingRepo: repos.listingRepo || listingRepo,
+      }),
+      User.find({}).select("walletAddress role createdAt").lean(),
+      Event.find({})
+        .select("title organizer category createdAt ticketsSold totalRevenue totalTicketsUsed")
+        .lean(),
+      Listing.find({ status: "sold" }).select("price soldAt").lean(),
+      Contribution.find({ status: "confirmed" })
+        .select("contributor amount timestamp")
+        .lean(),
+    ]);
+
+  const marketplaceVolumeWei = soldListings.reduce(
+    (sum, listing) => sum + toBigIntSafe(listing.price, 0n),
+    0n,
+  );
+
+  const monthlyAccumulator = Object.fromEntries(
+    pastSixMonths.map((monthKey) => [monthKey, { users: 0, events: 0, tickets: 0 }]),
+  );
+
+  for (const user of allUsers) {
+    const key = monthKeyFromDate(user.createdAt);
+    if (!key || !monthlyAccumulator[key]) continue;
+    monthlyAccumulator[key].users += 1;
+  }
+
+  for (const event of allEvents) {
+    const key = monthKeyFromDate(event.createdAt);
+    if (!key || !monthlyAccumulator[key]) continue;
+    monthlyAccumulator[key].events += 1;
+    monthlyAccumulator[key].tickets += Number(event.ticketsSold || 0);
+  }
+
+  const platformActivity = pastSixMonths.map((monthKey) => ({
+    month: labelFromMonthKey(monthKey),
+    users: monthlyAccumulator[monthKey]?.users || 0,
+    events: monthlyAccumulator[monthKey]?.events || 0,
+    tickets: monthlyAccumulator[monthKey]?.tickets || 0,
+  }));
+
+  const last7Days = Array.from({ length: 7 }, (_, idx) => {
+    const date = new Date();
+    date.setHours(0, 0, 0, 0);
+    date.setDate(date.getDate() - (6 - idx));
+    return date;
+  });
+
+  const engagement = last7Days.map((dayStart) => {
+    const dayEnd = new Date(dayStart);
+    dayEnd.setDate(dayEnd.getDate() + 1);
+    const dayLabel = dayStart.toLocaleString("en-US", { weekday: "short" });
+
+    const newUsers = allUsers.filter((user) => {
+      const t = new Date(user.createdAt || 0).getTime();
+      return t >= dayStart.getTime() && t < dayEnd.getTime();
+    }).length;
+
+    const activeSignals = contributions.filter((item) => {
+      const t = new Date(item.timestamp || 0).getTime();
+      return t >= dayStart.getTime() && t < dayEnd.getTime();
+    }).length;
+
+    return {
+      day: dayLabel,
+      active: activeSignals,
+      new: newUsers,
+    };
+  });
+
+  const userTypeDistribution = [
+    {
+      name: "Regular Users",
+      value: Math.max(
+        Number(platformStats.users.total || 0) -
+          Number(platformStats.users.verifiers || 0) -
+          Number(platformStats.users.admins || 0),
+        0,
+      ),
+    },
+    { name: "Event Organizers", value: Number(platformStats.users.organizers || 0) },
+    { name: "Verifiers", value: Number(platformStats.users.verifiers || 0) },
+    { name: "Admins", value: Number(platformStats.users.admins || 0) },
+  ];
+
+  const topEvents = allEvents
+    .slice()
+    .sort(
+      (a, b) =>
+        Number(toBigIntSafe(b.totalRevenue, 0n) - toBigIntSafe(a.totalRevenue, 0n)) ||
+        Number(b.ticketsSold || 0) - Number(a.ticketsSold || 0),
+    )
+    .slice(0, 5)
+    .map((event, index) => ({
+      rank: index + 1,
+      name: event.title || "Untitled event",
+      organizer: String(event.organizer || "").toLowerCase(),
+      category: event.category || "Other",
+      tickets: Number(event.ticketsSold || 0),
+      revenueEth: weiToEthNumber(event.totalRevenue || "0", 3),
+      attendees: Number(event.totalTicketsUsed || 0),
+      rating: 4.5,
+    }));
+
+  const categoryPerformanceMap = new Map();
+  for (const event of allEvents) {
+    const category = String(event.category || "Other").trim() || "Other";
+    const current =
+      categoryPerformanceMap.get(category) ||
+      ({ events: 0, tickets: 0, revenueWei: 0n });
+    current.events += 1;
+    current.tickets += Number(event.ticketsSold || 0);
+    current.revenueWei += toBigIntSafe(event.totalRevenue, 0n);
+    categoryPerformanceMap.set(category, current);
+  }
+
+  const categoryPerformance = Array.from(categoryPerformanceMap.entries())
+    .map(([category, value]) => ({
+      category,
+      events: value.events,
+      tickets: value.tickets,
+      revenue: weiToEthNumber(value.revenueWei, 3),
+    }))
+    .sort((a, b) => b.revenue - a.revenue)
+    .slice(0, 8);
+
+  const uniqueContributors = new Set(
+    contributions.map((item) => String(item.contributor || "").toLowerCase()),
+  );
+  const repeatContributors = contributions.length - uniqueContributors.size;
+  const retentionRate = contributions.length
+    ? Number(((repeatContributors / contributions.length) * 100).toFixed(1))
+    : 0;
+
+  return {
+    stats: {
+      totalUsers: Number(platformStats.users.total || 0),
+      totalEvents: Number(platformStats.events.total || 0),
+      ticketsSold: Number(platformStats.tickets.sold || 0),
+      marketplaceVolumeWei: marketplaceVolumeWei.toString(),
+      marketplaceVolumeEth: weiToEthNumber(marketplaceVolumeWei, 3),
+    },
+    platformActivity,
+    userEngagement: engagement,
+    userTypeDistribution,
+    topEvents,
+    categoryPerformance,
+    insights: {
+      avgTicketsPerEvent:
+        Number(platformStats.events.total || 0) > 0
+          ? Number(
+              (
+                Number(platformStats.tickets.sold || 0) /
+                Number(platformStats.events.total || 1)
+              ).toFixed(2),
+            )
+          : 0,
+      retentionRate,
     },
   };
 }

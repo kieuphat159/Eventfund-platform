@@ -2,50 +2,61 @@ import React from 'react';
 import { AlertTriangle, Shield, Ban, CheckCircle } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
+import { mockFraudMonitoringData } from '../../data/adminMockData';
+import {
+  getAdminFraudOverview,
+  type AdminFraudAlert,
+  type AdminBlockedTransaction,
+} from '../../services/admin.service';
 
 export const FraudMonitoring: React.FC = () => {
-  const stats = [
-    { label: 'Active Alerts', value: '3', icon: AlertTriangle, color: 'from-red-500 to-orange-500' },
-    { label: 'Resolved Today', value: '12', icon: CheckCircle, color: 'from-green-500 to-emerald-500' },
-    { label: 'Blocked Transactions', value: '8', icon: Ban, color: 'from-purple-500 to-pink-500' },
-    { label: 'Detection Rate', value: '98.5%', icon: Shield, color: 'from-blue-500 to-cyan-500' },
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState('');
+  const [alerts, setAlerts] = React.useState<AdminFraudAlert[]>(mockFraudMonitoringData.alerts);
+  const [blockedTransactions, setBlockedTransactions] = React.useState<AdminBlockedTransaction[]>(mockFraudMonitoringData.blockedTransactions);
+  const [stats, setStats] = React.useState(mockFraudMonitoringData.stats);
+
+  React.useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+        setError('');
+
+        const response = await getAdminFraudOverview();
+        setStats(
+          response?.stats || {
+            activeAlerts: 0,
+            resolvedToday: 0,
+            blockedTransactions: 0,
+            detectionRate: 0,
+          },
+        );
+        setAlerts(response?.alerts || []);
+        setBlockedTransactions(response?.blockedTransactions || []);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to fetch fraud data');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, []);
+
+  const statCards = [
+    { label: 'Active Alerts', value: String(stats.activeAlerts), icon: AlertTriangle, color: 'from-red-500 to-orange-500' },
+    { label: 'Resolved Today', value: String(stats.resolvedToday), icon: CheckCircle, color: 'from-green-500 to-emerald-500' },
+    { label: 'Blocked Transactions', value: String(stats.blockedTransactions), icon: Ban, color: 'from-purple-500 to-pink-500' },
+    { label: 'Detection Rate', value: `${stats.detectionRate.toFixed(2)}%`, icon: Shield, color: 'from-blue-500 to-cyan-500' },
   ];
 
-  const alerts = [
-    {
-      id: '1',
-      type: 'Suspicious Activity',
-      severity: 'high',
-      user: '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb5',
-      description: 'Multiple ticket purchases from same wallet in short timeframe',
-      time: '10 minutes ago',
-      status: 'pending',
-    },
-    {
-      id: '2',
-      type: 'Price Manipulation',
-      severity: 'medium',
-      user: '0x8ba1f109551bD432803012645Ac136ddd64DBA72',
-      description: 'Unusual pricing pattern detected on marketplace',
-      time: '1 hour ago',
-      status: 'investigating',
-    },
-    {
-      id: '3',
-      type: 'Fake Event',
-      severity: 'high',
-      user: '0xDC25EF3F5B8A186998338A2aDA83795FBA2D695E',
-      description: 'Event details match known scam patterns',
-      time: '3 hours ago',
-      status: 'pending',
-    },
-  ];
+  if (loading) {
+    return <div className="text-white">Loading fraud monitoring data...</div>;
+  }
 
-  const blockedTransactions = [
-    { wallet: '0x1111...2222', reason: 'Blacklisted address', amount: '5.0 ETH', time: '15 min ago' },
-    { wallet: '0x3333...4444', reason: 'Suspected bot activity', amount: '12.5 ETH', time: '45 min ago' },
-    { wallet: '0x5555...6666', reason: 'Failed verification', amount: '2.3 ETH', time: '2 hours ago' },
-  ];
+  if (error) {
+    return <div className="text-red-400">{error}</div>;
+  }
 
   return (
     <div className="space-y-6">
@@ -56,7 +67,7 @@ export const FraudMonitoring: React.FC = () => {
 
       {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {stats.map((stat, index) => (
+        {statCards.map((stat, index) => (
           <Card key={index} className="bg-slate-900 border-slate-800">
             <CardContent className="p-6">
               <div className="flex items-center justify-between">
@@ -156,10 +167,12 @@ export const FraudMonitoring: React.FC = () => {
                 {blockedTransactions.map((tx, index) => (
                   <tr key={index} className="border-b border-slate-800/50 hover:bg-slate-800/30">
                     <td className="py-4 px-4">
-                      <code className="text-sm text-slate-300 bg-slate-800 px-2 py-1 rounded">{tx.wallet}</code>
+                      <code className="text-sm text-slate-300 bg-slate-800 px-2 py-1 rounded">
+                        {tx.wallet.slice(0, 10)}...{tx.wallet.slice(-6)}
+                      </code>
                     </td>
                     <td className="py-4 px-4 text-sm text-slate-400">{tx.reason}</td>
-                    <td className="py-4 px-4 text-sm text-white">{tx.amount}</td>
+                    <td className="py-4 px-4 text-sm text-white">{tx.amountEth} ETH</td>
                     <td className="py-4 px-4 text-sm text-slate-500 text-right">{tx.time}</td>
                   </tr>
                 ))}

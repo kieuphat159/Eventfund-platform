@@ -109,6 +109,33 @@ class AdminController {
     });
   });
 
+  getFraudOverview = asyncHandler(async (req, res) => {
+    const data = await this.adminService.getFraudOverview();
+
+    res.status(200).json({
+      success: true,
+      data,
+    });
+  });
+
+  getFinanceOverview = asyncHandler(async (req, res) => {
+    const data = await this.adminService.getFinanceOverview();
+
+    res.status(200).json({
+      success: true,
+      data,
+    });
+  });
+
+  getAnalyticsOverview = asyncHandler(async (req, res) => {
+    const data = await this.adminService.getAnalyticsOverview();
+
+    res.status(200).json({
+      success: true,
+      data,
+    });
+  });
+
   deleteUser = asyncHandler(async (req, res) => {
     const { walletAddress } = req.params;
 

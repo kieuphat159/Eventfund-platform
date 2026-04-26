@@ -31,7 +31,11 @@ export const UserSidebar: React.FC<SidebarProps> = ({
   // IMPORTANT: All paths must start with /app
   const userNavItems = [
     { icon: LayoutDashboard, label: "Dashboard", path: "/app/dashboard" },
-    { icon: Calendar, label: "My Events", path: "/app/events/my-events" },
+    {
+      icon: Calendar,
+      label: user?.role === "verifier" ? "Managed Events" : "My Events",
+      path: "/app/events/my-events",
+    },
     { icon: Ticket, label: "My Tickets", path: "/app/tickets/my-tickets" },
     { icon: TrendingUp, label: "Investments", path: "/app/investments" },
     { icon: Wallet, label: "Wallet", path: "/app/wallet" },

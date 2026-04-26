@@ -467,4 +467,25 @@ router.get(
  */
 router.get('/health', authenticate, requireAdmin, controller.getSystemHealth);
 
+router.get(
+  '/fraud/overview',
+  authenticate,
+  requireAdmin,
+  controller.getFraudOverview,
+);
+
+router.get(
+  '/finance/overview',
+  authenticate,
+  requireAdmin,
+  controller.getFinanceOverview,
+);
+
+router.get(
+  '/analytics/overview',
+  authenticate,
+  requireAdmin,
+  controller.getAnalyticsOverview,
+);
+
 export default router;

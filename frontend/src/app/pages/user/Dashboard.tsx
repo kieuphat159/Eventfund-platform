@@ -6,6 +6,7 @@ import { Button } from '../../components/ui/button';
 import { mockInvestments } from '../../data/mockData';
 import { useAuth } from '../../contexts/AuthContext';
 import { getUserTickets, type ApiTicket } from '../../services/tickets.service';
+import { getManagedEvents, getMyEvents, type EventItem } from '../../services/events.service';
 
 const ETH_ADDRESS_REGEX = /^0x[a-fA-F0-9]{40}$/;
 
@@ -27,30 +28,74 @@ type TicketActivity = {
 export const Dashboard: React.FC = () => {
   const { user } = useAuth();
   const [tickets, setTickets] = useState<ApiTicket[]>([]);
+  const [events, setEvents] = useState<EventItem[]>([]);
 
   const walletAddress = user?.walletAddress?.trim();
+  const isVerifierView = user?.role === 'verifier';
 
   useEffect(() => {
-    const fetchTickets = async () => {
+    const fetchDashboardData = async () => {
       if (!walletAddress || !ETH_ADDRESS_REGEX.test(walletAddress)) {
         setTickets([]);
+        setEvents([]);
         return;
       }
 
       try {
-        const data = await getUserTickets(walletAddress);
-        setTickets(data);
+        const [ticketData, eventData] = await Promise.all([
+          getUserTickets(walletAddress).catch(() => []),
+          isVerifierView
+            ? getManagedEvents(walletAddress).catch(() => [])
+            : getMyEvents(walletAddress).catch(() => []),
+        ]);
+
+        setTickets(ticketData);
+        setEvents(eventData);
       } catch {
         setTickets([]);
+        setEvents([]);
       }
     };
 
-    fetchTickets();
-  }, [walletAddress]);
+    fetchDashboardData();
+  }, [isVerifierView, walletAddress]);
 
   const upcomingEvents = useMemo<UpcomingEvent[]>(() => {
     const now = Date.now();
     const map = new Map<string, UpcomingEvent>();
+
+    if (isVerifierView) {
+      events.forEach((event) => {
+        if (!event?.startDate || !event?.title) {
+          return;
+        }
+
+        const startTs = new Date(event.startDate).getTime();
+        if (!Number.isFinite(startTs) || startTs <= now) {
+          return;
+        }
+
+        const key = event._id || event.id || event.title;
+        if (map.has(key)) {
+          return;
+        }
+
+        map.set(key, {
+          id: key,
+          title: event.title,
+          location: event.venue?.address || 'TBA',
+          startDate: event.startDate,
+        });
+      });
+
+      return Array.from(map.values())
+        .sort((a, b) => {
+          const ta = a.startDate ? new Date(a.startDate).getTime() : Number.MAX_SAFE_INTEGER;
+          const tb = b.startDate ? new Date(b.startDate).getTime() : Number.MAX_SAFE_INTEGER;
+          return ta - tb;
+        })
+        .slice(0, 3);
+    }
 
     tickets.forEach((ticket) => {
       const event = typeof ticket.eventId === 'object' ? ticket.eventId : undefined;
@@ -83,7 +128,7 @@ export const Dashboard: React.FC = () => {
         return ta - tb;
       })
       .slice(0, 3);
-  }, [tickets]);
+  }, [events, isVerifierView, tickets]);
 
   const recentActivities = useMemo<TicketActivity[]>(() => {
     const activities = tickets
@@ -127,19 +172,34 @@ export const Dashboard: React.FC = () => {
 
   const stats = [
     {
-      title: 'My Events',
-      value: '3',
+      title: isVerifierView ? 'Managed Events' : 'My Events',
+      value: events.length.toString(),
       icon: Calendar,
       color: 'from-purple-500 to-blue-500',
       link: '/app/events/my-events',
     },
-    {
-      title: 'My Tickets',
-      value: tickets.length.toString(),
-      icon: Ticket,
-      color: 'from-blue-500 to-cyan-500',
-      link: '/app/tickets/my-tickets',
-    },
+    ...(isVerifierView
+      ? [
+          {
+            title: 'Check-In Ready',
+            value: events
+              .filter((event) => event.status === 'ongoing')
+              .length
+              .toString(),
+            icon: Ticket,
+            color: 'from-blue-500 to-cyan-500',
+            link: '/app/verifier/dashboard',
+          },
+        ]
+      : [
+          {
+            title: 'My Tickets',
+            value: tickets.length.toString(),
+            icon: Ticket,
+            color: 'from-blue-500 to-cyan-500',
+            link: '/app/tickets/my-tickets',
+          },
+        ]),
     {
       title: 'Active Investments',
       value: mockInvestments.filter(i => i.status === 'active').length.toString(),
@@ -188,8 +248,12 @@ export const Dashboard: React.FC = () => {
         {/* Upcoming Events */}
         <Card className="bg-slate-900 border-slate-800">
           <CardHeader>
-            <CardTitle className="text-white">Upcoming Events</CardTitle>
-            <CardDescription className="text-slate-400">Events you're attending</CardDescription>
+            <CardTitle className="text-white">
+              {isVerifierView ? 'Upcoming Managed Events' : 'Upcoming Events'}
+            </CardTitle>
+            <CardDescription className="text-slate-400">
+              {isVerifierView ? 'Events you can help check in' : "Events you're attending"}
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
@@ -216,12 +280,19 @@ export const Dashboard: React.FC = () => {
                 </div>
               ))}
               {upcomingEvents.length === 0 && (
-                <p className="text-sm text-slate-500">No upcoming events from your current tickets.</p>
+                <p className="text-sm text-slate-500">
+                  {isVerifierView
+                    ? 'No upcoming managed events right now.'
+                    : 'No upcoming events from your current tickets.'}
+                </p>
               )}
             </div>
-            <Link to="/app/tickets/my-tickets" className="block mt-4">
+            <Link
+              to={isVerifierView ? '/app/events/my-events' : '/app/tickets/my-tickets'}
+              className="block mt-4"
+            >
               <Button variant="ghost" className="w-full text-purple-400 hover:text-purple-300 hover:bg-slate-800">
-                View All Tickets
+                {isVerifierView ? 'View Managed Events' : 'View All Tickets'}
                 <ArrowRight className="w-4 h-4 ml-2" />
               </Button>
             </Link>
@@ -270,12 +341,18 @@ export const Dashboard: React.FC = () => {
         <CardContent className="p-6">
           <div className="flex flex-col md:flex-row items-center justify-between">
             <div className="mb-4 md:mb-0">
-              <h3 className="text-xl font-bold text-white mb-2">Become an Event Organizer</h3>
-              <p className="text-slate-300">Create and manage your own events with NFT tickets</p>
+              <h3 className="text-xl font-bold text-white mb-2">
+                {isVerifierView ? 'Open Verifier Workspace' : 'Become an Event Organizer'}
+              </h3>
+              <p className="text-slate-300">
+                {isVerifierView
+                  ? 'Scan QR, verify tickets, and manage assigned check-ins.'
+                  : 'Create and manage your own events with NFT tickets'}
+              </p>
             </div>
-            <Link to="/app/events/create">
+            <Link to={isVerifierView ? '/app/verifier/dashboard' : '/app/events/create'}>
               <Button className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white">
-                Create Event
+                {isVerifierView ? 'Open Check-In' : 'Create Event'}
                 <ArrowRight className="w-4 h-4 ml-2" />
               </Button>
             </Link>
