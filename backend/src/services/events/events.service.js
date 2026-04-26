@@ -1,6 +1,7 @@
 import { isValidObjectId } from "mongoose";
 import { ethers } from "ethers";
 import * as eventRepo from "../../repositories/event.repo.js";
+import * as userRepo from "../../repositories/user.repo.js";
 import * as shareRepo from "../../repositories/share.repo.js";
 import * as contributionRepo from "../../repositories/contribution.repo.js";
 import {
@@ -19,7 +20,7 @@ import { uploadEventMetadataToIpfs } from "../upload/ipfs.service.js";
 import Contribution from "../../models/Contribution.model.js";
 import Share from "../../models/Share.model.js";
 import Event from "../../models/Event.model.js";
-import { getFund, provider } from "../blockchain/index.js";
+import { getFund, getTicket, provider } from "../blockchain/index.js";
 import { persistLogsFromReceipt } from "../blockchain/core/receiptChainLog.js";
 
 // Default upload service instance (lazy initialization for future use)
@@ -51,6 +52,24 @@ function getBackendSigner() {
   return new ethers.Wallet(privateKey, provider);
 }
 
+function parseOnChainEventId(event) {
+  const contractEventId = String(event?.contractEventId || "").trim();
+  if (!contractEventId) {
+    throw new BadRequestError(
+      "Event has not been synced to on-chain yet",
+    );
+  }
+
+  if (!/^\d+$/.test(contractEventId)) {
+    throw new BadRequestError(
+      `Event contractEventId must be a numeric on-chain event id, got: ${contractEventId}`,
+    );
+  }
+
+  return BigInt(contractEventId);
+}
+
+function getBlockchainErrorMessage(error) {
 function getRawBlockchainErrorMessage(error) {
   if (!error || typeof error !== "object") {
     return String(error || "Unknown blockchain error");
@@ -1363,19 +1382,89 @@ export async function assignVerifier(eventId, verifier, user) {
     throw new NotFoundError("Event not found");
   }
 
+  if (event.contractEventId) {
+    throw new BadRequestError(
+      "This event is on-chain. Use the on-chain verifier assignment flow instead.",
+    );
+  }
+
   const normalizedVerifier = verifier.toLowerCase();
+  const verifierUser = await (userRepo.findByWalletAddress
+    ? userRepo.findByWalletAddress(normalizedVerifier)
+    : null);
 
-  if (!event.verifiers) {
-    event.verifiers = [];
+  if (!verifierUser) {
+    throw new NotFoundError("Verifier user not found");
   }
 
-  if (!event.verifiers.includes(normalizedVerifier)) {
-    event.verifiers.push(normalizedVerifier);
+  if (verifierUser.role !== "verifier") {
+    throw new BadRequestError("Selected user must have verifier role");
   }
 
-  await event.save();
+  if (verifierUser.isActive === false) {
+    throw new BadRequestError("Selected verifier is inactive");
+  }
 
-  return event;
+  return await Event.findByIdAndUpdate(
+    eventId,
+    { $addToSet: { verifiers: normalizedVerifier } },
+    { new: true, lean: true },
+  );
+}
+
+/**
+ * Assign verifier on-chain and sync DB
+ */
+export async function assignVerifierOnChain(eventId, verifier, user) {
+  if (!verifier) {
+    throw new BadRequestError("Verifier wallet is required");
+  }
+
+  const event = await Event.findById(eventId);
+
+  if (!event) {
+    throw new NotFoundError("Event not found");
+  }
+
+  const normalizedVerifier = verifier.toLowerCase();
+  const verifierUser = await (userRepo.findByWalletAddress
+    ? userRepo.findByWalletAddress(normalizedVerifier)
+    : null);
+
+  if (!verifierUser) {
+    throw new NotFoundError("Verifier user not found");
+  }
+
+  if (verifierUser.role !== "verifier") {
+    throw new BadRequestError("Selected user must have verifier role");
+  }
+
+  if (verifierUser.isActive === false) {
+    throw new BadRequestError("Selected verifier is inactive");
+  }
+
+  const chainEventId = parseOnChainEventId(event);
+  const ticket = getTicket().connect(getBackendSigner());
+
+  const alreadyOnChain = await ticket.isEventVerifier(
+    chainEventId,
+    normalizedVerifier,
+  );
+
+  if (!alreadyOnChain) {
+    const tx = await ticket.addEventVerifier(chainEventId, normalizedVerifier);
+    const receipt = await tx.wait();
+
+    if (!receipt || Number(receipt.status) !== 1) {
+      throw new BadRequestError("Verifier assignment transaction failed on-chain");
+    }
+  }
+
+  return await Event.findByIdAndUpdate(
+    eventId,
+    { $addToSet: { verifiers: normalizedVerifier } },
+    { new: true, lean: true },
+  );
 }
 
 /**

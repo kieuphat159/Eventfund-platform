@@ -486,6 +486,11 @@ router.post(
   controller.assignVerifier,
 );
 
+router.post(
+  "/:id/assign-verifier/onchain",
+  authenticate,
+  requireAdmin,
+  controller.assignVerifierOnChain,
 /**
  * @swagger
  * /events/{id}/mark-completed:

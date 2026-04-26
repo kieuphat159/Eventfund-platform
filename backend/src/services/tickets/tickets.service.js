@@ -42,6 +42,34 @@ function toTokenIdString(value) {
   return typeof value === 'bigint' ? value.toString() : String(value);
 }
 
+function normalizeWalletAddress(value) {
+  return value ? String(value).toLowerCase() : '';
+}
+
+async function getOnChainTicketSnapshot(tokenId, event = null) {
+  const ticketContract = getTicket();
+  const chainTokenId = BigInt(tokenId);
+
+  const [owner, chainStatus, chainEventId] = await Promise.all([
+    ticketContract.ownerOf(chainTokenId),
+    ticketContract.getTicketStatus(chainTokenId),
+    ticketContract.getEventId(chainTokenId),
+  ]);
+
+  if (
+    event?.contractEventId &&
+    String(chainEventId) !== String(event.contractEventId)
+  ) {
+    throw new BadRequestError('Ticket does not belong to this on-chain event');
+  }
+
+  return {
+    owner: normalizeWalletAddress(owner),
+    status: chainStatus,
+    eventId: String(chainEventId),
+  };
+}
+
 function validateTransactionHash(txHash) {
   if (!txHash || !ethers.isHexString(txHash, 32)) {
     throw new BadRequestError('Invalid transaction hash');
@@ -395,11 +423,22 @@ export async function createUseTicketIntent(tokenId, verifierWallet, repos = {})
   const ticketContract = getTicket();
   const chainTokenId = BigInt(ticket.tokenId);
 
-  const [chainStatus, contractAddress, network] = await Promise.all([
+  if (!event.contractEventId) {
+    throw new BadRequestError('Event is not configured for on-chain check-in');
+  }
+
+  const chainEventId = BigInt(event.contractEventId);
+
+  const [chainStatus, isVerifierOnChain, contractAddress, network] = await Promise.all([
     ticketContract.getTicketStatus(chainTokenId),
+    ticketContract.isEventVerifier(chainEventId, verifierWallet),
     ticketContract.getAddress(),
     provider.getNetwork(),
   ]);
+
+  if (!isVerifierOnChain) {
+    throw new ForbiddenError('Verifier wallet is not authorized on-chain for this event');
+  }
 
   if (chainStatus !== ONCHAIN_TICKET_STATUS.SOLD) {
     throw new BadRequestError('Ticket is not in sold state on-chain');
@@ -626,6 +665,12 @@ export async function markTicketAsUsed(tokenId, verifierWallet, repos = {}) {
     throw new BadRequestError('Current time must be within event dates');
   }
 
+  if (event.contractEventId) {
+    throw new BadRequestError(
+      'This event requires on-chain check-in. Use the use-intent and confirm flow instead.',
+    );
+  }
+
   const usageData = {
     usedAt: now,
     verifiedBy: verifierWallet.toLowerCase(),
@@ -827,7 +872,7 @@ export async function confirmRefundTransaction(payload = {}, repos = {}) {
 /**
  * Verify ticket ownership and return ticket details
  */
-export async function verifyTicket(tokenId, walletAddress, verifierWallet, repos = {}) {
+export async function verifyTicket(tokenId, eventId, walletAddress, verifierWallet, repos = {}) {
   const ticketRepository = repos.ticketRepo || ticketRepo;
   const eventRepository = repos.eventRepo || eventRepo;
 
@@ -835,6 +880,10 @@ export async function verifyTicket(tokenId, walletAddress, verifierWallet, repos
 
   if (!ticket) {
     throw new NotFoundError('Ticket not found');
+  }
+
+  if (eventId && String(ticket.eventId) !== String(eventId)) {
+    throw new BadRequestError('Ticket does not belong to this event');
   }
 
   const event = await eventRepository.findById(ticket.eventId);
@@ -853,10 +902,26 @@ export async function verifyTicket(tokenId, walletAddress, verifierWallet, repos
     throw new BadRequestError('Current time must be within event dates');
   }
 
-  const isOwner = ticket.currentOwner.toLowerCase() === walletAddress.toLowerCase();
+  let resolvedOwner = normalizeWalletAddress(ticket.currentOwner);
+
+  if (event.contractEventId) {
+    const chainSnapshot = await getOnChainTicketSnapshot(ticket.tokenId, event);
+
+    if (chainSnapshot.status !== ONCHAIN_TICKET_STATUS.SOLD) {
+      throw new BadRequestError('Ticket is not in sold state on-chain');
+    }
+
+    resolvedOwner = chainSnapshot.owner;
+  }
+
+  const normalizedWallet = normalizeWalletAddress(walletAddress);
+  const isOwner = normalizedWallet
+    ? resolvedOwner === normalizedWallet
+    : !!resolvedOwner;
 
   return {
     isOwner,
+    ownerWallet: resolvedOwner,
     ticket,
   };
 }

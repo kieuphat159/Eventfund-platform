@@ -31,6 +31,7 @@ export interface EventItem {
   description?: string;
   category?: string;
   status?: EventStatus;
+  verifiers?: string[];
 
   startDate?: string;
   endDate?: string;
@@ -89,6 +90,24 @@ export interface EventsResponse {
 export interface EventDetailResponse {
   success: boolean;
   data?: EventItem;
+  message?: string;
+}
+
+export interface AdminUserItem {
+  _id?: string;
+  walletAddress: string;
+  username?: string;
+  email?: string;
+  role?: "user" | "organizer" | "verifier" | "admin";
+  isActive?: boolean;
+  createdAt?: string;
+}
+
+interface AdminUsersResponse {
+  success: boolean;
+  data?: {
+    docs?: AdminUserItem[];
+  };
   message?: string;
 }
 
@@ -392,6 +411,24 @@ export async function getEventById(eventId: string): Promise<EventItem | null> {
 export async function getMyEvents(walletAddress: string): Promise<EventItem[]> {
   if (!walletAddress) return [];
   return getEvents({ organizer: walletAddress });
+}
+
+export async function getManagedEvents(
+  walletAddress: string,
+): Promise<EventItem[]> {
+  if (!walletAddress) return [];
+
+  const normalizedWallet = walletAddress.toLowerCase();
+  const events = await getEvents({ limit: 100 });
+
+  return events.filter((event) =>
+    Array.isArray(event.verifiers)
+      ? event.verifiers.some(
+          (verifierWallet) =>
+            verifierWallet?.toLowerCase() === normalizedWallet,
+        )
+      : false,
+  );
 }
 
 export async function getAdminEvents(params?: {
@@ -1619,6 +1656,31 @@ export async function updateAdminEventStatus(
 export async function deleteEvent(eventId: string): Promise<boolean> {
   await api.delete(`/events/${eventId}`);
   return true;
+}
+
+export async function assignEventVerifierOnChain(
+  eventId: string,
+  verifierWallet: string,
+): Promise<EventItem | null> {
+  const response = await api.post<CreateEventResponse>(
+    `/events/${eventId}/assign-verifier/onchain`,
+    { verifier: verifierWallet },
+  );
+
+  return response.data || null;
+}
+
+export async function getVerifierUsers(): Promise<AdminUserItem[]> {
+  const response = await api.get<AdminUsersResponse>(
+    "/admin/users?role=verifier&limit=100",
+  );
+
+  const docs = response.data?.docs || [];
+  return docs.sort((a, b) => {
+    const left = (a.username || a.email || a.walletAddress || "").toLowerCase();
+    const right = (b.username || b.email || b.walletAddress || "").toLowerCase();
+    return left.localeCompare(right);
+  });
 }
 
 export async function getEventStats(eventId: string) {

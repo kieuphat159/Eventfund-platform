@@ -7,3 +7,18 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+declare module "react-qr-scanner" {
+  import type { ComponentType } from "react";
+
+  interface QrScannerProps {
+    delay?: number | false;
+    facingMode?: "front" | "rear";
+    onError?: (error: unknown) => void;
+    onScan?: (result: string | null) => void;
+    style?: Record<string, unknown>;
+  }
+
+  const QrScanner: ComponentType<QrScannerProps>;
+  export default QrScanner;
+}

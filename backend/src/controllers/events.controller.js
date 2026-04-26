@@ -267,6 +267,15 @@ class EventsController {
   });
 
   /**
+   * POST /events/:id/assign-verifier/onchain
+   * Assign verifier on-chain and sync DB
+   */
+  assignVerifierOnChain = asyncHandler(async (req, res) => {
+    const { verifier } = req.body;
+
+    const event = await this.eventsService.assignVerifierOnChain(
+      req.params.id,
+      verifier,
    * POST /events/:id/mark-completed
    * Mark event as completed when ticket usage threshold is met
    */

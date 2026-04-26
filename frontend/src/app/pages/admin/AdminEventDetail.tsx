@@ -10,6 +10,17 @@ import {
   TrendingUp,
   User,
   Wallet,
+} from 'lucide-react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
+import { Button } from '../../components/ui/button';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../../components/ui/select';
+import { StatusBadge } from '../../components/StatusBadge';
 } from "lucide-react";
 import {
   Card,
@@ -21,8 +32,11 @@ import {
 import { Button } from "../../components/ui/button";
 import { StatusBadge } from "../../components/StatusBadge";
 import {
+  assignEventVerifierOnChain,
   getAdminEventById,
   getAdminEventInvestments,
+  getVerifierUsers,
+  type AdminUserItem,
   type AdminEventInvestmentsData,
   type EventItem,
 } from "../../services/events.service";
@@ -31,6 +45,15 @@ import { calculatePercentage, formatIntegerWithUnit } from "../../lib/utils";
 export const AdminEventDetail: React.FC = () => {
   const { id } = useParams();
   const [event, setEvent] = useState<EventItem | null>(null);
+  const [investmentData, setInvestmentData] = useState<AdminEventInvestmentsData | null>(null);
+  const [verifierUsers, setVerifierUsers] = useState<AdminUserItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [verifierWallet, setVerifierWallet] = useState('');
+  const [loadingVerifiers, setLoadingVerifiers] = useState(false);
+  const [assigningVerifierOnChain, setAssigningVerifierOnChain] = useState(false);
+  const [assignOnChainError, setAssignOnChainError] = useState('');
+  const [assignOnChainSuccess, setAssignOnChainSuccess] = useState('');
   const [investmentData, setInvestmentData] =
     useState<AdminEventInvestmentsData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -46,10 +69,14 @@ export const AdminEventDetail: React.FC = () => {
 
       try {
         setLoading(true);
+        setLoadingVerifiers(true);
+        setError('');
         setError("");
 
-        const [eventData, investments] = await Promise.all([
+        const [eventData, investments, verifierOptions] = await Promise.all([
           getAdminEventById(id),
+          getAdminEventInvestments(id, { limit: 10, sort: '-contributionAmount' }),
+          getVerifierUsers(),
           getAdminEventInvestments(id, {
             limit: 10,
             sort: "-contributionAmount",
@@ -63,12 +90,14 @@ export const AdminEventDetail: React.FC = () => {
 
         setEvent(eventData);
         setInvestmentData(investments);
+        setVerifierUsers(verifierOptions.filter((item) => item.isActive !== false));
       } catch (err) {
         setError(
           err instanceof Error ? err.message : "Failed to load event details",
         );
       } finally {
         setLoading(false);
+        setLoadingVerifiers(false);
       }
     };
 
@@ -83,6 +112,84 @@ export const AdminEventDetail: React.FC = () => {
   }, [event?.currentFunding, event?.fundingGoal]);
   const investmentMode =
     event?.investmentEnabled === false ? "Self-funded" : "Investment-enabled";
+
+  const assignedVerifiers = useMemo(
+    () => new Set((event?.verifiers || []).map((wallet) => wallet.toLowerCase())),
+    [event?.verifiers],
+  );
+
+  const availableVerifierUsers = useMemo(
+    () =>
+      verifierUsers.filter(
+        (verifier) => !assignedVerifiers.has(verifier.walletAddress.toLowerCase()),
+      ),
+    [assignedVerifiers, verifierUsers],
+  );
+
+  const verifierMap = useMemo(
+    () =>
+      new Map(
+        verifierUsers.map((verifier) => [
+          verifier.walletAddress.toLowerCase(),
+          verifier,
+        ]),
+      ),
+    [verifierUsers],
+  );
+
+  const formatVerifierOption = (verifier: AdminUserItem) => {
+    const identity = verifier.username || verifier.email || 'Unnamed verifier';
+    return `${identity} - ${verifier.walletAddress}`;
+  };
+
+  useEffect(() => {
+    if (!verifierWallet && availableVerifierUsers.length > 0) {
+      setVerifierWallet(availableVerifierUsers[0].walletAddress.toLowerCase());
+    } else if (
+      verifierWallet &&
+      !availableVerifierUsers.some(
+        (verifier) =>
+          verifier.walletAddress.toLowerCase() === verifierWallet.toLowerCase(),
+      )
+    ) {
+      setVerifierWallet(availableVerifierUsers[0]?.walletAddress.toLowerCase() || '');
+    }
+  }, [availableVerifierUsers, verifierWallet]);
+
+  const handleAssignVerifierOnChain = async () => {
+    const eventId = event?._id || event?.id;
+    if (!eventId) {
+      setAssignOnChainError('Invalid event id.');
+      return;
+    }
+
+    const normalizedWallet = verifierWallet.trim().toLowerCase();
+    if (!normalizedWallet) {
+      setAssignOnChainError('Please select a verifier.');
+      return;
+    }
+
+    try {
+      setAssigningVerifierOnChain(true);
+      setAssignOnChainError('');
+      setAssignOnChainSuccess('');
+
+      const updatedEvent = await assignEventVerifierOnChain(eventId, normalizedWallet);
+      if (!updatedEvent) {
+        throw new Error('Assign verifier on-chain returned no data.');
+      }
+
+      setEvent(updatedEvent);
+      setVerifierWallet('');
+      setAssignOnChainSuccess('Verifier assigned on-chain successfully.');
+    } catch (err) {
+      setAssignOnChainError(
+        err instanceof Error ? err.message : 'Failed to assign verifier on-chain.',
+      );
+    } finally {
+      setAssigningVerifierOnChain(false);
+    }
+  };
 
   if (loading) {
     return <div className="text-white">Loading event details...</div>;
@@ -380,6 +487,104 @@ export const AdminEventDetail: React.FC = () => {
               ))}
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      <Card className="bg-slate-900 border-slate-800">
+        <CardHeader>
+          <CardTitle className="text-white">Verifier Assignment</CardTitle>
+          <CardDescription className="text-slate-400">
+            Choose from active accounts that already have verifier role
+          </CardDescription>
+        </CardHeader>
+
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_auto]">
+            <Select
+              value={verifierWallet}
+              onValueChange={setVerifierWallet}
+              disabled={loadingVerifiers || availableVerifierUsers.length === 0}
+            >
+              <SelectTrigger className="bg-slate-800 border-slate-700 text-white">
+                <SelectValue
+                  placeholder={
+                    loadingVerifiers
+                      ? 'Loading verifier accounts...'
+                      : availableVerifierUsers.length > 0
+                        ? 'Select verifier account'
+                        : 'No unassigned verifier account available'
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent className="bg-slate-800 border-slate-700">
+                {availableVerifierUsers.map((verifier) => (
+                  <SelectItem
+                    key={verifier.walletAddress}
+                    value={verifier.walletAddress.toLowerCase()}
+                    className="text-white hover:bg-slate-700"
+                  >
+                    {formatVerifierOption(verifier)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button
+              onClick={handleAssignVerifierOnChain}
+              disabled={assigningVerifierOnChain || !verifierWallet || !event.contractEventId}
+              variant="outline"
+              className="border-cyan-600 text-cyan-300 hover:bg-cyan-950/40 hover:text-cyan-200"
+              title={event.contractEventId ? 'Assign verifier on-chain' : 'Event is not synced to chain yet'}
+            >
+              {assigningVerifierOnChain ? 'On-chain...' : 'Assign On-chain'}
+            </Button>
+          </div>
+
+          {assignOnChainError && <p className="text-sm text-red-400">{assignOnChainError}</p>}
+          {assignOnChainSuccess && <p className="text-sm text-emerald-400">{assignOnChainSuccess}</p>}
+
+          {event.contractEventId ? (
+            <p className="text-sm text-cyan-300">
+              This event is on-chain, so verifier assignment is handled only on-chain.
+            </p>
+          ) : (
+            <p className="text-sm text-yellow-300">
+              Sync this event on-chain first before assigning verifiers.
+            </p>
+          )}
+
+          <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-4 text-sm text-slate-300">
+            <div className="flex items-center justify-between gap-3">
+              <span>On-chain Event ID</span>
+              <span className="break-all font-medium text-white">
+                {event.contractEventId || 'Not synced yet'}
+              </span>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-4">
+            <p className="mb-3 text-sm font-medium text-slate-300">Current Verifiers</p>
+
+            {Array.isArray(event.verifiers) && event.verifiers.length > 0 ? (
+              <div className="space-y-2">
+                {event.verifiers.map((wallet) => {
+                  const verifier = verifierMap.get(wallet.toLowerCase());
+                  return (
+                    <div
+                      key={wallet}
+                      className="rounded-md bg-slate-900/70 px-3 py-2 text-sm text-slate-300"
+                    >
+                      <p className="font-medium text-white">
+                        {verifier?.username || verifier?.email || 'Verifier account'}
+                      </p>
+                      <p className="mt-1 break-all text-xs text-slate-400">{wallet}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-sm text-slate-500">No verifier assigned yet.</p>
+            )}
+          </div>
         </CardContent>
       </Card>
     </div>

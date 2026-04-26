@@ -31,8 +31,20 @@ import { useWeb3Auth } from "@web3auth/modal/react";
 
 const ETH_ADDRESS_REGEX = /^0x[a-fA-F0-9]{40}$/;
 
+const resolveTicketEventId = (ticket: ApiTicket): string | null => {
+  if (ticket.eventIdRaw) return ticket.eventIdRaw;
+  if (typeof ticket.eventId === "string") return ticket.eventId;
+  if (typeof ticket.eventId === "object" && ticket.eventId?._id) {
+    return ticket.eventId._id;
+  }
+  return null;
+};
+
 const buildQR = (ticket: ApiTicket) => {
-  return `http://localhost:3000/tickets/verify/${ticket.tokenId}`;
+  const tokenId = String(ticket.tokenId).trim();
+  const eventId = (resolveTicketEventId(ticket) || "").trim();
+
+  return `eft1:${tokenId}:${eventId}`;
 };
 
 const getTicketQrCanvasId = (ticket: ApiTicket) => {
@@ -393,6 +405,9 @@ export const MyTickets: React.FC = () => {
                       id={getTicketQrCanvasId(ticket)}
                       value={buildQR(ticket)}
                       size={800}
+                      level="L"
+                      bgColor="#ffffff"
+                      fgColor="#111111"
                       includeMargin
                     />
                   </div>
@@ -485,16 +500,25 @@ export const MyTickets: React.FC = () => {
       )}
       {selectedTicket && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-          <div className="bg-slate-900 p-6 rounded-xl border border-slate-700 text-center w-[300px]">
+          <div className="bg-slate-900 p-6 rounded-xl border border-slate-700 text-center w-[380px] max-w-[92vw]">
             <h3 className="text-white mb-4 font-semibold">
               Ticket #{selectedTicket.tokenId}
             </h3>
 
             <div className="flex justify-center items-center">
-              <QRCodeCanvas value={buildQR(selectedTicket)} size={200} />
+              <QRCodeCanvas
+                value={buildQR(selectedTicket)}
+                size={280}
+                level="L"
+                bgColor="#ffffff"
+                fgColor="#111111"
+                includeMargin
+              />
             </div>
 
-            <p className="text-slate-400 text-xs mt-3">Scan to verify ticket</p>
+            <p className="text-slate-400 text-xs mt-3">
+              Verifier sẽ quét mã này để xác thực vé
+            </p>
 
             <Button
               className="mt-4 w-full"
