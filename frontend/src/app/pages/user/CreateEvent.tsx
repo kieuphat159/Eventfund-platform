@@ -48,6 +48,7 @@ export const CreateEvent: React.FC = () => {
 
   const [fundingGoal, setFundingGoal] = useState("");
   const [minStakeRequired, setMinStakeRequired] = useState("");
+  const [minInvestmentAmount, setMinInvestmentAmount] = useState("");
   const [investmentEnabled, setInvestmentEnabled] = useState(true);
 
   const [submitting, setSubmitting] = useState(false);
@@ -71,6 +72,7 @@ export const CreateEvent: React.FC = () => {
     setCategory("");
     setFundingGoal("");
     setMinStakeRequired("");
+    setMinInvestmentAmount("");
     setInvestmentEnabled(true);
     setTicketTiers([{ name: "General", price: "", supply: "" }]);
     setFieldErrors({});
@@ -125,19 +127,25 @@ export const CreateEvent: React.FC = () => {
     }, 0n);
   };
 
-  // Calculate minimum stake as 5% of total ticket value when investment is disabled
-  const calculateMinStakeForSelfFunded = () => {
+  // Creation fee is fixed at 5% of total ticket value for all event modes.
+  const calculateCreationFeeWei = () => {
     const totalValue = calculateTotalTicketValue();
+    if (totalValue <= 0n) {
+      return "0";
+    }
+
     const minStakeInWei = totalValue / 20n; // 5% = divide by 20
+    if (minStakeInWei <= 0n) {
+      return "1";
+    }
+
     return minStakeInWei.toString();
   };
 
-  // Auto-recalculate min stake whenever ticket tiers change and investment is disabled
+  // Always keep creation fee synced with ticket tiers.
   useEffect(() => {
-    if (!investmentEnabled) {
-      setMinStakeRequired(calculateMinStakeForSelfFunded());
-    }
-  }, [ticketTiers, investmentEnabled]);
+    setMinStakeRequired(calculateCreationFeeWei());
+  }, [ticketTiers]);
 
   const buildStartDate = () => {
     return parseOptionalDateTime(startAt);
@@ -209,27 +217,17 @@ export const CreateEvent: React.FC = () => {
         errors.fundingGoal = "Funding goal must be a positive integer string.";
       }
 
-      if (
-        minStakeRequired.trim() &&
-        (!/^\d+$/.test(minStakeRequired.trim()) ||
-          BigInt(minStakeRequired.trim()) <= 0n)
-      ) {
-        errors.minStakeRequired =
-          "Min stake required must be a positive integer string.";
+      if (!minInvestmentAmount.trim()) {
+        errors.minInvestmentAmount = "Minimum investment amount is required.";
+      } else if (!isPositiveWeiInteger(minInvestmentAmount)) {
+        errors.minInvestmentAmount =
+          "Minimum investment amount must be a positive integer string.";
       }
     }
 
-    if (!investmentEnabled) {
-      if (!minStakeRequired.trim()) {
-        errors.minStakeRequired =
-          "Organizer stake is required and must be a positive integer string.";
-      } else if (
-        !/^\d+$/.test(minStakeRequired.trim()) ||
-        BigInt(minStakeRequired.trim()) <= 0n
-      ) {
-        errors.minStakeRequired =
-          "Organizer stake is required and must be a positive integer string.";
-      }
+    if (!isPositiveWeiInteger(minStakeRequired || "0")) {
+      errors.minStakeRequired =
+        "Creation fee must be greater than 0. Please add ticket tiers with valid price and supply.";
     }
 
     if (!description.trim()) {
@@ -432,6 +430,8 @@ export const CreateEvent: React.FC = () => {
         (sum, tier) => sum + tier.totalSupply,
         0,
       );
+      const primaryTicketPriceWei =
+        normalizedTiers[0]?.price?.toString() ?? "0";
 
       setSubmitting(true);
 
@@ -483,7 +483,10 @@ export const CreateEvent: React.FC = () => {
         {
           ...basePayload,
           fundingGoal: investmentEnabled ? fundingGoal.trim() : "0",
-          minStakeRequired: minStakeRequired.trim() || undefined,
+          minStakeRequired,
+          minInvestmentAmount: investmentEnabled
+            ? minInvestmentAmount.trim()
+            : undefined,
           fundingDeadline: investmentEnabled
             ? fundingDeadline?.toISOString()
             : new Date(start.getTime() - 24 * 60 * 60 * 1000).toISOString(), // startDate - 1 day when investment disabled
@@ -524,9 +527,9 @@ export const CreateEvent: React.FC = () => {
       <div>
         <h1 className="text-3xl font-bold text-white mb-2">Create Event</h1>
         <p className="text-slate-400">
-          Investment-enabled events go through on-chain funding. If you turn
-          investment off, the event is created on-chain in funded state so
-          admins can move it straight into ticketing later.
+          Every event charges a fixed creation fee equal to 5% of total ticket
+          value. If investment is off, organizer receives 100% of net revenue.
+          If investment is on, revenue is split 70% organizer and 30% investors.
         </p>
       </div>
 
@@ -966,8 +969,8 @@ export const CreateEvent: React.FC = () => {
         <CardHeader>
           <CardTitle className="text-white">Investment Options</CardTitle>
           <CardDescription className="text-slate-400">
-            Optional funding configuration. Disable investment if the organizer
-            is already self-funded and does not need outside investors.
+            Every event pays 5% creation fee from total ticket value. Investment
+            mode adds outside investors and applies a 70/30 split.
           </CardDescription>
         </CardHeader>
 
@@ -981,23 +984,18 @@ export const CreateEvent: React.FC = () => {
                 const enabled = e.target.checked;
                 setInvestmentEnabled(enabled);
                 if (!enabled) {
-                  // When investment is disabled, set funding goal to 0 and calculate min stake
                   setFundingGoal("0");
                   setFundingDeadlineAt("");
-                  // Auto-calculate minimum stake as 10% of total ticket value
-                  const calculatedMinStake = calculateMinStakeForSelfFunded();
-                  setMinStakeRequired(calculatedMinStake);
+                  setMinInvestmentAmount("");
                   setFieldErrors((prev) => {
                     const next = { ...prev };
                     delete next.fundingGoal;
-                    delete next.minStakeRequired;
+                    delete next.minInvestmentAmount;
                     delete next.fundingDeadlineAt;
                     return next;
                   });
                 } else {
-                  // When investment is enabled, reset to empty values
                   setFundingGoal("");
-                  setMinStakeRequired("");
                 }
               }}
               className="w-4 h-4 rounded border-slate-700 bg-slate-800 accent-cyan-400"
@@ -1042,35 +1040,21 @@ export const CreateEvent: React.FC = () => {
 
             <div>
               <Label htmlFor="min-stake-required" className="text-slate-300">
-                Organizer Stake (wei)
-                {!investmentEnabled && (
-                  <span className="text-xs text-slate-400 ml-2">
-                    (Auto-calculated: 10% of total ticket value)
-                  </span>
-                )}
+                Event Creation Fee (wei)
+                <span className="text-xs text-slate-400 ml-2">
+                  (Auto-calculated: 5% of total ticket value)
+                </span>
               </Label>
               <Input
                 id="min-stake-required"
                 value={minStakeRequired}
-                onChange={(e) => {
-                  setMinStakeRequired(e.target.value);
-                  setFieldErrors((prev) => {
-                    const next = { ...prev };
-                    delete next.minStakeRequired;
-                    return next;
-                  });
-                }}
-                placeholder={
-                  !investmentEnabled
-                    ? "Auto-calculated based on ticket tiers"
-                    : "1000000000000000000"
-                }
+                placeholder="Auto-calculated based on ticket tiers"
                 className={`mt-1.5 bg-slate-800 text-white ${
                   fieldErrors.minStakeRequired
                     ? "border-red-500 focus-visible:ring-red-500"
                     : "border-slate-700"
-                } ${!investmentEnabled ? "bg-slate-700 text-slate-300" : ""}`}
-                readOnly={!investmentEnabled}
+                } bg-slate-700 text-slate-300`}
+                readOnly
               />
               {fieldErrors.minStakeRequired && (
                 <p className="mt-1 text-sm text-red-400">
@@ -1079,6 +1063,39 @@ export const CreateEvent: React.FC = () => {
               )}
             </div>
           </div>
+
+          {investmentEnabled && (
+            <div>
+              <Label htmlFor="min-investment-amount" className="text-slate-300">
+                Minimum Investment Amount (wei) *
+              </Label>
+              <Input
+                id="min-investment-amount"
+                value={minInvestmentAmount}
+                onChange={(e) => {
+                  setMinInvestmentAmount(e.target.value);
+                  if (fieldErrors.minInvestmentAmount) {
+                    setFieldErrors((prev) => {
+                      const next = { ...prev };
+                      delete next.minInvestmentAmount;
+                      return next;
+                    });
+                  }
+                }}
+                placeholder="100000000000000000"
+                className={`mt-1.5 bg-slate-800 text-white ${
+                  fieldErrors.minInvestmentAmount
+                    ? "border-red-500 focus-visible:ring-red-500"
+                    : "border-slate-700"
+                }`}
+              />
+              {fieldErrors.minInvestmentAmount && (
+                <p className="mt-1 text-sm text-red-400">
+                  {fieldErrors.minInvestmentAmount}
+                </p>
+              )}
+            </div>
+          )}
 
           {investmentEnabled && (
             <div>
@@ -1119,8 +1136,8 @@ export const CreateEvent: React.FC = () => {
           )}
 
           <p className="text-xs text-slate-500">
-            Stake, funding, and ticket tier price fields use integer wei values.
-            Minimum organizer stake is used as the on-chain stake threshold.
+            Ticket tier prices, funding goal, and minimum investment amount use
+            integer wei values.
           </p>
         </CardContent>
       </Card>

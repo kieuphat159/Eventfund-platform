@@ -1,11 +1,13 @@
 import { jest } from "@jest/globals";
 
 const fundAddress = "0x3333333333333333333333333333333333333333";
+const ticketAddress = "0x4444444444444444444444444444444444444444";
 
 const mockFundWithSigner = {
   createEvent: jest.fn(),
   createEventWithInvestment: jest.fn(),
   finalizeFunding: jest.fn(),
+  cancelEvent: jest.fn(),
   startTicketing: jest.fn(),
   setCompletedIfThresholdMet: jest.fn(),
 };
@@ -18,12 +20,21 @@ const mockFund = {
   },
 };
 
+const mockTicket = {
+  getAddress: jest.fn(),
+  interface: {
+    parseLog: jest.fn(),
+  },
+};
+
 const mockPersistLogsFromReceipt = jest.fn();
 const mockGetFund = jest.fn(() => mockFund);
+const mockGetTicket = jest.fn(() => mockTicket);
 
 jest.unstable_mockModule("../../../services/blockchain/index.js", () => ({
   provider: {},
   getFund: mockGetFund,
+  getTicket: mockGetTicket,
 }));
 
 jest.unstable_mockModule(
@@ -44,8 +55,13 @@ describe("admin.service updateEventStatus", () => {
       "0x59c6995e998f97a5a0044966f0945382d7d8b6d2f6f6b7b85d3c7f3c6a7b1234";
 
     mockGetFund.mockReturnValue(mockFund);
+    mockGetTicket.mockReturnValue(mockTicket);
     mockFund.getAddress.mockResolvedValue(fundAddress);
     mockFund.connect.mockReturnValue(mockFundWithSigner);
+    mockTicket.getAddress.mockResolvedValue(ticketAddress);
+    mockTicket.interface.parseLog.mockImplementation(() => {
+      throw new Error("Unknown ticket log");
+    });
     mockFund.interface.parseLog.mockImplementation((log) => {
       if (log.data === "0xcreated") {
         return {
@@ -79,6 +95,17 @@ describe("admin.service updateEventStatus", () => {
         };
       }
 
+      if (log.data === "0xcancelled") {
+        return {
+          name: "EventCancelled",
+          args: {
+            reason: 2,
+            ticketRefundsEnabled: true,
+            refundPoolAmount: 100n,
+          },
+        };
+      }
+
       throw new Error("Unknown log");
     });
 
@@ -98,6 +125,12 @@ describe("admin.service updateEventStatus", () => {
       wait: jest.fn().mockResolvedValue({
         status: 1,
         logs: [{ address: fundAddress, data: "0xticketing" }],
+      }),
+    });
+    mockFundWithSigner.cancelEvent.mockResolvedValue({
+      wait: jest.fn().mockResolvedValue({
+        status: 1,
+        logs: [{ address: fundAddress, data: "0xcancelled" }],
       }),
     });
   });
@@ -167,7 +200,7 @@ describe("admin.service updateEventStatus", () => {
       draftEvent._id,
       { status: "ticketing" },
     );
-    expect(mockPersistLogsFromReceipt).toHaveBeenCalledTimes(2);
+    expect(mockPersistLogsFromReceipt).toHaveBeenCalledTimes(3);
     expect(result).toMatchObject({
       contractEventId: "9",
       status: "ticketing",
@@ -223,5 +256,133 @@ describe("admin.service updateEventStatus", () => {
     });
 
     contributionFind.mockRestore();
+  });
+
+  test("cancels ticketing event on-chain with reason metadata", async () => {
+    const ticketingEvent = {
+      _id: "507f1f77bcf86cd799439099",
+      title: "Slow sales",
+      organizer: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      status: "ticketing",
+      contractEventId: "9",
+      fundingGoal: "1000",
+      currentFunding: "1000",
+    };
+
+    const repository = {
+      findById: jest.fn().mockResolvedValue(ticketingEvent),
+      updateById: jest.fn().mockResolvedValue({
+        ...ticketingEvent,
+        status: "cancelled",
+        cancellationReason: "organizer_cancelled",
+        cancellationNote: "sales too low",
+      }),
+    };
+
+    const result = await updateEventStatus(
+      ticketingEvent._id,
+      "cancelled",
+      {
+        reason: "sales too low",
+        actor: {
+          walletAddress: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        },
+      },
+      { eventRepo: repository },
+    );
+
+    expect(mockFundWithSigner.cancelEvent).toHaveBeenCalledWith(9n, 1);
+    expect(repository.updateById).toHaveBeenCalledWith(
+      ticketingEvent._id,
+      expect.objectContaining({
+        status: "cancelled",
+        cancellationReason: "organizer_cancelled",
+        cancellationNote: "sales too low",
+        cancelledBy: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      }),
+    );
+    expect(result).toMatchObject({
+      status: "cancelled",
+      cancellationReason: "organizer_cancelled",
+    });
+  });
+
+  test("marks ticketing event as failed on-chain when ticket sales are not met", async () => {
+    const ticketingEvent = {
+      _id: "507f1f77bcf86cd799439055",
+      title: "Failed ticketing",
+      organizer: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      status: "ticketing",
+      contractEventId: "9",
+      fundingGoal: "1000",
+      currentFunding: "1000",
+    };
+
+    const repository = {
+      findById: jest.fn().mockResolvedValue(ticketingEvent),
+      updateById: jest.fn().mockResolvedValue({
+        ...ticketingEvent,
+        status: "failed",
+        cancellationReason: "ticket_sales_not_met",
+      }),
+    };
+
+    const result = await updateEventStatus(
+      ticketingEvent._id,
+      "failed",
+      {},
+      { eventRepo: repository },
+    );
+
+    expect(mockFundWithSigner.cancelEvent).toHaveBeenCalledWith(9n, 2);
+    expect(repository.updateById).toHaveBeenCalledWith(
+      ticketingEvent._id,
+      expect.objectContaining({
+        status: "failed",
+        cancellationReason: "ticket_sales_not_met",
+      }),
+    );
+    expect(result).toMatchObject({
+      status: "failed",
+      cancellationReason: "ticket_sales_not_met",
+    });
+  });
+
+  test("moves ticketing event to ongoing without an on-chain status change", async () => {
+    const ticketingEvent = {
+      _id: "507f1f77bcf86cd799439066",
+      title: "Ready to start",
+      organizer: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      status: "ticketing",
+      contractEventId: "9",
+      fundingGoal: "1000",
+      currentFunding: "1000",
+    };
+
+    const repository = {
+      findById: jest.fn().mockResolvedValue(ticketingEvent),
+      updateById: jest.fn().mockResolvedValue({
+        ...ticketingEvent,
+        status: "ongoing",
+      }),
+    };
+
+    const result = await updateEventStatus(
+      ticketingEvent._id,
+      "ongoing",
+      {},
+      { eventRepo: repository },
+    );
+
+    expect(mockFundWithSigner.cancelEvent).not.toHaveBeenCalled();
+    expect(mockFundWithSigner.finalizeFunding).not.toHaveBeenCalled();
+    expect(mockFundWithSigner.startTicketing).not.toHaveBeenCalled();
+    expect(repository.updateById).toHaveBeenCalledWith(
+      ticketingEvent._id,
+      { status: "ongoing" },
+    );
+    expect(result).toMatchObject({
+      status: "ongoing",
+    });
   });
 });

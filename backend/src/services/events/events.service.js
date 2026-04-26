@@ -3,6 +3,7 @@ import { ethers } from "ethers";
 import * as eventRepo from "../../repositories/event.repo.js";
 import * as userRepo from "../../repositories/user.repo.js";
 import * as shareRepo from "../../repositories/share.repo.js";
+import * as contributionRepo from "../../repositories/contribution.repo.js";
 import {
   addBigInt,
   compareBigInt,
@@ -69,6 +70,7 @@ function parseOnChainEventId(event) {
 }
 
 function getBlockchainErrorMessage(error) {
+function getRawBlockchainErrorMessage(error) {
   if (!error || typeof error !== "object") {
     return String(error || "Unknown blockchain error");
   }
@@ -81,6 +83,171 @@ function getBlockchainErrorMessage(error) {
     error.error?.message ||
     "Unknown blockchain error"
   );
+}
+
+function extractBlockchainErrorData(error) {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  const queue = [error];
+  const visited = new Set();
+
+  while (queue.length) {
+    const current = queue.shift();
+    if (!current || typeof current !== "object" || visited.has(current)) {
+      continue;
+    }
+
+    visited.add(current);
+
+    if (
+      typeof current.data === "string" &&
+      current.data.startsWith("0x") &&
+      current.data.length >= 10
+    ) {
+      return current.data;
+    }
+
+    if (current.error) queue.push(current.error);
+    if (current.info?.error) queue.push(current.info.error);
+    if (current.cause) queue.push(current.cause);
+  }
+
+  return null;
+}
+
+function mapFundCustomErrorToMessage(errorName) {
+  const messages = {
+    NotAuthorized:
+      "Backend signer is not authorized to cancel this event. Organizer wallet signature is required.",
+    NotOrganizer:
+      "Only the organizer can perform this on-chain action from the connected wallet.",
+    EventNotFound: "Event was not found on-chain.",
+    AlreadyFinalized: "Event is already cancelled or finalized on-chain.",
+    Unsafe: "Event cannot be cancelled in its current on-chain state.",
+    BadParam:
+      "Cancellation parameters are invalid for the current on-chain state.",
+    NotFunding: "Event is not in funding state on-chain.",
+    NotFunded: "Event is not in funded state on-chain.",
+    NotTicketing: "Event is not in ticketing state on-chain.",
+    NotCompleted: "Event is not completed on-chain.",
+    FundingClosed: "Funding is already closed on-chain.",
+    ShareLocked: "Event shares are already finalized on-chain.",
+  };
+
+  return messages[errorName] || null;
+}
+
+function getBlockchainErrorMeta(error) {
+  const fallbackMessage = getRawBlockchainErrorMessage(error);
+  const normalizedFallbackMessage = String(fallbackMessage).toLowerCase();
+
+  if (
+    normalizedFallbackMessage.includes("no data present") ||
+    normalizedFallbackMessage.includes("likely require(false) occurred")
+  ) {
+    return {
+      code: "NO_REVERT_DATA",
+      message:
+        "On-chain cancellation reverted without error data. The deployed Fund contract may not match the current ABI/source in this repo, or FUND_ADDRESS may point to an older deployment. Verify FUND_ADDRESS on Sepolia and redeploy/update contracts if needed.",
+      shouldFallbackToOrganizerWallet: false,
+    };
+  }
+
+  if (
+    error &&
+    typeof error === "object" &&
+    typeof error.revert?.name === "string"
+  ) {
+    const message =
+      mapFundCustomErrorToMessage(error.revert.name) || fallbackMessage;
+    return {
+      code: error.revert.name,
+      message,
+      shouldFallbackToOrganizerWallet:
+        error.revert.name === "NotAuthorized" ||
+        error.revert.name === "NotOrganizer",
+    };
+  }
+
+  const errorData = extractBlockchainErrorData(error);
+  if (errorData) {
+    try {
+      const fund = getFund();
+      if (typeof fund?.interface?.parseError === "function") {
+        const parsedError = fund.interface.parseError(errorData);
+        const errorName = parsedError?.name;
+        if (errorName) {
+          const message =
+            mapFundCustomErrorToMessage(errorName) || fallbackMessage;
+          return {
+            code: errorName,
+            message,
+            shouldFallbackToOrganizerWallet:
+              errorName === "NotAuthorized" || errorName === "NotOrganizer",
+          };
+        }
+      }
+    } catch {
+      // Fall through to the raw error message.
+    }
+  }
+
+  return {
+    code: null,
+    message: fallbackMessage,
+    shouldFallbackToOrganizerWallet: false,
+  };
+}
+
+function getBlockchainErrorMessage(error) {
+  return getBlockchainErrorMeta(error).message;
+}
+
+function shouldIgnoreReleaseRevenueError(error) {
+  const { code, message } = getBlockchainErrorMeta(error);
+  if (code === "BadParam" || code === "AlreadyFinalized") {
+    return true;
+  }
+
+  const normalizedMessage = String(message || "").toLowerCase();
+  return (
+    normalizedMessage.includes("already finalized") ||
+    normalizedMessage.includes("badparam") ||
+    normalizedMessage.includes("missing revert data") ||
+    normalizedMessage.includes("estimate gas")
+  );
+}
+
+async function tryReleaseRevenueAfterCompletion(
+  fundWithSigner,
+  chainEventId,
+  fund,
+  fundAddress,
+) {
+  try {
+    const releaseTx = await fundWithSigner.releaseRevenue(chainEventId);
+    const releaseReceipt = await releaseTx.wait();
+    if (!releaseReceipt || Number(releaseReceipt.status) !== 1) {
+      throw new BadRequestError("On-chain release revenue transaction failed");
+    }
+
+    await persistLogsFromReceipt({
+      receipt: releaseReceipt,
+      contract: fund,
+      contractName: "Fund",
+      contractAddress: fundAddress,
+    });
+  } catch (error) {
+    if (shouldIgnoreReleaseRevenueError(error)) {
+      return;
+    }
+
+    throw new BadRequestError(
+      `Event completed on-chain but release revenue failed: ${getBlockchainErrorMessage(error)}`,
+    );
+  }
 }
 
 async function sendCreateEventWithInvestmentTx(
@@ -267,8 +434,10 @@ function buildConfirmedEventPatch(draftEvent, extra = {}) {
     description: draftEvent.description,
     category: draftEvent.category,
     organizer: draftEvent.organizer,
+    investmentEnabled: draftEvent.investmentEnabled,
     organizerStake: draftEvent.organizerStake,
     minStakeRequired: draftEvent.minStakeRequired,
+    minInvestmentAmount: draftEvent.minInvestmentAmount,
     fundingGoal: draftEvent.fundingGoal,
     currentFunding: draftEvent.currentFunding,
     organizerShareBps: draftEvent.organizerShareBps,
@@ -321,9 +490,9 @@ function resolveOwnerStatusTransition(currentStatus, requestedStatus) {
   const allowedTransitions = {
     draft: ["cancelled"],
     funding: ["cancelled"],
-    funded: [],
-    ticketing: [],
-    ongoing: [],
+    funded: ["cancelled"],
+    ticketing: ["cancelled", "ongoing"],
+    ongoing: ["completed"],
     completed: [],
     cancelled: [],
     failed: [],
@@ -349,13 +518,39 @@ function resolveDraftTicketPriceNumber(eventData) {
   return Number(firstTierPrice);
 }
 
-function resolveDefaultMinStakeRequired(fundingGoal, minStakeRequired) {
-  if (minStakeRequired !== undefined && minStakeRequired !== null) {
-    return asBigInt(minStakeRequired, "minStakeRequired");
+function calculateCreationFeeWei(ticketPrice, maxTickets) {
+  const totalTicketValue = BigInt(ticketPrice) * maxTickets;
+  const fivePercent = totalTicketValue / 20n;
+
+  // Keep non-zero stake so on-chain create validations pass.
+  return fivePercent > 0n ? fivePercent : 1n;
+}
+
+function resolveMinInvestmentAmount(eventData, investmentEnabled) {
+  if (!investmentEnabled) {
+    return 0n;
   }
 
-  // Default organizer stake requirement = 10% funding goal when not provided.
-  return fundingGoal / 10n;
+  if (
+    eventData?.minInvestmentAmount === undefined ||
+    eventData?.minInvestmentAmount === null ||
+    String(eventData.minInvestmentAmount).trim() === ""
+  ) {
+    throw new BadRequestError(
+      "minInvestmentAmount is required when investment is enabled",
+    );
+  }
+
+  const minInvestmentAmount = asBigInt(
+    eventData.minInvestmentAmount,
+    "minInvestmentAmount",
+  );
+
+  if (minInvestmentAmount <= 0n) {
+    throw new BadRequestError("minInvestmentAmount must be greater than 0");
+  }
+
+  return minInvestmentAmount;
 }
 
 function mapFundStatusToAppStatus(statusCode) {
@@ -369,6 +564,78 @@ function mapFundStatusToAppStatus(statusCode) {
   };
 
   return map[Number(statusCode)] || "failed";
+}
+
+const CHAIN_CANCELLATION_REASON = {
+  funding_goal_not_met: 0,
+  organizer_cancelled: 1,
+  ticket_sales_not_met: 2,
+};
+
+function normalizeCancellationReason(inputReason, event = null) {
+  const rawReason = typeof inputReason === "string" ? inputReason.trim() : "";
+  const normalizedReason = rawReason.toLowerCase();
+
+  if (normalizedReason === "organizer_cancelled") {
+    return {
+      reasonCode: normalizedReason,
+      cancellationNote: null,
+    };
+  }
+
+  return {
+    reasonCode: "organizer_cancelled",
+    cancellationNote: rawReason || null,
+  };
+}
+
+function buildCancellationPatch(reasonMeta, user = null) {
+  const actorAddress = user?.walletAddress || user?.smartAccountAddress;
+
+  return {
+    status: "cancelled",
+    cancellationReason: reasonMeta.reasonCode,
+    cancellationNote: reasonMeta.cancellationNote,
+    cancelledAt: new Date(),
+    ...(actorAddress ? { cancelledBy: actorAddress.toLowerCase() } : {}),
+  };
+}
+
+async function assertEventUsesCurrentFundContract(event) {
+  if (!event?.contractEventId) {
+    return null;
+  }
+
+  const fund = getFund();
+  const currentFundAddress = (await fund.getAddress()).toLowerCase();
+  const eventFundAddress = event.fundContractAddress?.toLowerCase();
+
+  if (eventFundAddress && eventFundAddress !== currentFundAddress) {
+    throw new BadRequestError(
+      "Event belongs to an older Fund deployment and can no longer be managed through the current backend configuration. Use the matching historical contract or recreate the event on the current deployment.",
+    );
+  }
+
+  return {
+    fund,
+    currentFundAddress,
+  };
+}
+
+function findParsedFundEventByNameAndEventId(
+  parsedEvents,
+  eventName,
+  chainEventId,
+) {
+  const normalizedChainEventId = String(chainEventId);
+
+  return (parsedEvents || []).find((parsedEvent) => {
+    if (parsedEvent?.name !== eventName) {
+      return false;
+    }
+
+    return String(parsedEvent.args?.eventId ?? "") === normalizedChainEventId;
+  });
 }
 
 function resolveImmediateFundingDeadline(eventData) {
@@ -438,27 +705,22 @@ function resolveTicketingTimeline(eventData, fundingDeadlineDate) {
 
 function resolveFundingConfig(eventData) {
   const investmentExplicitlyDisabled = eventData?.investmentEnabled === false;
+  const investmentExplicitlyEnabled = eventData?.investmentEnabled === true;
 
   if (investmentExplicitlyDisabled) {
-    const organizerStake = eventData.organizerStake
-      ? asBigInt(eventData.organizerStake, "organizerStake")
-      : eventData.minStakeRequired
-        ? asBigInt(eventData.minStakeRequired, "minStakeRequired")
-        : 0n;
-
-    if (organizerStake <= 0n) {
-      throw new BadRequestError(
-        "organizerStake must be greater than 0 when investment is disabled",
-      );
-    }
-
     return {
       investmentEnabled: false,
       fundingGoal: 0n,
-      minStakeRequired: organizerStake,
-      organizerStake,
+      minStakeRequired: 0n,
+      organizerStake: 0n,
       fundingDeadlineDate: null,
     };
+  }
+
+  if (investmentExplicitlyEnabled && !eventData?.fundingGoal) {
+    throw new BadRequestError(
+      "fundingGoal is required when investment is enabled",
+    );
   }
 
   const fundingGoalInput = eventData.fundingGoal;
@@ -468,20 +730,6 @@ function resolveFundingConfig(eventData) {
     String(fundingGoalInput).trim() !== "";
 
   if (!hasFundingGoal) {
-    const organizerStake = eventData.organizerStake
-      ? asBigInt(eventData.organizerStake, "organizerStake")
-      : 0n;
-
-    if (organizerStake > 0n) {
-      return {
-        investmentEnabled: false,
-        fundingGoal: 0n,
-        minStakeRequired: organizerStake,
-        organizerStake,
-        fundingDeadlineDate: null,
-      };
-    }
-
     return {
       investmentEnabled: false,
       fundingGoal: 0n,
@@ -496,24 +744,18 @@ function resolveFundingConfig(eventData) {
     throw new BadRequestError("fundingGoal must not be negative");
   }
 
+  if (investmentExplicitlyEnabled && fundingGoal <= 0n) {
+    throw new BadRequestError(
+      "fundingGoal must be greater than 0 when investment is enabled",
+    );
+  }
+
   if (fundingGoal === 0n) {
-    const organizerStake = eventData.organizerStake
-      ? asBigInt(eventData.organizerStake, "organizerStake")
-      : eventData.minStakeRequired
-        ? asBigInt(eventData.minStakeRequired, "minStakeRequired")
-        : 0n;
-
-    if (organizerStake <= 0n) {
-      throw new BadRequestError(
-        "organizerStake must be greater than 0 when fundingGoal is 0",
-      );
-    }
-
     return {
       investmentEnabled: false,
       fundingGoal: 0n,
-      minStakeRequired: organizerStake,
-      organizerStake,
+      minStakeRequired: 0n,
+      organizerStake: 0n,
       fundingDeadlineDate: null,
     };
   }
@@ -523,27 +765,11 @@ function resolveFundingConfig(eventData) {
     throw new BadRequestError("fundingDeadline must be a valid ISO datetime");
   }
 
-  const minStakeRequired = resolveDefaultMinStakeRequired(
-    fundingGoal,
-    eventData.minStakeRequired,
-  );
-  if (minStakeRequired <= 0n) {
-    throw new BadRequestError("minStakeRequired must be greater than 0");
-  }
-
-  const organizerStake = eventData.organizerStake
-    ? asBigInt(eventData.organizerStake, "organizerStake")
-    : minStakeRequired;
-
-  if (organizerStake < minStakeRequired) {
-    throw new BadRequestError("organizerStake must be >= minStakeRequired");
-  }
-
   return {
     investmentEnabled: true,
     fundingGoal,
-    minStakeRequired,
-    organizerStake,
+    minStakeRequired: 0n,
+    organizerStake: 0n,
     fundingDeadlineDate,
   };
 }
@@ -557,19 +783,14 @@ function resolveFundingConfig(eventData) {
  */
 export async function createEvent(eventData, user, repos = {}) {
   const repository = repos.eventRepo || eventRepo;
-  const {
-    investmentEnabled,
-    fundingGoal,
-    minStakeRequired,
-    organizerStake,
-    fundingDeadlineDate,
-  } = resolveFundingConfig(eventData);
+  const { investmentEnabled, fundingGoal, fundingDeadlineDate } =
+    resolveFundingConfig(eventData);
   const { ticketingStartAt, ticketingEndAt } = resolveTicketingTimeline(
     eventData,
     fundingDeadlineDate,
   );
 
-  const organizerShareBps = Number(eventData.organizerShareBps ?? 7000);
+  const organizerShareBps = investmentEnabled ? 7000 : 10000;
   const ticketPrice = resolveDraftTicketPriceNumber(eventData);
   if (
     !Number.isFinite(ticketPrice) ||
@@ -586,15 +807,17 @@ export async function createEvent(eventData, user, repos = {}) {
     throw new BadRequestError("totalTickets must be greater than 0");
   }
 
+  const creationFeeWei = calculateCreationFeeWei(ticketPrice, maxTickets);
+  const organizerStake = creationFeeWei;
+  const minStakeRequired = creationFeeWei;
+  const minInvestmentAmount = resolveMinInvestmentAmount(
+    eventData,
+    investmentEnabled,
+  );
+
   const usedThreshold = BigInt(
     eventData.usedThreshold ?? eventData.totalTickets,
   );
-
-  if (!investmentEnabled && organizerStake <= 0n) {
-    throw new BadRequestError(
-      "organizerStake must be greater than 0 when investment is disabled",
-    );
-  }
 
   if (usedThreshold <= 0n || usedThreshold > maxTickets) {
     throw new BadRequestError(
@@ -615,6 +838,7 @@ export async function createEvent(eventData, user, repos = {}) {
       ticketTiers: eventData.ticketTiers || [],
       fundingGoal: fundingGoal.toString(),
       minStakeRequired: minStakeRequired.toString(),
+      minInvestmentAmount: minInvestmentAmount.toString(),
       organizerStake: organizerStake.toString(),
       fundingDeadline: fundingDeadlineDate?.toISOString(),
       totalTickets: Number(maxTickets),
@@ -624,6 +848,7 @@ export async function createEvent(eventData, user, repos = {}) {
 
   const event = await repository.createEvent({
     ...eventData,
+    investmentEnabled,
     organizerShareBps,
     ticketPrice,
     usedThreshold: Number(usedThreshold),
@@ -631,6 +856,7 @@ export async function createEvent(eventData, user, repos = {}) {
     status: investmentEnabled ? "funding" : "draft",
     organizerStake: organizerStake.toString(),
     minStakeRequired: minStakeRequired.toString(),
+    minInvestmentAmount: minInvestmentAmount.toString(),
     fundingGoal: fundingGoal.toString(),
     fundingDeadline: fundingDeadlineDate,
     ticketingStartAt,
@@ -732,6 +958,7 @@ export async function createEvent(eventData, user, repos = {}) {
       contractEventId,
       fundContractAddress: fundAddress.toLowerCase(),
       onChainOrganizer,
+      investmentEnabled,
       status: investmentEnabled ? "funding" : "funded",
       fundingDeadline: effectiveFundingDeadlineDate,
     });
@@ -783,13 +1010,8 @@ export async function createEvent(eventData, user, repos = {}) {
 export async function createCreateEventIntent(eventData, user, repos = {}) {
   const repository = repos.eventRepo || eventRepo;
   const fund = getFund();
-  const {
-    investmentEnabled,
-    fundingGoal,
-    minStakeRequired,
-    organizerStake,
-    fundingDeadlineDate,
-  } = resolveFundingConfig(eventData);
+  const { investmentEnabled, fundingGoal, fundingDeadlineDate } =
+    resolveFundingConfig(eventData);
   const { ticketingStartAt, ticketingEndAt } = resolveTicketingTimeline(
     eventData,
     fundingDeadlineDate,
@@ -800,7 +1022,7 @@ export async function createCreateEventIntent(eventData, user, repos = {}) {
     );
   }
 
-  const organizerShareBps = Number(eventData.organizerShareBps ?? 7000);
+  const organizerShareBps = investmentEnabled ? 7000 : 10000;
   const ticketPrice = resolveDraftTicketPriceNumber(eventData);
   if (
     !Number.isFinite(ticketPrice) ||
@@ -816,6 +1038,14 @@ export async function createCreateEventIntent(eventData, user, repos = {}) {
   if (maxTickets <= 0n) {
     throw new BadRequestError("totalTickets must be greater than 0");
   }
+
+  const creationFeeWei = calculateCreationFeeWei(ticketPrice, maxTickets);
+  const organizerStake = creationFeeWei;
+  const minStakeRequired = creationFeeWei;
+  const minInvestmentAmount = resolveMinInvestmentAmount(
+    eventData,
+    investmentEnabled,
+  );
 
   const usedThreshold = BigInt(
     eventData.usedThreshold ?? eventData.totalTickets,
@@ -840,6 +1070,7 @@ export async function createCreateEventIntent(eventData, user, repos = {}) {
       ticketTiers: eventData.ticketTiers || [],
       fundingGoal: fundingGoal.toString(),
       minStakeRequired: minStakeRequired.toString(),
+      minInvestmentAmount: minInvestmentAmount.toString(),
       organizerStake: organizerStake.toString(),
       fundingDeadline: fundingDeadlineDate?.toISOString(),
       totalTickets: Number(maxTickets),
@@ -851,6 +1082,7 @@ export async function createCreateEventIntent(eventData, user, repos = {}) {
 
   const draftEvent = await repository.createEvent({
     ...eventData,
+    investmentEnabled,
     organizer,
     status: "draft",
     organizerShareBps,
@@ -858,6 +1090,7 @@ export async function createCreateEventIntent(eventData, user, repos = {}) {
     usedThreshold: Number(usedThreshold),
     organizerStake: organizerStake.toString(),
     minStakeRequired: minStakeRequired.toString(),
+    minInvestmentAmount: minInvestmentAmount.toString(),
     fundingGoal: fundingGoal.toString(),
     fundingDeadline: fundingDeadlineDate,
     ticketingStartAt,
@@ -1324,6 +1557,307 @@ export async function updateEvent(eventId, updates, user, repos = {}) {
     throw new BadRequestError("No valid event fields were provided");
   }
 
+  if (nextStatus === "cancelled") {
+    const reasonMeta = normalizeCancellationReason(updates.reason, event);
+    const cancellationPatch = buildCancellationPatch(reasonMeta, user);
+    const activeFundContext = await assertEventUsesCurrentFundContract(event);
+
+    if (!event.contractEventId) {
+      return await repository.updateById(eventId, {
+        ...sanitizedUpdates,
+        ...cancellationPatch,
+      });
+    }
+
+    if (updates.txHash) {
+      validateTransactionHash(updates.txHash);
+
+      const fund = activeFundContext?.fund || getFund();
+      const fundAddress =
+        activeFundContext?.currentFundAddress || (await fund.getAddress());
+      const receipt = await getMinedReceipt(updates.txHash);
+
+      if (!receipt) {
+        throw new BadRequestError(
+          "Cancellation transaction not mined yet. Please retry shortly.",
+        );
+      }
+
+      if (Number(receipt.status) !== 1) {
+        throw new BadRequestError("Cancellation transaction failed on-chain");
+      }
+
+      await persistLogsFromReceipt({
+        receipt,
+        contract: fund,
+        contractName: "Fund",
+        contractAddress: fundAddress,
+      });
+
+      const parsedEvents = await parseFundEventsFromReceipt(receipt);
+      const chainEventId = String(event.contractEventId);
+
+      if (reasonMeta.reasonCode === "funding_goal_not_met") {
+        const finalized = findParsedFundEventByNameAndEventId(
+          parsedEvents,
+          "FundingFinalized",
+          chainEventId,
+        );
+        if (!finalized) {
+          throw new BadRequestError(
+            "FundingFinalized event not found in cancellation receipt for this event",
+          );
+        }
+
+        const finalizedStatus = mapFundStatusToAppStatus(
+          finalized.args?.statusAfterFinalize,
+        );
+        if (finalizedStatus !== "cancelled") {
+          throw new BadRequestError(
+            `Cannot cancel event because funding finalized with status ${finalizedStatus}`,
+          );
+        }
+      } else {
+        const cancelled = findParsedFundEventByNameAndEventId(
+          parsedEvents,
+          "EventCancelled",
+          chainEventId,
+        );
+        if (!cancelled) {
+          throw new BadRequestError(
+            "EventCancelled event not found in cancellation receipt for this event",
+          );
+        }
+      }
+
+      return await repository.updateById(eventId, {
+        ...sanitizedUpdates,
+        ...cancellationPatch,
+      });
+    }
+
+    const signer = getBackendSigner();
+    const fund = activeFundContext?.fund || getFund();
+    const fundWithSigner = fund.connect(signer);
+    const chainEventId = BigInt(event.contractEventId);
+    const fundAddress =
+      activeFundContext?.currentFundAddress || (await fund.getAddress());
+
+    let tx;
+    try {
+      if (reasonMeta.reasonCode === "funding_goal_not_met") {
+        tx = await fundWithSigner.finalizeFunding(chainEventId);
+      } else {
+        tx = await fundWithSigner.cancelEvent(
+          chainEventId,
+          CHAIN_CANCELLATION_REASON[reasonMeta.reasonCode],
+        );
+      }
+    } catch (error) {
+      const blockchainError = getBlockchainErrorMeta(error);
+      if (blockchainError.shouldFallbackToOrganizerWallet) {
+        throw new BadRequestError(
+          `Organizer wallet signature required: ${blockchainError.message}`,
+        );
+      }
+
+      throw new BadRequestError(
+        `Failed to cancel event on-chain: ${blockchainError.message}`,
+      );
+    }
+
+    const receipt = await tx.wait();
+    if (!receipt || Number(receipt.status) !== 1) {
+      throw new BadRequestError("On-chain cancellation failed");
+    }
+
+    await persistLogsFromReceipt({
+      receipt,
+      contract: fund,
+      contractName: "Fund",
+      contractAddress: fundAddress,
+    });
+
+    const parsedEvents = await parseFundEventsFromReceipt(receipt);
+    if (reasonMeta.reasonCode === "funding_goal_not_met") {
+      const finalized = parsedEvents.find(
+        (parsedEvent) => parsedEvent?.name === "FundingFinalized",
+      );
+      if (!finalized) {
+        throw new BadRequestError(
+          "FundingFinalized event not found in transaction receipt",
+        );
+      }
+
+      const finalizedStatus = mapFundStatusToAppStatus(
+        finalized.args?.statusAfterFinalize,
+      );
+      if (finalizedStatus !== "cancelled") {
+        throw new BadRequestError(
+          `Cannot cancel event because funding finalized with status ${finalizedStatus}`,
+        );
+      }
+    } else {
+      const cancelled = parsedEvents.find(
+        (parsedEvent) => parsedEvent?.name === "EventCancelled",
+      );
+      if (!cancelled) {
+        throw new BadRequestError(
+          "EventCancelled event not found in transaction receipt",
+        );
+      }
+    }
+
+    return await repository.updateById(eventId, {
+      ...sanitizedUpdates,
+      ...cancellationPatch,
+    });
+  }
+
+  if (nextStatus === "completed") {
+    const activeFundContext = await assertEventUsesCurrentFundContract(event);
+
+    if (!event.contractEventId) {
+      throw new BadRequestError("Event has not been synced to on-chain yet");
+    }
+
+    const fund = activeFundContext?.fund || getFund();
+    const fundAddress =
+      activeFundContext?.currentFundAddress || (await fund.getAddress());
+    const chainEventId = BigInt(event.contractEventId);
+    const completionPatch = {
+      ...sanitizedUpdates,
+      completedAt: new Date(),
+    };
+
+    if (updates.txHash) {
+      validateTransactionHash(updates.txHash);
+
+      const completionReceipt = await getMinedReceipt(updates.txHash);
+      if (!completionReceipt) {
+        throw new BadRequestError(
+          "Completion transaction not mined yet. Please retry shortly.",
+        );
+      }
+
+      if (Number(completionReceipt.status) !== 1) {
+        throw new BadRequestError("Completion transaction failed on-chain");
+      }
+
+      await persistLogsFromReceipt({
+        receipt: completionReceipt,
+        contract: fund,
+        contractName: "Fund",
+        contractAddress: fundAddress,
+      });
+
+      const completedEvents = await parseFundEventsFromReceipt(completionReceipt);
+      const completedEvent = findParsedFundEventByNameAndEventId(
+        completedEvents,
+        "Completed",
+        event.contractEventId,
+      );
+
+      if (!completedEvent) {
+        throw new BadRequestError(
+          "Completed event not found in completion receipt for this event",
+        );
+      }
+
+      if (updates.releaseTxHash) {
+        validateTransactionHash(updates.releaseTxHash);
+
+        const releaseReceipt = await getMinedReceipt(updates.releaseTxHash);
+        if (!releaseReceipt) {
+          throw new BadRequestError(
+            "Revenue release transaction not mined yet. Please retry shortly.",
+          );
+        }
+
+        if (Number(releaseReceipt.status) !== 1) {
+          throw new BadRequestError(
+            "Revenue release transaction failed on-chain",
+          );
+        }
+
+        await persistLogsFromReceipt({
+          receipt: releaseReceipt,
+          contract: fund,
+          contractName: "Fund",
+          contractAddress: fundAddress,
+        });
+
+        const releaseEvents = await parseFundEventsFromReceipt(releaseReceipt);
+        const revenueReleasedEvent = findParsedFundEventByNameAndEventId(
+          releaseEvents,
+          "RevenueReleased",
+          event.contractEventId,
+        );
+
+        if (!revenueReleasedEvent) {
+          throw new BadRequestError(
+            "RevenueReleased event not found in revenue release receipt for this event",
+          );
+        }
+      }
+
+      return await repository.updateById(eventId, completionPatch);
+    }
+
+    const signer = getBackendSigner();
+    const fundWithSigner = fund.connect(signer);
+
+    let tx;
+    try {
+      tx = await fundWithSigner.setCompletedIfThresholdMet(chainEventId);
+    } catch (error) {
+      const blockchainError = getBlockchainErrorMeta(error);
+      if (blockchainError.shouldFallbackToOrganizerWallet) {
+        throw new BadRequestError(
+          `Organizer wallet signature required: ${blockchainError.message}`,
+        );
+      }
+
+      throw new BadRequestError(
+        `Failed to mark event as completed on-chain: ${blockchainError.message}`,
+      );
+    }
+
+    const receipt = await tx.wait();
+    if (!receipt || Number(receipt.status) !== 1) {
+      throw new BadRequestError("On-chain completion transaction failed");
+    }
+
+    await persistLogsFromReceipt({
+      receipt,
+      contract: fund,
+      contractName: "Fund",
+      contractAddress: fundAddress,
+    });
+
+    const parsedEvents = await parseFundEventsFromReceipt(receipt);
+    const completedEvent = findParsedFundEventByNameAndEventId(
+      parsedEvents,
+      "Completed",
+      event.contractEventId,
+    );
+
+    if (!completedEvent) {
+      throw new BadRequestError(
+        "Completed event not found in transaction receipt. Event may not have met usage threshold.",
+      );
+    }
+
+    await tryReleaseRevenueAfterCompletion(
+      fundWithSigner,
+      chainEventId,
+      fund,
+      fundAddress,
+    );
+
+    return await repository.updateById(eventId, completionPatch);
+  }
+
   // Apply updates
   const updatedEvent = await repository.updateById(eventId, sanitizedUpdates);
   return updatedEvent;
@@ -1492,6 +2026,15 @@ export async function createInvestmentIntent(
     throw new BadRequestError("Investment amount must be a positive integer");
   }
 
+  const minInvestmentAmount = toStringBigInt(event.minInvestmentAmount || "0");
+  if (compareBigInt(minInvestmentAmount, "0") > 0) {
+    if (compareBigInt(normalizedAmount, minInvestmentAmount) < 0) {
+      throw new BadRequestError(
+        `Investment amount must be at least ${minInvestmentAmount}`,
+      );
+    }
+  }
+
   const investor = getAuthenticatedWalletAddress(user, null, "investorWallet");
   const fund = getFund();
 
@@ -1615,6 +2158,15 @@ export async function confirmInvestmentTransaction(
     throw new BadRequestError("On-chain contribution amount must be positive");
   }
 
+  const minInvestmentAmount = toStringBigInt(event.minInvestmentAmount || "0");
+  if (compareBigInt(minInvestmentAmount, "0") > 0) {
+    if (compareBigInt(amountFromChain, minInvestmentAmount) < 0) {
+      throw new BadRequestError(
+        `Contribution amount is below minimum investment amount ${minInvestmentAmount}`,
+      );
+    }
+  }
+
   await persistLogsFromReceipt({
     receipt,
     contract: fund,
@@ -1676,6 +2228,209 @@ export async function confirmInvestmentTransaction(
     synced: !alreadySynced,
     alreadySynced,
     txHash: normalizedTxHash,
+    event: updatedEvent,
+    share: updatedShare,
+  };
+}
+
+export async function createContributionRefundIntent(
+  eventId,
+  user,
+  repos = {},
+) {
+  const repository = repos.eventRepo || eventRepo;
+  const shareRepository = repos.shareRepo || shareRepo;
+
+  if (!isValidObjectId(eventId)) {
+    throw new BadRequestError("Invalid event id");
+  }
+
+  const event = await repository.findById(eventId);
+  if (!event) {
+    throw new NotFoundError("Event not found");
+  }
+
+  if (event.status !== "cancelled" && event.status !== "failed") {
+    throw new BadRequestError(
+      "Event must be cancelled or failed before refund claim",
+    );
+  }
+
+  if (!event.contractEventId) {
+    throw new BadRequestError("Event has not been synced to on-chain yet");
+  }
+
+  const investor = getAuthenticatedWalletAddress(user, null, "investorWallet");
+  const existingShare = await shareRepository.findByEventAndHolder(
+    eventId,
+    investor,
+  );
+
+  if (
+    !existingShare ||
+    compareBigInt(String(existingShare.contributionAmount || "0"), "0") <= 0
+  ) {
+    throw new BadRequestError("No refundable investment found for this wallet");
+  }
+
+  const fund = getFund();
+  const [fundAddress, network] = await Promise.all([
+    fund.getAddress(),
+    provider.getNetwork(),
+  ]);
+
+  const eventFundAddress = event.fundContractAddress?.toLowerCase();
+  if (eventFundAddress && eventFundAddress !== fundAddress.toLowerCase()) {
+    throw new BadRequestError(
+      "Event is linked to a different Fund contract than backend configuration",
+    );
+  }
+
+  const data = fund.interface.encodeFunctionData("claimContributionRefund", [
+    BigInt(event.contractEventId),
+  ]);
+
+  return {
+    eventId: String(event._id),
+    contractEventId: String(event.contractEventId),
+    investor,
+    refundableAmount: String(existingShare.contributionAmount || "0"),
+    transaction: {
+      to: fundAddress,
+      data,
+      value: "0",
+      chainId: network.chainId.toString(),
+      functionName: "claimContributionRefund",
+    },
+  };
+}
+
+export async function confirmContributionRefundTransaction(
+  eventId,
+  payload = {},
+  user,
+  repos = {},
+) {
+  const repository = repos.eventRepo || eventRepo;
+  const shareRepository = repos.shareRepo || shareRepo;
+  const { txHash, investorWallet } = payload;
+
+  validateTransactionHash(txHash);
+
+  if (!isValidObjectId(eventId)) {
+    throw new BadRequestError("Invalid event id");
+  }
+
+  const event = await repository.findById(eventId);
+  if (!event) {
+    throw new NotFoundError("Event not found");
+  }
+
+  if (!event.contractEventId) {
+    throw new BadRequestError("Event has not been synced to on-chain yet");
+  }
+
+  const normalizedInvestor = getAuthenticatedWalletAddress(
+    user,
+    investorWallet,
+    "investorWallet",
+  );
+
+  const fund = getFund();
+  const fundAddress = (await fund.getAddress()).toLowerCase();
+
+  if (
+    event.fundContractAddress &&
+    event.fundContractAddress.toLowerCase() !== fundAddress
+  ) {
+    throw new BadRequestError(
+      "Event is linked to a different Fund contract than backend configuration",
+    );
+  }
+
+  const receipt = await getMinedReceipt(txHash);
+  if (!receipt) {
+    throw new BadRequestError(
+      "Transaction not mined yet. Please retry shortly.",
+    );
+  }
+  if (Number(receipt.status) !== 1) {
+    throw new BadRequestError("Transaction failed on-chain");
+  }
+
+  const parsedEvents = await parseFundEventsFromReceipt(receipt);
+  const refundEvents = parsedEvents.filter(
+    (parsedEvent) => parsedEvent?.name === "ContributionRefunded",
+  );
+
+  const matchedRefund = refundEvents.find((parsedEvent) => {
+    const chainEventId = String(parsedEvent.args?.eventId ?? "");
+    const chainInvestor = String(parsedEvent.args?.donator ?? "").toLowerCase();
+
+    return (
+      chainEventId === String(event.contractEventId) &&
+      chainInvestor === normalizedInvestor
+    );
+  });
+
+  if (!matchedRefund) {
+    throw new BadRequestError(
+      "ContributionRefunded event not found in transaction receipt for this user/event",
+    );
+  }
+
+  const amountFromChain = toStringBigInt(
+    String(matchedRefund.args?.amount ?? "0"),
+  );
+  if (compareBigInt(amountFromChain, "0") <= 0) {
+    throw new BadRequestError("On-chain refund amount must be positive");
+  }
+
+  await persistLogsFromReceipt({
+    receipt,
+    contract: fund,
+    contractName: "Fund",
+    contractAddress: fundAddress,
+  });
+
+  const existingConfirmedContribution = await Contribution.findOne({
+    eventId: event._id,
+    contributor: normalizedInvestor,
+    type: "donator_contribution",
+    status: "confirmed",
+  }).lean();
+
+  const alreadySynced = !existingConfirmedContribution;
+
+  if (!alreadySynced) {
+    await contributionRepo.markDonatorContributionsAsRefunded(
+      event._id,
+      normalizedInvestor,
+    );
+
+    const fundingUpdates = await rebuildSharePercentagesAndFunding(eventId);
+    await repository.updateById(eventId, {
+      currentFunding: fundingUpdates.currentFunding,
+      status: event.status === "failed" ? "failed" : "cancelled",
+      escrowStatus: "refunded",
+      refundedAmount: addBigInt(event.refundedAmount || "0", amountFromChain),
+      lastContributionRefundAt: new Date(),
+    });
+  }
+
+  const updatedEvent = await repository.findById(eventId);
+  const updatedShare = await Share.findOne({
+    eventId: event._id,
+    holder: normalizedInvestor,
+  })
+    .populate("eventId")
+    .lean();
+
+  return {
+    synced: !alreadySynced,
+    alreadySynced,
+    txHash: txHash.toLowerCase(),
+    refundAmount: amountFromChain,
     event: updatedEvent,
     share: updatedShare,
   };
@@ -1772,6 +2527,15 @@ export async function investInEvent(eventId, amount, user, repos = {}) {
 
   if (compareBigInt(normalizedAmount, "0") <= 0) {
     throw new BadRequestError("Investment amount must be a positive integer");
+  }
+
+  const minInvestmentAmount = toStringBigInt(event.minInvestmentAmount || "0");
+  if (compareBigInt(minInvestmentAmount, "0") > 0) {
+    if (compareBigInt(normalizedAmount, minInvestmentAmount) < 0) {
+      throw new BadRequestError(
+        `Investment amount must be at least ${minInvestmentAmount}`,
+      );
+    }
   }
 
   const existingShare = await shareRepository.findByEventAndHolder(
@@ -1883,6 +2647,112 @@ export async function deleteEventImage(
   const updatedImageUrls = event.imageUrls.filter((url) => url !== imageUrl);
   const updatedEvent = await repository.updateById(eventId, {
     imageUrls: updatedImageUrls,
+  });
+
+  return updatedEvent;
+}
+
+/**
+ * Mark event as completed when ticket threshold is met
+ * @param {string} eventId - Event ID
+ * @param {Object} payload - Payload with optional txHash for polling
+ * @param {Object} user - User object with walletAddress (organizer)
+ * @param {Object} repos - Injected repositories (for testing)
+ * @returns {Promise<Object>} Updated event with completed status
+ */
+export async function markEventAsCompleted(
+  eventId,
+  payload = {},
+  user,
+  repos = {},
+) {
+  const repository = repos.eventRepo || eventRepo;
+  const { txHash } = payload;
+
+  if (!isValidObjectId(eventId)) {
+    throw new BadRequestError("Invalid event id");
+  }
+
+  const event = await repository.findById(eventId);
+  if (!event) {
+    throw new NotFoundError("Event not found");
+  }
+
+  // Only organizer can mark event as completed
+  if (!isEventOwnedByUser(event, user)) {
+    throw new ForbiddenError("Not authorized to mark this event as completed");
+  }
+
+  // App status may already be ongoing while on-chain status is still ticketing.
+  if (!["ticketing", "ongoing"].includes(event.status)) {
+    throw new BadRequestError(
+      `Event must be in ticketing or ongoing status to mark as completed, current status: ${event.status}`,
+    );
+  }
+
+  // Event must have contract ID
+  if (!event.contractEventId) {
+    throw new BadRequestError("Event has not been synced to on-chain yet");
+  }
+
+  const signer = getBackendSigner();
+  const fund = getFund();
+  const fundWithSigner = fund.connect(signer);
+  const chainEventId = BigInt(event.contractEventId);
+  const fundAddress = await fund.getAddress();
+
+  const signerAddress = String(signer.address || "").toLowerCase();
+  const organizerAddress = String(
+    event.onChainOrganizer || event.organizer || "",
+  ).toLowerCase();
+  if (organizerAddress && signerAddress !== organizerAddress) {
+    throw new BadRequestError(
+      "Cannot mark completed with current backend signer. Fund.setCompletedIfThresholdMet requires organizer wallet.",
+    );
+  }
+
+  let tx;
+  try {
+    tx = await fundWithSigner.setCompletedIfThresholdMet(chainEventId);
+  } catch (error) {
+    throw new BadRequestError(
+      `Failed to mark event as completed on-chain: ${getBlockchainErrorMessage(error)}`,
+    );
+  }
+
+  const receipt = await tx.wait();
+  if (!receipt || Number(receipt.status) !== 1) {
+    throw new BadRequestError("On-chain completion transaction failed");
+  }
+
+  await persistLogsFromReceipt({
+    receipt,
+    contract: fund,
+    contractName: "Fund",
+    contractAddress: fundAddress,
+  });
+
+  const parsedEvents = await parseFundEventsFromReceipt(receipt);
+  const completedEvent = parsedEvents.find(
+    (parsedEvent) => parsedEvent?.name === "Completed",
+  );
+
+  if (!completedEvent) {
+    throw new BadRequestError(
+      "Completed event not found in transaction receipt. Event may not have met usage threshold.",
+    );
+  }
+
+  await tryReleaseRevenueAfterCompletion(
+    fundWithSigner,
+    chainEventId,
+    fund,
+    fundAddress,
+  );
+
+  // Update event status to completed
+  const updatedEvent = await repository.updateById(eventId, {
+    status: "completed",
   });
 
   return updatedEvent;

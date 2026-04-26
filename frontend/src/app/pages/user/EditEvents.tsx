@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { useWeb3Auth } from "@web3auth/modal/react";
 import { Calendar, MapPin, Upload, Plus, Trash2 } from "lucide-react";
 import {
   Card,
@@ -14,11 +15,14 @@ import { Textarea } from "../../components/ui/textarea";
 import { Label } from "../../components/ui/label";
 import { StatusBadge } from "../../components/StatusBadge";
 import {
+  cancelEventWithWalletFallback,
+  completeEventWithWalletFallback,
   getEventById,
   updateEvent,
   type EventItem,
   type EventStatus,
 } from "../../services/events.service";
+import { useAuth } from "../../contexts/AuthContext";
 
 type TicketTierForm = {
   name: string;
@@ -32,6 +36,13 @@ const OWNER_FORWARD_STATUS_OPTIONS: Partial<
   ticketing: ["ongoing"],
   ongoing: ["completed"],
 };
+
+const OWNER_CANCELABLE_STATUSES = new Set<EventStatus>([
+  "draft",
+  "funding",
+  "funded",
+  "ticketing",
+]);
 
 const toDateInputValue = (iso?: string) => {
   if (!iso) return "";
@@ -60,6 +71,8 @@ const isPositiveWeiInteger = (value: string) => {
 export const EditEvent: React.FC = () => {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
+  const { user, connectWallet } = useAuth();
+  const { web3Auth } = useWeb3Auth();
 
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -180,6 +193,8 @@ export const EditEvent: React.FC = () => {
   const allowedForwardStatuses =
     OWNER_FORWARD_STATUS_OPTIONS[currentStatus] || [];
   const canOwnerAdvanceStatus = allowedForwardStatuses.length > 0;
+  const canOwnerCancel = OWNER_CANCELABLE_STATUSES.has(currentStatus);
+  const canOwnerChangeStatus = canOwnerAdvanceStatus || canOwnerCancel;
 
   const handleSubmit = async () => {
     try {
@@ -268,9 +283,28 @@ export const EditEvent: React.FC = () => {
         return;
       }
 
-      setSubmitting(true);
+      if (
+        status === "cancelled" &&
+        currentStatus !== "cancelled" &&
+        !window.confirm(
+          'Bạn có chắc muốn hủy sự kiện này không?\n\nHành động này sẽ chuyển event sang trạng thái "cancelled" theo flow hiện tại của hệ thống.',
+        )
+      ) {
+        return;
+      }
 
-      const updated = await updateEvent(id, {
+      if (
+        status === "completed" &&
+        currentStatus !== "completed" &&
+        !window.confirm(
+          'Bạn có chắc muốn hoàn tất sự kiện này không?\n\nHệ thống sẽ cần ký ví organizer để gọi on-chain completion và release revenue.',
+        )
+      ) {
+        return;
+      }
+
+      setSubmitting(true);
+      const updatePayload = {
         title: title.trim(),
         description: description.trim(),
         category,
@@ -285,7 +319,60 @@ export const EditEvent: React.FC = () => {
         },
         ticketTiers: normalizedTiers,
         ...(status !== currentStatus ? { status } : {}),
-      });
+      };
+
+      if (status === "cancelled" && currentStatus !== "cancelled") {
+        if (!web3Auth?.provider) {
+          await connectWallet();
+          setError(
+            "Ví đã được kết nối. Vui lòng bấm cập nhật lại một lần nữa để ký giao dịch hủy bằng ví organizer.",
+          );
+          return;
+        }
+      }
+
+      if (status === "completed" && currentStatus !== "completed") {
+        if (!web3Auth?.provider) {
+          await connectWallet();
+          setError(
+            "Ví đã được kết nối. Vui lòng bấm cập nhật lại một lần nữa để ký giao dịch hoàn tất sự kiện và chia doanh thu bằng ví organizer.",
+          );
+          return;
+        }
+      }
+
+      const updated =
+        status === "cancelled" && currentStatus !== "cancelled"
+          ? await cancelEventWithWalletFallback(
+              web3Auth?.provider as
+                | {
+                    request: (args: {
+                      method: string;
+                      params?: unknown[];
+                    }) => Promise<unknown>;
+                  }
+                | undefined,
+              id,
+              updatePayload,
+              user?.walletAddress,
+              user?.smartAccountAddress,
+            )
+          : status === "completed" && currentStatus !== "completed"
+            ? await completeEventWithWalletFallback(
+                web3Auth?.provider as
+                  | {
+                      request: (args: {
+                        method: string;
+                        params?: unknown[];
+                      }) => Promise<unknown>;
+                    }
+                  | undefined,
+                id,
+                updatePayload,
+                user?.walletAddress,
+                user?.smartAccountAddress,
+              )
+          : await updateEvent(id, updatePayload);
 
       if (!updated) {
         setError("Cập nhật sự kiện thất bại");
@@ -345,8 +432,8 @@ export const EditEvent: React.FC = () => {
         <CardHeader>
           <CardTitle className="text-white">Event Details</CardTitle>
           <CardDescription className="text-slate-400">
-            Admin reviews the early workflow. After ticketing starts, you can
-            only move status forward.
+            Organizer can cancel eligible events here, and can still move the
+            status forward once ticketing has started.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -357,8 +444,9 @@ export const EditEvent: React.FC = () => {
                   Current workflow status
                 </p>
                 <p className="text-xs text-slate-400">
-                  Admin controls review states up to ticketing. You can only
-                  advance from ticketing to ongoing, then ongoing to completed.
+                  You can cancel events in `draft`, `funding`, `funded`, or
+                  `ticketing`. Once ticketing starts, you can also advance to
+                  `ongoing`, then `completed`.
                 </p>
               </div>
               <StatusBadge status={currentStatus as any} />
@@ -468,7 +556,7 @@ export const EditEvent: React.FC = () => {
               id="status"
               value={status}
               onChange={(e) => setStatus(e.target.value as EventStatus)}
-              disabled={!canOwnerAdvanceStatus}
+              disabled={!canOwnerChangeStatus}
               className="mt-1.5 w-full h-9 px-3 rounded-md bg-slate-800 border border-slate-700 text-white text-sm disabled:opacity-60"
             >
               <option value={currentStatus}>{currentStatus}</option>
@@ -477,12 +565,28 @@ export const EditEvent: React.FC = () => {
                   {nextStatus}
                 </option>
               ))}
+              {canOwnerCancel && currentStatus !== "cancelled" && (
+                <option value="cancelled">cancelled</option>
+              )}
             </select>
             <p className="mt-1 text-xs text-slate-500">
-              {canOwnerAdvanceStatus
-                ? "Bạn chỉ có thể đẩy sang bước tiếp theo, không thể chỉnh lùi."
+              {canOwnerChangeStatus
+                ? "Bạn có thể hủy event ở các trạng thái hợp lệ, hoặc đẩy workflow tiến lên khi hệ thống cho phép."
                 : "Ở giai đoạn này bạn không thể tự đổi status."}
             </p>
+            {status === "cancelled" && currentStatus !== "cancelled" && (
+              <div className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+                Event sẽ được gửi theo flow hủy hiện có của backend. Nếu event
+                đang ở `ticketing`, hệ thống sẽ xử lý theo nhánh hủy ticketing
+                tương ứng.
+              </div>
+            )}
+            {status === "completed" && currentStatus !== "completed" && (
+              <div className="mt-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+                Khi hoàn tất event, organizer wallet sẽ ký 2 giao dịch on-chain:
+                đánh dấu `completed` và `release revenue` để hệ thống chia tiền.
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>

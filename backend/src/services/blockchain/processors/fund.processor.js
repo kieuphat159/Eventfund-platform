@@ -22,6 +22,8 @@ import revenueDistributionRepo from "../../../repositories/revenueDistribution.r
 import rewardClaimRepo from "../../../repositories/rewardClaim.repo.js";
 import penaltyRepo from "../../../repositories/penalty.repo.js";
 import chainLogRepo from "../../../repositories/chainLog.repo.js";
+import { scheduleAutoRefundForCancelledEvent } from "../../tickets/autoRefund.service.js";
+import { scheduleAutoContributionRefundForEvent } from "../../events/autoContributionRefund.service.js";
 
 const CONTRACT_NAME = "Fund";
 const PROCESSOR_NAME = "FundProcessor";
@@ -55,6 +57,21 @@ function getEventStatusLabel(statusValue) {
   const label = map[n];
   // Fallback to "failed" instead of "unknown_X" to match enum
   return label ?? "failed";
+}
+
+function getCancellationReasonLabel(reasonValue) {
+  const map = {
+    0: "funding_goal_not_met",
+    1: "organizer_cancelled",
+    2: "ticket_sales_not_met",
+  };
+
+  return map[Number(reasonValue)] ?? "organizer_cancelled";
+}
+
+function getTerminalStatusFromCancellationReason(reasonValue) {
+  const reason = getCancellationReasonLabel(reasonValue);
+  return reason === "organizer_cancelled" ? "cancelled" : "failed";
 }
 
 // -------------------------
@@ -94,6 +111,10 @@ async function rebuildFullEventStateFromChainLog(contractEventId, contractAddres
     refundPool: 0,
     totalRevenue: "0",
     organizerStakeWithdrawn: 0,
+    cancellationReason: null,
+    cancellationNote: null,
+    cancelledAt: null,
+    cancelledBy: null,
     // Clear timestamps
     fundingFinalizedAt: null,
     ticketingStartedAt: null,
@@ -125,6 +146,16 @@ async function rebuildFullEventStateFromChainLog(contractEventId, contractAddres
       case "FundingFinalized":
         state.status = getEventStatusLabel(args.statusAfterFinalize);
         state.fundingFinalizedAt = new Date();
+        break;
+      case "EventCancelled":
+        state.status = getTerminalStatusFromCancellationReason(args.reason);
+        state.cancellationReason = getCancellationReasonLabel(args.reason);
+        state.cancelledAt = new Date();
+        if (args.ticketRefundsEnabled) {
+          state.escrowStatus = "refund_enabled";
+          state.refundPool = toNumberSafe(args.refundPoolAmount);
+          state.refundEnabledAt = new Date();
+        }
         break;
       case "TicketingStarted":
         state.status = "ticketing";
@@ -174,7 +205,9 @@ async function rebuildFullEventStateFromChainLog(contractEventId, contractAddres
         state.lastPenaltyAt = new Date();
         break;
       case "ContributionRefunded":
-        state.status = "cancelled";
+        if (state.status !== "failed" && state.status !== "cancelled") {
+          state.status = "cancelled";
+        }
         state.escrowStatus = "refunded";
         state.refundedAmount += toNumberSafe(args.amount);
         state.lastContributionRefundAt = new Date();
@@ -356,6 +389,31 @@ async function handleFundingFinalized(log, eventDoc) {
       fundingFinalizedAt: new Date(),
     },
   });
+}
+
+async function handleEventCancelled(log, eventDoc) {
+  const { args } = log;
+  const patch = {
+    status: getTerminalStatusFromCancellationReason(args.reason),
+    cancellationReason: getCancellationReasonLabel(args.reason),
+    cancelledAt: new Date(),
+  };
+
+  if (args.ticketRefundsEnabled) {
+    patch.escrowStatus = "refund_enabled";
+    patch.refundPool = toNumberSafe(args.refundPoolAmount);
+    patch.refundEnabledAt = new Date();
+  }
+
+  const updatedEvent = await eventRepo.updateById(eventDoc._id, {
+    $set: patch,
+  });
+
+  if (args.ticketRefundsEnabled) {
+    scheduleAutoRefundForCancelledEvent(updatedEvent || { ...eventDoc, ...patch });
+  }
+
+  scheduleAutoContributionRefundForEvent(updatedEvent || { ...eventDoc, ...patch });
 }
 
 async function handleTicketingStarted(log, eventDoc) {
@@ -550,7 +608,11 @@ async function handleContributionRefunded(log, eventDoc) {
     {
       inc: { refundedAmount: amount },
       set: {
-        status: "cancelled",
+        status:
+          eventDoc?.cancellationReason === "ticket_sales_not_met" ||
+          eventDoc?.cancellationReason === "funding_goal_not_met"
+            ? "failed"
+            : "cancelled",
         escrowStatus: "refunded",
         lastContributionRefundAt: new Date(),
       },
@@ -561,7 +623,11 @@ async function handleContributionRefunded(log, eventDoc) {
   if (!applied) {
     await eventRepo.updateById(eventDoc._id, {
       $set: {
-        status: "cancelled",
+        status:
+          eventDoc?.cancellationReason === "ticket_sales_not_met" ||
+          eventDoc?.cancellationReason === "funding_goal_not_met"
+            ? "failed"
+            : "cancelled",
         escrowStatus: "refunded",
         lastContributionRefundAt: new Date(),
       },
@@ -606,6 +672,7 @@ async function processFundLog(log) {
     case "SharesIssued": await handleSharesIssued(log, eventDoc); break;
     case "FundingSuccessful": await handleFundingSuccessful(eventDoc); break;
     case "FundingFinalized": await handleFundingFinalized(log, eventDoc); break;
+    case "EventCancelled": await handleEventCancelled(log, eventDoc); break;
     case "TicketingStarted": await handleTicketingStarted(log, eventDoc); break;
     case "Completed": await handleCompleted(log, eventDoc); break;
     case "RevenueReleased": await handleRevenueReleased(log, eventDoc); break;

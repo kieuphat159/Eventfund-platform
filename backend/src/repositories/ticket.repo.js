@@ -240,6 +240,31 @@ export async function markAsUsedFromChain(tokenId, usageData, models = {}) {
 }
 
 /**
+ * Mark ticket as refunded after on-chain confirmation
+ * @param {string} tokenId - Token ID
+ * @param {Object} refundData - Refund data (refundedAt, refundedTxHash)
+ * @param {Object} models - Injected models (optional)
+ * @returns {Promise<Object|null>} Updated ticket as plain object or null
+ */
+export async function markAsRefundedFromChain(tokenId, refundData, models = {}) {
+  const Ticket = models.Ticket || DefaultTicket;
+
+  const updates = {
+    status: 'refunded',
+    refundedAt: refundData.refundedAt || new Date(),
+    refundedTxHash: refundData.refundedTxHash?.toLowerCase(),
+  };
+
+  const ticket = await Ticket.findOneAndUpdate(
+    { tokenId },
+    { $set: updates },
+    { new: true, runValidators: true }
+  );
+
+  return ticket ? ticket.toObject() : null;
+}
+
+/**
  * Upsert minted ticket from on-chain TicketMintedBatch event.
  * This keeps Ticket read-model in sync so primary-sale APIs can find minted inventory.
  * @param {Object} data - Minted ticket payload

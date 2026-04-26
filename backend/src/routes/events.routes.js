@@ -399,6 +399,19 @@ router.post(
   controller.investInEvent,
 );
 
+router.post(
+  "/:id/refund-intent",
+  authenticate,
+  controller.createContributionRefundIntent,
+);
+
+router.post(
+  "/:id/refund/confirm",
+  authenticate,
+  validate({ body: eventSchemas.confirmContributionRefund }),
+  controller.confirmContributionRefundTransaction,
+);
+
 /**
  * @swagger
  * /events/{id}/images/{imageUrl}:
@@ -478,6 +491,52 @@ router.post(
   authenticate,
   requireAdmin,
   controller.assignVerifierOnChain,
+/**
+ * @swagger
+ * /events/{id}/mark-completed:
+ *   post:
+ *     summary: Mark event as completed when ticket usage threshold is met
+ *     tags: [Events]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Event ID
+ *         example: "507f1f77bcf86cd799439011"
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               txHash:
+ *                 type: string
+ *                 description: Optional transaction hash if triggered on-chain separately
+ *                 example: "0x123abc..."
+ *     responses:
+ *       200:
+ *         description: Event marked as completed successfully
+ *       400:
+ *         description: Validation error or event not in ticketing status or threshold not met
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Not authorized (organizer required)
+ *       404:
+ *         description: Event not found
+ *       500:
+ *         description: Server error
+ */
+router.post(
+  "/:id/mark-completed",
+  authenticate,
+  requireEventCreator,
+  validate({ body: eventSchemas.markEventCompleted }),
+  controller.markEventAsCompleted,
 );
 
 export default router;

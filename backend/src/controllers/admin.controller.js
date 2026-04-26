@@ -80,7 +80,10 @@ class AdminController {
     const { status } = body;
     const { id } = req.params;
 
-    const event = await this.adminService.updateEventStatus(id, status, body);
+    const event = await this.adminService.updateEventStatus(id, status, {
+      ...body,
+      actor: req.user,
+    });
 
     res.status(200).json({
       success: true,

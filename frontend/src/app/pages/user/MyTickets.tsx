@@ -16,7 +16,11 @@ import {
 } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { useAuth } from "../../contexts/AuthContext";
-import { getUserTickets, type ApiTicket } from "../../services/tickets.service";
+import {
+  claimTicketRefundOnChain,
+  getUserTickets,
+  type ApiTicket,
+} from "../../services/tickets.service";
 import {
   cancelListingOnchain,
   getListings,
@@ -76,6 +80,7 @@ export const MyTickets: React.FC = () => {
   const [listingLoading, setListingLoading] = useState(false);
   const [cancelTicket, setCancelTicket] = useState<ApiTicket | null>(null);
   const [cancelLoading, setCancelLoading] = useState(false);
+  const [refundingTokenId, setRefundingTokenId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!listingPopup) return;
@@ -209,6 +214,62 @@ export const MyTickets: React.FC = () => {
         request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
       }
     | undefined;
+
+  const refreshTickets = async () => {
+    if (!walletAddress || !ETH_ADDRESS_REGEX.test(walletAddress)) {
+      return;
+    }
+
+    const data = await getUserTickets(walletAddress);
+    setTickets(data);
+  };
+
+  const handleClaimRefund = async (ticket: ApiTicket) => {
+    try {
+      if (!user?.walletAddress) {
+        await connectWallet();
+        showListingPopup(
+          "success",
+          "Wallet connected. Please click Claim Refund again to continue.",
+        );
+        return;
+      }
+
+      if (!walletProvider?.request) {
+        throw new Error(
+          "Wallet provider is not ready. Please reconnect wallet and try again.",
+        );
+      }
+
+      setRefundingTokenId(ticket.tokenId);
+      const result = await claimTicketRefundOnChain(
+        walletProvider,
+        ticket.tokenId,
+        user.walletAddress,
+      );
+
+      setTickets((prev) =>
+        prev.map((item) =>
+          item.tokenId === ticket.tokenId
+            ? result.confirmation?.ticket || { ...item, status: "refunded" }
+            : item,
+        ),
+      );
+      await refreshTickets();
+      showListingPopup(
+        "success",
+        `Refund claimed successfully. Tx: ${result.txHash}`,
+      );
+    } catch (error) {
+      showListingPopup(
+        "error",
+        error instanceof Error ? error.message : "Refund claim failed",
+      );
+    } finally {
+      setRefundingTokenId(null);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {listingPopup && (
@@ -282,6 +343,9 @@ export const MyTickets: React.FC = () => {
               .filter(Boolean)
               .join(" - ") || "Unknown venue";
           const purchasePrice = ticket.originalPrice || "0";
+          const canClaimRefund =
+            ticket.status === "sold" &&
+            ["cancelled", "failed"].includes(event?.status || "");
 
           return (
             <Card
@@ -380,25 +444,37 @@ export const MyTickets: React.FC = () => {
                   </Button>
                 </div>
 
-                <Button
-                  className={`w-full mt-3 text-white ${
-                    ticket.isListed
-                      ? "bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700"
-                      : "bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700"
-                  }`}
-                  onClick={() => {
-                    if (ticket.isListed) {
-                      setCancelTicket(ticket);
-                      return;
-                    }
+                {canClaimRefund ? (
+                  <Button
+                    className="w-full mt-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white"
+                    disabled={refundingTokenId === ticket.tokenId}
+                    onClick={() => void handleClaimRefund(ticket)}
+                  >
+                    {refundingTokenId === ticket.tokenId
+                      ? "Claiming Refund..."
+                      : "Claim Refund"}
+                  </Button>
+                ) : (
+                  <Button
+                    className={`w-full mt-3 text-white ${
+                      ticket.isListed
+                        ? "bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700"
+                        : "bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700"
+                    }`}
+                    onClick={() => {
+                      if (ticket.isListed) {
+                        setCancelTicket(ticket);
+                        return;
+                      }
 
-                    setListingTicket(ticket);
-                    setListingError(null);
-                    setListingPrice("");
-                  }}
-                >
-                  {ticket.isListed ? "Cancel Listing" : "List on Marketplace"}
-                </Button>
+                      setListingTicket(ticket);
+                      setListingError(null);
+                      setListingPrice("");
+                    }}
+                  >
+                    {ticket.isListed ? "Cancel Listing" : "List on Marketplace"}
+                  </Button>
+                )}
               </CardContent>
             </Card>
           );

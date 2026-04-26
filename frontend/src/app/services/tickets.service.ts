@@ -15,7 +15,7 @@ export interface ApiTicket {
   tokenId: string;
   originalPrice?: string;
   ticketType?: string;
-  status?: "minted" | "sold" | "used" | "expired";
+  status?: "minted" | "sold" | "used" | "expired" | "refunded";
   isListed?: boolean;
   currentOwner?: string;
   createdAt?: string;
@@ -105,6 +105,47 @@ export interface ConfirmPurchaseData {
   ticket?: ApiTicket;
 }
 
+export interface RefundIntentTransaction {
+  to: string;
+  data: string;
+  value: string;
+  chainId: string;
+  functionName?: string;
+}
+
+export interface RefundIntentData {
+  tokenId: string;
+  eventId: string;
+  buyer: string;
+  refundAmount: string;
+  transaction: RefundIntentTransaction;
+}
+
+interface RefundIntentResponse {
+  success: boolean;
+  data?: RefundIntentData;
+  message?: string;
+}
+
+export interface ConfirmRefundPayload {
+  txHash: string;
+  tokenId?: string;
+  buyerWallet?: string;
+}
+
+export interface ConfirmRefundData {
+  synced: boolean;
+  alreadySynced: boolean;
+  txHash: string;
+  ticket?: ApiTicket;
+}
+
+interface ConfirmRefundResponse {
+  success: boolean;
+  data?: ConfirmRefundData;
+  message?: string;
+}
+
 interface ConfirmPurchaseResponse {
   success: boolean;
   data?: ConfirmPurchaseData;
@@ -140,10 +181,19 @@ export interface Eip1193Provider {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
 }
 
+const WEB3AUTH_TX_GAS_CAP = 16_777_216n;
+const PURCHASE_FALLBACK_GAS_LIMIT = 500_000n;
+
 export interface PurchaseTicketResult {
   txHash: string;
   intent: PurchaseIntentData;
   confirmation: ConfirmPurchaseData | null;
+}
+
+export interface ClaimTicketRefundResult {
+  txHash: string;
+  intent: RefundIntentData;
+  confirmation: ConfirmRefundData | null;
 }
 
 const SEND_TX_MAX_RETRIES = 4;
@@ -246,6 +296,64 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
+function parseHexToBigInt(value: unknown): bigint | null {
+  if (typeof value !== "string") return null;
+
+  try {
+    return BigInt(value);
+  } catch {
+    return null;
+  }
+}
+
+function toSafeGasHex(estimatedGas: bigint): string {
+  const paddedGas = estimatedGas + estimatedGas / 5n + 15_000n;
+  const boundedGas =
+    paddedGas > WEB3AUTH_TX_GAS_CAP ? WEB3AUTH_TX_GAS_CAP : paddedGas;
+
+  return toHexValue(boundedGas.toString());
+}
+
+async function estimatePurchaseGasLimit(
+  provider: Eip1193Provider,
+  tx: {
+    from: string;
+    to: string;
+    data: string;
+    value: string;
+  },
+): Promise<string> {
+  const txRequest = {
+    from: tx.from,
+    to: tx.to,
+    data: tx.data,
+    value: tx.value,
+  };
+
+  try {
+    const estimated = await provider.request({
+      method: "eth_estimateGas",
+      params: [txRequest],
+    });
+
+    const estimatedGas = parseHexToBigInt(estimated);
+    if (estimatedGas && estimatedGas > 0n) {
+      return toSafeGasHex(estimatedGas);
+    }
+  } catch (error) {
+    console.warn(
+      "[Tickets] Failed to estimate gas via wallet provider. Falling back to safe default gas limit.",
+      error,
+    );
+  }
+
+  const safeFallback =
+    PURCHASE_FALLBACK_GAS_LIMIT > WEB3AUTH_TX_GAS_CAP
+      ? WEB3AUTH_TX_GAS_CAP
+      : PURCHASE_FALLBACK_GAS_LIMIT;
+  return toHexValue(safeFallback.toString());
+}
+
 async function sendPurchaseTransactionWithRetry(
   provider: Eip1193Provider,
   tx: {
@@ -256,6 +364,7 @@ async function sendPurchaseTransactionWithRetry(
   },
 ): Promise<string> {
   let lastError: unknown;
+  const gas = await estimatePurchaseGasLimit(provider, tx);
 
   for (let attempt = 1; attempt <= SEND_TX_MAX_RETRIES; attempt += 1) {
     try {
@@ -267,6 +376,7 @@ async function sendPurchaseTransactionWithRetry(
             to: tx.to,
             data: tx.data,
             value: tx.value,
+            gas,
           },
         ],
       })) as string;
@@ -431,6 +541,37 @@ export async function confirmPurchaseTransaction(
     : null;
 }
 
+export async function createRefundIntent(
+  tokenId: string,
+): Promise<RefundIntentData | null> {
+  const response = await api.post<RefundIntentResponse>(
+    `/tickets/${encodeURIComponent(tokenId)}/refund-intent`,
+    {},
+    { headers: getAuthHeaders() },
+  );
+
+  return response.data || null;
+}
+
+export async function confirmRefundTransaction(
+  payload: ConfirmRefundPayload,
+): Promise<ConfirmRefundData | null> {
+  const response = await api.post<ConfirmRefundResponse>(
+    "/tickets/refund/confirm",
+    payload,
+    { headers: getAuthHeaders() },
+  );
+
+  return response.data
+    ? {
+        ...response.data,
+        ticket: response.data.ticket
+          ? normalizeTicket(response.data.ticket)
+          : undefined,
+      }
+    : null;
+}
+
 function toHexValue(decimalString: string): string {
   const value = BigInt(decimalString);
   return `0x${value.toString(16)}`;
@@ -535,6 +676,25 @@ export async function useTicketOnChain(
 
   await ensureWalletAccountAccess(provider, fromAddress);
 
+export async function claimTicketRefundOnChain(
+  provider: Eip1193Provider,
+  tokenId: string,
+  buyerWallet?: string,
+): Promise<ClaimTicketRefundResult> {
+  if (!provider?.request) {
+    throw new Error("Wallet provider is unavailable");
+  }
+
+  const intent = await createRefundIntent(tokenId);
+  if (!intent?.transaction) {
+    throw new Error("Unable to create refund intent");
+  }
+
+  const fromAddress = buyerWallet || intent.buyer;
+  if (!fromAddress) {
+    throw new Error("Buyer wallet address is required");
+  }
+
   const txHash = await sendPurchaseTransactionWithRetry(provider, {
     from: fromAddress,
     to: intent.transaction.to,
@@ -546,6 +706,13 @@ export async function useTicketOnChain(
     txHash,
     tokenId: intent.tokenId,
     verifierWallet: fromAddress,
+    value: toHexValue(intent.transaction.value),
+  });
+
+  const confirmation = await confirmRefundTransaction({
+    txHash,
+    tokenId: intent.tokenId,
+    buyerWallet: fromAddress,
   });
 
   return {
@@ -566,5 +733,8 @@ export const ticketsService = {
   useTicketOnChain,
   createPurchaseIntent,
   confirmPurchaseTransaction,
+  createRefundIntent,
+  confirmRefundTransaction,
   purchaseTicket,
+  claimTicketRefundOnChain,
 };

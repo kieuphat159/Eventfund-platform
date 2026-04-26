@@ -29,7 +29,7 @@ function mapOnchainStatusToDbStatus(chainStatus) {
   if (chainStatus === ONCHAIN_TICKET_STATUS.SOLD) return 'sold';
   if (chainStatus === ONCHAIN_TICKET_STATUS.USED) return 'used';
   if (chainStatus === ONCHAIN_TICKET_STATUS.EXPIRED) return 'expired';
-  if (chainStatus === ONCHAIN_TICKET_STATUS.REFUNDED) return 'expired';
+  if (chainStatus === ONCHAIN_TICKET_STATUS.REFUNDED) return 'refunded';
   return null;
 }
 
@@ -733,6 +733,139 @@ export async function getTicketStats(eventId, repos = {}) {
     usedTickets: stats.used || 0,
     mintedTickets: stats.minted || 0,
     availableTickets: Math.max((stats.minted || 0) - (stats.sold || 0), 0),
+  };
+}
+
+export async function createRefundIntent(tokenId, buyerWallet, repos = {}) {
+  const ticketRepository = repos.ticketRepo || ticketRepo;
+  const eventRepository = repos.eventRepo || eventRepo;
+
+  if (!buyerWallet) {
+    throw new BadRequestError('Buyer wallet address is required');
+  }
+
+  const ticket = await ticketRepository.findByTokenId(tokenId, { lean: true });
+  if (!ticket) {
+    throw new NotFoundError('Ticket not found');
+  }
+
+  if (ticket.status !== 'sold') {
+    throw new BadRequestError('Ticket must be sold before refund claim');
+  }
+
+  if (ticket.currentOwner?.toLowerCase() !== buyerWallet.toLowerCase()) {
+    throw new ForbiddenError('Only the current ticket owner can claim refund');
+  }
+
+  const event = await eventRepository.findById(ticket.eventId);
+  if (!event) {
+    throw new NotFoundError('Event not found');
+  }
+
+  if (event.status !== 'cancelled' && event.status !== 'failed') {
+    throw new BadRequestError('Ticket refund is only available for cancelled or failed events');
+  }
+
+  const ticketContract = getTicket();
+  const chainTokenId = BigInt(ticket.tokenId);
+  const [chainStatus, contractAddress, network] = await Promise.all([
+    ticketContract.getTicketStatus(chainTokenId),
+    ticketContract.getAddress(),
+    provider.getNetwork(),
+  ]);
+
+  if (chainStatus !== ONCHAIN_TICKET_STATUS.SOLD) {
+    throw new BadRequestError('Ticket is not refundable on-chain');
+  }
+
+  const data = ticketContract.interface.encodeFunctionData('claimRefund', [chainTokenId]);
+
+  return {
+    tokenId: ticket.tokenId,
+    eventId: String(ticket.eventId),
+    buyer: buyerWallet.toLowerCase(),
+    refundAmount: String(ticket.originalPrice || '0'),
+    transaction: {
+      to: contractAddress,
+      data,
+      value: '0',
+      chainId: network.chainId.toString(),
+      functionName: 'claimRefund',
+    },
+  };
+}
+
+export async function confirmRefundTransaction(payload = {}, repos = {}) {
+  const ticketRepository = repos.ticketRepo || ticketRepo;
+
+  const { txHash, tokenId, buyerWallet } = payload;
+
+  validateTransactionHash(txHash);
+
+  const receipt = await getMinedReceipt(txHash);
+  if (!receipt) {
+    throw new BadRequestError('Transaction not mined yet. Please wait a moment and retry.');
+  }
+  if (Number(receipt.status) !== 1) {
+    throw new BadRequestError('Transaction failed on-chain');
+  }
+
+  const parsedEvents = await parseTicketEventsFromReceipt(receipt);
+  const refundEvents = parsedEvents.filter((event) => event?.name === 'TicketRefunded');
+
+  let matchedEvent = null;
+
+  if (tokenId) {
+    matchedEvent = refundEvents.find((event) => {
+      const eventTokenId = toTokenIdString(event.args?.tokenId);
+      return eventTokenId === String(tokenId);
+    });
+  } else {
+    [matchedEvent] = refundEvents;
+  }
+
+  if (!matchedEvent) {
+    throw new BadRequestError('TicketRefunded event not found in transaction receipt');
+  }
+
+  const refundedTokenId = toTokenIdString(matchedEvent.args?.tokenId);
+  const buyerFromChain = String(matchedEvent.args?.owner || '').toLowerCase();
+
+  if (buyerWallet && buyerFromChain !== buyerWallet.toLowerCase()) {
+    throw new BadRequestError('Buyer wallet does not match on-chain refund event');
+  }
+
+  const existingTicket = await ticketRepository.findByTokenId(refundedTokenId, { lean: true });
+  if (!existingTicket) {
+    throw new NotFoundError('Ticket not found in database');
+  }
+
+  if (existingTicket.status === 'refunded') {
+    return {
+      synced: false,
+      alreadySynced: true,
+      txHash: normalizeTxHash(txHash),
+      ticket: existingTicket,
+    };
+  }
+
+  const refundedAt = receipt.blockNumber
+    ? new Date(Number((await provider.getBlock(receipt.blockNumber)).timestamp) * 1000)
+    : new Date();
+
+  const updatedTicket = await ticketRepository.markAsRefundedFromChain(
+    refundedTokenId,
+    {
+      refundedAt,
+      refundedTxHash: normalizeTxHash(txHash),
+    },
+  );
+
+  return {
+    synced: true,
+    alreadySynced: false,
+    txHash: normalizeTxHash(txHash),
+    ticket: updatedTicket,
   };
 }
 

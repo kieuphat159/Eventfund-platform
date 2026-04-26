@@ -190,6 +190,32 @@ class EventsController {
     });
   });
 
+  createContributionRefundIntent = asyncHandler(async (req, res) => {
+    const intent = await this.eventsService.createContributionRefundIntent(
+      req.params.id,
+      req.user,
+    );
+
+    res.status(200).json({
+      success: true,
+      data: intent,
+    });
+  });
+
+  confirmContributionRefundTransaction = asyncHandler(async (req, res) => {
+    const payload = req.validated?.body || req.body;
+    const result = await this.eventsService.confirmContributionRefundTransaction(
+      req.params.id,
+      payload,
+      req.user,
+    );
+
+    res.status(200).json({
+      success: true,
+      data: result,
+    });
+  });
+
   /**
    * GET /events/:id/stats
    * Get event statistics
@@ -250,6 +276,15 @@ class EventsController {
     const event = await this.eventsService.assignVerifierOnChain(
       req.params.id,
       verifier,
+   * POST /events/:id/mark-completed
+   * Mark event as completed when ticket usage threshold is met
+   */
+  markEventAsCompleted = asyncHandler(async (req, res) => {
+    const payload = req.validated?.body || req.body;
+
+    const event = await this.eventsService.markEventAsCompleted(
+      req.params.id,
+      payload,
       req.user,
     );
 

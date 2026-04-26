@@ -2,12 +2,16 @@ import { jest } from "@jest/globals";
 
 const mockProvider = {
   getTransactionReceipt: jest.fn(),
+  waitForTransaction: jest.fn(),
 };
 
 const mockFundWithSigner = {
   createEvent: jest.fn(),
   createEventWithInvestment: jest.fn(),
   finalizeFunding: jest.fn(),
+  cancelEvent: jest.fn(),
+  setCompletedIfThresholdMet: jest.fn(),
+  releaseRevenue: jest.fn(),
 };
 
 mockFundWithSigner.createEventWithInvestment.staticCall = jest.fn();
@@ -17,6 +21,7 @@ const mockFund = {
   connect: jest.fn(() => mockFundWithSigner),
   interface: {
     parseLog: jest.fn(),
+    parseError: jest.fn(),
   },
 };
 
@@ -40,7 +45,12 @@ jest.unstable_mockModule("../../../services/upload/ipfs.service.js", () => ({
   uploadEventMetadataToIpfs: mockUploadEventMetadataToIpfs,
 }));
 
-const { confirmCreateEventTransaction, createCreateEventIntent, createEvent } =
+const {
+  confirmCreateEventTransaction,
+  createCreateEventIntent,
+  createEvent,
+  updateEvent,
+} =
   await import("../../../services/events/events.service.js");
 
 describe("events.service", () => {
@@ -48,6 +58,9 @@ describe("events.service", () => {
     jest.clearAllMocks();
     mockGetFund.mockReturnValue(mockFund);
     mockFund.connect.mockReturnValue(mockFundWithSigner);
+    mockFund.getAddress.mockResolvedValue(
+      "0x3333333333333333333333333333333333333333",
+    );
     mockUploadEventMetadataToIpfs.mockResolvedValue("ipfs://event-metadata");
   });
 
@@ -228,13 +241,13 @@ describe("events.service", () => {
     expect(mockFundWithSigner.createEventWithInvestment).toHaveBeenCalledWith(
       0n,
       0n,
-      25n,
-      7000n,
+      5n,
+      10000n,
       1n,
       100n,
       100n,
       false,
-      { value: 25n },
+      { value: 5n },
     );
     expect(repository.updateById).toHaveBeenCalledWith(
       eventId,
@@ -285,33 +298,46 @@ describe("events.service", () => {
     expect(intent.transaction.to).toBe(
       "0x3333333333333333333333333333333333333333",
     );
-    expect(intent.transaction.value).toBe("25");
+    expect(intent.transaction.value).toBe("5");
     expect(intent.transaction.functionName).toBe("createEventWithInvestment");
     expect(intent.transaction.data).toContain("0x");
   });
 
-  test("requires organizer stake for no-invest event creation", async () => {
-    await expect(
-      createEvent(
-        {
-          title: "No-invest event",
-          description: "Already funded",
-          category: "conference",
-          investmentEnabled: false,
-          startDate: "2026-06-01T10:00:00.000Z",
-          endDate: "2026-06-01T12:00:00.000Z",
-          totalTickets: 100,
-          venue: { address: "Test venue" },
-          ticketTiers: [{ name: "General", price: 1, totalSupply: 100 }],
-        },
-        {
-          walletAddress: "0x1111111111111111111111111111111111111111",
-        },
-        { eventRepo: {} },
-      ),
-    ).rejects.toThrow(
-      "organizerStake must be greater than 0 when investment is disabled",
+  test("auto-calculates organizer stake for no-invest event intent", async () => {
+    const repository = {
+      createEvent: jest.fn().mockResolvedValue({
+        _id: "507f1f77bcf86cd799439016",
+        organizer: "0x1111111111111111111111111111111111111111",
+        status: "draft",
+      }),
+    };
+
+    mockFund.getAddress.mockResolvedValue(
+      "0x3333333333333333333333333333333333333333",
     );
+    mockProvider.getNetwork = jest
+      .fn()
+      .mockResolvedValue({ chainId: 11155111n });
+
+    const intent = await createCreateEventIntent(
+      {
+        title: "No-invest event",
+        description: "Already funded",
+        category: "conference",
+        investmentEnabled: false,
+        startDate: "2026-06-01T10:00:00.000Z",
+        endDate: "2026-06-01T12:00:00.000Z",
+        totalTickets: 100,
+        venue: { address: "Test venue" },
+        ticketTiers: [{ name: "General", price: 1, totalSupply: 100 }],
+      },
+      {
+        walletAddress: "0x1111111111111111111111111111111111111111",
+      },
+      { eventRepo: repository },
+    );
+
+    expect(intent.transaction.value).toBe("5");
   });
 
   test("surfaces self-funded contract revert reason when no-invest mode is supported", async () => {
@@ -364,5 +390,281 @@ describe("events.service", () => {
     expect(
       mockFundWithSigner.createEventWithInvestment.staticCall,
     ).toHaveBeenCalledTimes(1);
+  });
+
+  test("cancels owner event on-chain and stores cancellation metadata", async () => {
+    const eventId = "507f1f77bcf86cd799439015";
+    const userAddress = "0x1111111111111111111111111111111111111111";
+    const fundAddress = "0x3333333333333333333333333333333333333333";
+    const existingEvent = {
+      _id: eventId,
+      organizer: userAddress.toLowerCase(),
+      status: "ticketing",
+      contractEventId: "12",
+      fundingGoal: "1000",
+      currentFunding: "1000",
+    };
+
+    const repository = {
+      findById: jest.fn().mockResolvedValue(existingEvent),
+      updateById: jest.fn().mockResolvedValue({
+        ...existingEvent,
+        status: "cancelled",
+        cancellationReason: "ticket_sales_not_met",
+      }),
+    };
+
+    mockFund.getAddress.mockResolvedValue(fundAddress);
+    mockFund.interface.parseLog.mockReturnValue({
+      name: "EventCancelled",
+      args: {
+        reason: 2,
+        ticketRefundsEnabled: true,
+        refundPoolAmount: 100n,
+      },
+    });
+    mockFundWithSigner.cancelEvent.mockResolvedValue({
+      wait: jest.fn().mockResolvedValue({
+        status: 1,
+        logs: [
+          {
+            address: fundAddress,
+            topics: ["0xtopic"],
+            data: "0xcancelled",
+          },
+        ],
+      }),
+    });
+
+    const result = await updateEvent(
+      eventId,
+      {
+        status: "cancelled",
+        reason: "ticket sales too low",
+      },
+      {
+        walletAddress: userAddress,
+      },
+      { eventRepo: repository },
+    );
+
+    expect(mockFundWithSigner.cancelEvent).toHaveBeenCalledWith(12n, 2);
+    expect(repository.updateById).toHaveBeenCalledWith(
+      eventId,
+      expect.objectContaining({
+        status: "cancelled",
+        cancellationReason: "ticket_sales_not_met",
+        cancellationNote: "ticket sales too low",
+        cancelledBy: userAddress.toLowerCase(),
+      }),
+    );
+    expect(result).toMatchObject({
+      status: "cancelled",
+      cancellationReason: "ticket_sales_not_met",
+    });
+  });
+
+  test("requests organizer wallet fallback when backend signer is not authorized to cancel", async () => {
+    const eventId = "507f1f77bcf86cd799439016";
+    const userAddress = "0x1111111111111111111111111111111111111111";
+    const existingEvent = {
+      _id: eventId,
+      organizer: userAddress.toLowerCase(),
+      status: "funded",
+      contractEventId: "27",
+      fundingGoal: "1000",
+      currentFunding: "1000",
+    };
+
+    const repository = {
+      findById: jest.fn().mockResolvedValue(existingEvent),
+      updateById: jest.fn(),
+    };
+
+    mockFundWithSigner.cancelEvent.mockRejectedValue({
+      revert: { name: "NotAuthorized" },
+      message: "execution reverted",
+    });
+
+    await expect(
+      updateEvent(
+        eventId,
+        {
+          status: "cancelled",
+        },
+        {
+          walletAddress: userAddress,
+        },
+        { eventRepo: repository },
+      ),
+    ).rejects.toThrow(
+      "Organizer wallet signature required: Backend signer is not authorized to cancel this event. Organizer wallet signature is required.",
+    );
+
+    expect(mockFundWithSigner.cancelEvent).toHaveBeenCalledWith(27n, 1);
+    expect(repository.updateById).not.toHaveBeenCalled();
+  });
+
+  test("requests organizer wallet fallback when backend signer is not authorized to complete", async () => {
+    const eventId = "507f1f77bcf86cd799439018";
+    const userAddress = "0x1111111111111111111111111111111111111111";
+    const existingEvent = {
+      _id: eventId,
+      organizer: userAddress.toLowerCase(),
+      status: "ongoing",
+      contractEventId: "28",
+      fundingGoal: "1000",
+      currentFunding: "1000",
+    };
+
+    const repository = {
+      findById: jest.fn().mockResolvedValue(existingEvent),
+      updateById: jest.fn(),
+    };
+
+    mockFundWithSigner.setCompletedIfThresholdMet.mockRejectedValue({
+      revert: { name: "NotOrganizer" },
+      message: "execution reverted",
+    });
+
+    await expect(
+      updateEvent(
+        eventId,
+        {
+          status: "completed",
+        },
+        {
+          walletAddress: userAddress,
+        },
+        { eventRepo: repository },
+      ),
+    ).rejects.toThrow(
+      "Organizer wallet signature required: Only the organizer can perform this on-chain action from the connected wallet.",
+    );
+
+    expect(mockFundWithSigner.setCompletedIfThresholdMet).toHaveBeenCalledWith(
+      28n,
+    );
+    expect(repository.updateById).not.toHaveBeenCalled();
+  });
+
+  test("syncs organizer-signed completion and revenue release receipts", async () => {
+    const eventId = "507f1f77bcf86cd799439019";
+    const userAddress = "0x1111111111111111111111111111111111111111";
+    const fundAddress = "0x3333333333333333333333333333333333333333";
+    const completionTxHash = `0x${"b".repeat(64)}`;
+    const releaseTxHash = `0x${"c".repeat(64)}`;
+    const existingEvent = {
+      _id: eventId,
+      organizer: userAddress.toLowerCase(),
+      status: "ongoing",
+      contractEventId: "29",
+      fundingGoal: "1000",
+      currentFunding: "1000",
+    };
+
+    const repository = {
+      findById: jest.fn().mockResolvedValue(existingEvent),
+      updateById: jest.fn().mockImplementation(async (_id, patch) => ({
+        ...existingEvent,
+        ...patch,
+      })),
+    };
+
+    mockFund.getAddress.mockResolvedValue(fundAddress);
+    mockProvider.getTransactionReceipt
+      .mockResolvedValueOnce({
+        status: 1,
+        logs: [
+          {
+            address: fundAddress,
+            topics: ["0xcompleted"],
+            data: "0xcompleted",
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        status: 1,
+        logs: [
+          {
+            address: fundAddress,
+            topics: ["0xreleased"],
+            data: "0xreleased",
+          },
+        ],
+      });
+
+    mockFund.interface.parseLog
+      .mockReturnValueOnce({
+        name: "Completed",
+        args: { eventId: 29n, usedTickets: 40n },
+      })
+      .mockReturnValueOnce({
+        name: "RevenueReleased",
+        args: { eventId: 29n, totalRevenue: 500n },
+      });
+
+    const result = await updateEvent(
+      eventId,
+      {
+        status: "completed",
+        txHash: completionTxHash,
+        releaseTxHash,
+      },
+      {
+        walletAddress: userAddress,
+      },
+      { eventRepo: repository },
+    );
+
+    expect(mockPersistLogsFromReceipt).toHaveBeenCalledTimes(2);
+    expect(repository.updateById).toHaveBeenCalledWith(
+      eventId,
+      expect.objectContaining({
+        status: "completed",
+      }),
+    );
+    expect(result).toMatchObject({
+      status: "completed",
+    });
+  });
+
+  test("rejects cancellation for events linked to an older Fund deployment", async () => {
+    const eventId = "507f1f77bcf86cd799439017";
+    const userAddress = "0x1111111111111111111111111111111111111111";
+    const existingEvent = {
+      _id: eventId,
+      organizer: userAddress.toLowerCase(),
+      status: "funded",
+      contractEventId: "31",
+      fundContractAddress: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    };
+
+    const repository = {
+      findById: jest.fn().mockResolvedValue(existingEvent),
+      updateById: jest.fn(),
+    };
+
+    mockFund.getAddress.mockResolvedValue(
+      "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    );
+
+    await expect(
+      updateEvent(
+        eventId,
+        {
+          status: "cancelled",
+        },
+        {
+          walletAddress: userAddress,
+        },
+        { eventRepo: repository },
+      ),
+    ).rejects.toThrow(
+      "Event belongs to an older Fund deployment and can no longer be managed through the current backend configuration. Use the matching historical contract or recreate the event on the current deployment.",
+    );
+
+    expect(mockFundWithSigner.cancelEvent).not.toHaveBeenCalled();
+    expect(repository.updateById).not.toHaveBeenCalled();
   });
 });
