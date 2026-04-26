@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { useWeb3Auth } from "@web3auth/modal/react";
-import { Calendar, MapPin, Upload, Plus, Trash2 } from "lucide-react";
+import { Calendar, MapPin, Upload, Plus } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -14,13 +13,7 @@ import { Input } from "../../components/ui/input";
 import { Textarea } from "../../components/ui/textarea";
 import { Label } from "../../components/ui/label";
 import { StatusBadge } from "../../components/StatusBadge";
-import {
-  cancelEventWithWalletFallback,
-  getEventById,
-  updateEvent,
-  type EventItem,
-  type EventStatus,
-} from "../../services/events.service";
+import { getEventById, updateEvent, type EventItem, type EventStatus } from "../../services/events.service";
 import { useAuth } from "../../contexts/AuthContext";
 
 type TicketTierForm = {
@@ -70,8 +63,7 @@ const isPositiveWeiInteger = (value: string) => {
 export const EditEvent: React.FC = () => {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
-  const { user, connectWallet } = useAuth();
-  const { web3Auth } = useWeb3Auth();
+  const { user } = useAuth();
 
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -164,11 +156,13 @@ export const EditEvent: React.FC = () => {
   }, [error, success]);
 
   const addTier = () => {
-    setTicketTiers((prev) => [...prev, { name: "", price: "", supply: "" }]);
+    // no-op in view-only mode
+    return;
   };
 
   const removeTier = (index: number) => {
-    setTicketTiers((prev) => prev.filter((_, i) => i !== index));
+    // no-op in view-only mode
+    return;
   };
 
   const updateTierField = (
@@ -215,11 +209,7 @@ export const EditEvent: React.FC = () => {
         return;
       }
 
-      if (!date || !time) {
-        setError("Please select event date and time");
-        return;
-      }
-
+      // Only allow updating title, description, location, category in this view
       if (!location.trim()) {
         setError("Please enter the location");
         return;
@@ -230,113 +220,17 @@ export const EditEvent: React.FC = () => {
         return;
       }
 
-      const filledTiers = ticketTiers
-        .filter(
-          (tier) => tier.name.trim() && tier.price !== "" && tier.supply !== "",
-        );
-      const normalizedTiers = filledTiers.map((tier) => ({
-        name: tier.name.trim(),
-        price: Number.parseInt(tier.price.trim(), 10),
-        totalSupply: Number(tier.supply),
-      }));
-
-      if (!normalizedTiers.length) {
-        setError("Please create at least one valid ticket tier");
-        return;
-      }
-
-      const hasInvalidTier = normalizedTiers.some(
-        (_tier, index) =>
-          !isPositiveWeiInteger(filledTiers[index]?.price || "") ||
-          Number.isNaN(normalizedTiers[index]?.totalSupply) ||
-          !Number.isInteger(normalizedTiers[index]?.totalSupply) ||
-          normalizedTiers[index]?.totalSupply <= 0,
-      );
-
-      if (hasInvalidTier) {
-        setError("Ticket price (wei) or ticket quantity is invalid");
-        return;
-      }
-
-      const totalTickets = normalizedTiers.reduce(
-        (sum, tier) => sum + tier.totalSupply,
-        0,
-      );
-
-      const start = buildStartDate();
-      if (!start) {
-        setError("Ngày giờ bắt đầu không hợp lệ");
-        return;
-      }
-
-      const end = eventData?.endDate
-        ? new Date(eventData.endDate)
-        : new Date(start.getTime() + 2 * 60 * 60 * 1000);
-
-      const fundingDeadline = eventData?.fundingDeadline
-        ? new Date(eventData.fundingDeadline)
-        : new Date(start.getTime() - 7 * 24 * 60 * 60 * 1000);
-
-      if (!fundingGoal.trim()) {
-        setError("Vui lòng nhập funding goal");
-        return;
-      }
-
-      if (
-        status === "cancelled" &&
-        currentStatus !== "cancelled" &&
-        !window.confirm(
-          'Bạn có chắc muốn hủy sự kiện này không?\n\nHành động này sẽ chuyển event sang trạng thái "cancelled" theo flow hiện tại của hệ thống.',
-        )
-      ) {
-        return;
-      }
-
       setSubmitting(true);
       const updatePayload = {
         title: title.trim(),
         description: description.trim(),
         category,
-        startDate: start.toISOString(),
-        endDate: end.toISOString(),
-        fundingGoal: fundingGoal.trim(),
-        minStakeRequired: minStakeRequired.trim() || "0",
-        fundingDeadline: fundingDeadline.toISOString(),
-        totalTickets,
         venue: {
           address: location.trim(),
         },
-        ticketTiers: normalizedTiers,
-        ...(status !== currentStatus ? { status } : {}),
       };
 
-      if (status === "cancelled" && currentStatus !== "cancelled") {
-        if (!web3Auth?.provider) {
-          await connectWallet();
-          setError(
-            "Ví đã được kết nối. Vui lòng bấm cập nhật lại một lần nữa để ký giao dịch hủy bằng ví organizer.",
-          );
-          return;
-        }
-      }
-
-      const updated =
-        status === "cancelled" && currentStatus !== "cancelled"
-          ? await cancelEventWithWalletFallback(
-              web3Auth?.provider as
-                | {
-                    request: (args: {
-                      method: string;
-                      params?: unknown[];
-                    }) => Promise<unknown>;
-                  }
-                | undefined,
-              id,
-              updatePayload,
-              user?.walletAddress,
-              user?.smartAccountAddress,
-            )
-          : await updateEvent(id, updatePayload);
+      const updated = await updateEvent(id, updatePayload);
 
       if (!updated) {
         setError("Cập nhật sự kiện thất bại");
@@ -445,34 +339,107 @@ export const EditEvent: React.FC = () => {
 
           <div className="grid md:grid-cols-2 gap-4">
             <div>
-              <Label htmlFor="date" className="text-white">
-                Event Date *
+              <Label htmlFor="start-date" className="text-white">
+                Event Start Date
               </Label>
               <div className="relative mt-1.5">
                 <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                 <Input
-                  id="date"
+                  id="start-date"
                   type="date"
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
+                  value={toDateInputValue(eventData?.startDate)}
+                  disabled
                   className="pl-10 bg-slate-800 border-slate-700 text-white"
                 />
               </div>
             </div>
 
             <div>
-              <Label htmlFor="time" className="text-white">
-                Event Time *
+              <Label htmlFor="start-time" className="text-white">
+                Event Start Time
               </Label>
               <Input
-                id="time"
+                id="start-time"
                 type="time"
-                value={time}
-                onChange={(e) => setTime(e.target.value)}
+                value={toTimeInputValue(eventData?.startDate)}
+                disabled
                 className="mt-1.5 bg-slate-800 border-slate-700 text-white"
               />
             </div>
           </div>
+
+          <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              <Label htmlFor="end-date" className="text-white">
+                Event End Date
+              </Label>
+              <Input
+                id="end-date"
+                type="date"
+                value={toDateInputValue(eventData?.endDate)}
+                disabled
+                className="mt-1.5 bg-slate-800 border-slate-700 text-white"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="end-time" className="text-white">
+                Event End Time
+              </Label>
+              <Input
+                id="end-time"
+                type="time"
+                value={toTimeInputValue(eventData?.endDate)}
+                disabled
+                className="mt-1.5 bg-slate-800 border-slate-700 text-white"
+              />
+            </div>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              <Label htmlFor="ticketing-start" className="text-white">
+                Ticketing Start Date
+              </Label>
+              <Input
+                id="ticketing-start"
+                type="date"
+                value={toDateInputValue(eventData?.ticketingStartAt)}
+                disabled
+                className="mt-1.5 bg-slate-800 border-slate-700 text-white"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="ticketing-end" className="text-white">
+                Ticketing End Date
+              </Label>
+              <Input
+                id="ticketing-end"
+                type="date"
+                value={toDateInputValue(eventData?.ticketingEndAt)}
+                disabled
+                className="mt-1.5 bg-slate-800 border-slate-700 text-white"
+              />
+            </div>
+          </div>
+
+          {eventData?.investmentEnabled !== false ? (
+            <div className="grid md:grid-cols-1 gap-4">
+              <div>
+                <Label htmlFor="funding-deadline" className="text-white">
+                  Funding Deadline
+                </Label>
+                <Input
+                  id="funding-deadline"
+                  type="date"
+                  value={toDateInputValue(eventData?.fundingDeadline)}
+                  disabled
+                  className="mt-1.5 bg-slate-800 border-slate-700 text-white"
+                />
+              </div>
+            </div>
+          ) : null}
 
           <div>
             <Label htmlFor="location" className="text-white">
@@ -520,7 +487,7 @@ export const EditEvent: React.FC = () => {
               id="status"
               value={status}
               onChange={(e) => setStatus(e.target.value as EventStatus)}
-              disabled={!canOwnerChangeStatus}
+              disabled
               className="mt-1.5 w-full h-9 px-3 rounded-md bg-slate-800 border border-slate-700 text-white text-sm disabled:opacity-60"
             >
               <option value={currentStatus}>{currentStatus}</option>
@@ -533,11 +500,7 @@ export const EditEvent: React.FC = () => {
                 <option value="cancelled">cancelled</option>
               )}
             </select>
-            <p className="mt-1 text-xs text-slate-500">
-              {canOwnerChangeStatus
-                ? "Bạn có thể hủy event ở các trạng thái hợp lệ, hoặc đẩy workflow tiến lên khi hệ thống cho phép."
-                : "Ở giai đoạn này bạn không thể tự đổi status."}
-            </p>
+            <p className="mt-1 text-xs text-slate-500">Trạng thái chỉ hiển thị, không thể chỉnh sửa từ đây.</p>
             {status === "cancelled" && currentStatus !== "cancelled" && (
               <div className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
                 Event sẽ được gửi theo flow hủy hiện có của backend. Nếu event
@@ -584,7 +547,8 @@ export const EditEvent: React.FC = () => {
               onClick={addTier}
               variant="outline"
               size="sm"
-              className="border-slate-700 hover:bg-slate-800 text-white"
+              disabled
+              className="border-slate-700 text-white disabled:opacity-50"
             >
               <Plus className="w-4 h-4 mr-2" />
               Add Tier
@@ -599,17 +563,7 @@ export const EditEvent: React.FC = () => {
             >
               <div className="flex items-start justify-between mb-4">
                 <h4 className="text-white font-medium">Tier {index + 1}</h4>
-                {ticketTiers.length > 1 && (
-                  <Button
-                    type="button"
-                    onClick={() => removeTier(index)}
-                    variant="ghost"
-                    size="sm"
-                    className="text-red-400 hover:bg-red-900/20"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                )}
+                {/* tier editing is view-only; remove delete control */}
               </div>
 
               <div className="grid md:grid-cols-3 gap-4">
@@ -624,9 +578,7 @@ export const EditEvent: React.FC = () => {
                     id={`tier-name-${index}`}
                     placeholder="e.g., VIP, General"
                     value={tier.name}
-                    onChange={(e) =>
-                      updateTierField(index, "name", e.target.value)
-                    }
+                    disabled
                     className="mt-1.5 bg-slate-800 border-slate-700 text-white"
                   />
                 </div>
@@ -645,9 +597,7 @@ export const EditEvent: React.FC = () => {
                     pattern="[0-9]*"
                     placeholder="e.g., 1000000000000000"
                     value={tier.price}
-                    onChange={(e) =>
-                      updateTierField(index, "price", e.target.value)
-                    }
+                    disabled
                     className="mt-1.5 bg-slate-800 border-slate-700 text-white"
                   />
                 </div>
@@ -664,9 +614,7 @@ export const EditEvent: React.FC = () => {
                     type="number"
                     placeholder="100"
                     value={tier.supply}
-                    onChange={(e) =>
-                      updateTierField(index, "supply", e.target.value)
-                    }
+                    disabled
                     className="mt-1.5 bg-slate-800 border-slate-700 text-white"
                   />
                 </div>
@@ -692,7 +640,7 @@ export const EditEvent: React.FC = () => {
               <Input
                 id="funding-goal"
                 value={fundingGoal}
-                onChange={(e) => setFundingGoal(e.target.value)}
+                disabled
                 placeholder="5000000000000000000"
                 className="mt-1.5 bg-slate-800 border-slate-700 text-white"
               />
@@ -705,7 +653,7 @@ export const EditEvent: React.FC = () => {
               <Input
                 id="min-stake-required"
                 value={minStakeRequired}
-                onChange={(e) => setMinStakeRequired(e.target.value)}
+                disabled
                 placeholder="1000000000000000000"
                 className="mt-1.5 bg-slate-800 border-slate-700 text-white"
               />
