@@ -396,40 +396,42 @@ export const EventDetail: React.FC = () => {
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
-                <div className="flex items-center justify-between text-sm text-slate-300 mb-2">
-                  <span className="inline-flex items-center gap-2">
-                    <Gauge className="w-4 h-4 text-cyan-300" />
-                    Funding progress
-                  </span>
-                  <span className="font-medium">
-                    {fundingProgress.toFixed(1)}%
-                  </span>
+              {event?.investmentEnabled !== false ? (
+                <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
+                  <div className="flex items-center justify-between text-sm text-slate-300 mb-2">
+                    <span className="inline-flex items-center gap-2">
+                      <Gauge className="w-4 h-4 text-cyan-300" />
+                      Funding progress
+                    </span>
+                    <span className="font-medium">
+                      {fundingProgress.toFixed(1)}%
+                    </span>
+                  </div>
+                  <div className="h-2 rounded-full bg-slate-800 overflow-hidden mb-3">
+                    <div
+                      className="h-full bg-gradient-to-r from-cyan-400 via-emerald-400 to-amber-300"
+                      style={{ width: `${fundingProgress}%` }}
+                    />
+                  </div>
+                  <div className="grid sm:grid-cols-2 gap-2 text-xs text-slate-400">
+                    <span>
+                      Raised: {" "}
+                      {formatIntegerWithUnit(event?.currentFunding, "wei")}
+                    </span>
+                    <span>
+                      Goal: {formatIntegerWithUnit(event?.fundingGoal, "wei")}
+                    </span>
+                    <span>
+                      Min stake: {" "}
+                      {formatIntegerWithUnit(event?.minStakeRequired, "wei")}
+                    </span>
+                    {fundingDeadline ? (
+                      <span>Deadline: {formatDate(fundingDeadline)}</span>
+                    ) : null}
+                    <span>Investment Mode: {investmentMode}</span>
+                  </div>
                 </div>
-                <div className="h-2 rounded-full bg-slate-800 overflow-hidden mb-3">
-                  <div
-                    className="h-full bg-gradient-to-r from-cyan-400 via-emerald-400 to-amber-300"
-                    style={{ width: `${fundingProgress}%` }}
-                  />
-                </div>
-                <div className="grid sm:grid-cols-2 gap-2 text-xs text-slate-400">
-                  <span>
-                    Raised:{" "}
-                    {formatIntegerWithUnit(event?.currentFunding, "wei")}
-                  </span>
-                  <span>
-                    Goal: {formatIntegerWithUnit(event?.fundingGoal, "wei")}
-                  </span>
-                  <span>
-                    Min stake:{" "}
-                    {formatIntegerWithUnit(event?.minStakeRequired, "wei")}
-                  </span>
-                  {fundingDeadline ? (
-                    <span>Deadline: {formatDate(fundingDeadline)}</span>
-                  ) : null}
-                  <span>Investment Mode: {investmentMode}</span>
-                </div>
-              </div>
+              ) : null}
             </div>
           </div>
         </div>
@@ -492,80 +494,6 @@ export const EventDetail: React.FC = () => {
               </div>
             ) : (
               <div className="text-slate-400">No ticket tiers configured.</div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card className="bg-slate-900/80 border-slate-800 backdrop-blur-sm mt-8">
-          <CardContent className="p-6">
-            <h2 className="text-2xl font-semibold text-white mb-3">
-              Ticket Inventory
-            </h2>
-            <p className="text-sm text-slate-400 mb-4">
-              Synced from ticket records for this event.
-            </p>
-
-            <div className="grid sm:grid-cols-4 gap-3 mb-5">
-              <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3">
-                <div className="text-xs text-slate-500 mb-1">Available</div>
-                <div className="text-lg font-semibold text-emerald-300">
-                  {ticketStats?.availableTickets ?? "-"}
-                </div>
-              </div>
-              <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3">
-                <div className="text-xs text-slate-500 mb-1">Total Tracked</div>
-                <div className="text-lg font-semibold text-cyan-300">
-                  {ticketStats?.totalTickets ?? "-"}
-                </div>
-              </div>
-              <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3">
-                <div className="text-xs text-slate-500 mb-1">Sold</div>
-                <div className="text-lg font-semibold text-amber-300">
-                  {ticketStats?.soldTickets ?? "-"}
-                </div>
-              </div>
-              <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3">
-                <div className="text-xs text-slate-500 mb-1">Used</div>
-                <div className="text-lg font-semibold text-purple-300">
-                  {ticketStats?.usedTickets ?? "-"}
-                </div>
-              </div>
-            </div>
-
-            {loadingTickets ? (
-              <div className="text-slate-400 text-sm">Loading tickets...</div>
-            ) : eventTickets.length === 0 ? (
-              <div className="text-slate-400 text-sm">
-                No ticket records found for this event yet.
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="min-w-full text-sm">
-                  <thead>
-                    <tr className="text-left text-slate-400 border-b border-slate-700">
-                      <th className="py-2 pr-3">Token</th>
-                      <th className="py-2 pr-3">Status</th>
-                      <th className="py-2 pr-3">Owner</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {eventTickets.map((ticket) => (
-                      <tr
-                        key={ticket.tokenId}
-                        className="border-b border-slate-800 text-slate-200"
-                      >
-                        <td className="py-2 pr-3 font-mono">
-                          #{ticket.tokenId}
-                        </td>
-                        <td className="py-2 pr-3">{ticket.status || "-"}</td>
-                        <td className="py-2 pr-3 font-mono text-xs">
-                          {ticket.currentOwner || "-"}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
             )}
           </CardContent>
         </Card>
