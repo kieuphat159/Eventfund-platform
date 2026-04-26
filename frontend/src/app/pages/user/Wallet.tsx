@@ -6,6 +6,7 @@ import {
   ArrowUpRight,
   ArrowDownLeft,
 } from "lucide-react";
+import { DepositModal } from "../../components/shared/DepositModal";
 import { formatEther } from "ethers";
 import {
   Card,
@@ -91,6 +92,7 @@ export const Wallet: React.FC = () => {
   });
   const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isDepositModalOpen, setIsDepositModalOpen] = useState(false);
 
   useEffect(() => {
     const loadWalletData = async () => {
@@ -246,6 +248,18 @@ export const Wallet: React.FC = () => {
 
   const isNetPositive = compareIntegerValues(netChange, "0") >= 0;
 
+  const handleDepositSuccess = async () => {
+    // Reload wallet balance after successful deposit
+    if (walletAddress) {
+      try {
+        const newBalance = await fetchWalletBalance(walletAddress);
+        setBalance(newBalance);
+      } catch (error) {
+        console.error("Failed to reload balance:", error);
+      }
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -254,6 +268,13 @@ export const Wallet: React.FC = () => {
           Manage your digital assets and transactions
         </p>
       </div>
+
+      {/* Deposit Modal */}
+      <DepositModal
+        isOpen={isDepositModalOpen}
+        onClose={() => setIsDepositModalOpen(false)}
+        onSuccess={handleDepositSuccess}
+      />
 
       <Card className="bg-gradient-to-br from-purple-900/50 to-blue-900/50 border-purple-500/30">
         <CardContent className="p-8">
@@ -308,8 +329,8 @@ export const Wallet: React.FC = () => {
               Send
             </Button>
             <Button
-              className="bg-slate-900/50 hover:bg-slate-900/70 text-white border border-purple-500/30"
-              disabled
+              className="bg-purple-600 hover:bg-purple-700 text-white border-0"
+              onClick={() => setIsDepositModalOpen(true)}
             >
               <Download className="w-4 h-4 mr-2" />
               Receive
