@@ -1,4 +1,4 @@
-﻿[
+[
     {
         "inputs":  [
 
@@ -227,6 +227,37 @@
                        }
                    ],
         "name":  "ContributionRefunded",
+        "type":  "event"
+    },
+    {
+        "anonymous":  false,
+        "inputs":  [
+                       {
+                           "indexed":  true,
+                           "internalType":  "uint256",
+                           "name":  "eventId",
+                           "type":  "uint256"
+                       },
+                       {
+                           "indexed":  false,
+                           "internalType":  "enum IFund.CancellationReason",
+                           "name":  "reason",
+                           "type":  "uint8"
+                       },
+                       {
+                           "indexed":  false,
+                           "internalType":  "bool",
+                           "name":  "ticketRefundsEnabled",
+                           "type":  "bool"
+                       },
+                       {
+                           "indexed":  false,
+                           "internalType":  "uint256",
+                           "name":  "refundPoolAmount",
+                           "type":  "uint256"
+                       }
+                   ],
+        "name":  "EventCancelled",
         "type":  "event"
     },
     {
@@ -760,6 +791,26 @@
                        }
                    ],
         "name":  "applyPenalty",
+        "outputs":  [
+
+                    ],
+        "stateMutability":  "nonpayable",
+        "type":  "function"
+    },
+    {
+        "inputs":  [
+                       {
+                           "internalType":  "uint256",
+                           "name":  "eventId",
+                           "type":  "uint256"
+                       },
+                       {
+                           "internalType":  "enum IFund.CancellationReason",
+                           "name":  "reason",
+                           "type":  "uint8"
+                       }
+                   ],
+        "name":  "cancelEvent",
         "outputs":  [
 
                     ],

@@ -10,6 +10,10 @@ const bigIntString = Joi.string()
   .pattern(/^[0-9]+$/)
   .message("must be a valid positive integer string");
 
+const txHashSchema = Joi.string()
+  .pattern(/^0x([A-Fa-f0-9]{64})$/)
+  .message("must be a valid transaction hash");
+
 // Venue schema
 const venueSchema = Joi.object({
   address: Joi.string().trim().required(),
@@ -64,6 +68,7 @@ const createEventSchema = Joi.object({
   organizerStake: bigIntString.optional(),
   fundingGoal: bigIntString.optional(),
   minStakeRequired: bigIntString.optional(),
+  minInvestmentAmount: bigIntString.optional(),
   fundingDeadline: Joi.date().iso().optional().messages({
     "date.base": "Funding deadline must be a valid date",
   }),
@@ -113,16 +118,31 @@ const createEventSchema = Joi.object({
   usedThreshold: Joi.number().integer().min(1).optional(),
 })
   .custom((value, helpers) => {
-    if (value.investmentEnabled === false) {
-      const organizerStake = value.organizerStake ?? value.minStakeRequired;
-      if (
-        !organizerStake ||
-        !/^[0-9]+$/.test(String(organizerStake)) ||
-        BigInt(organizerStake) <= 0n
-      ) {
+    if (value.investmentEnabled === true) {
+      const fundingGoal =
+        value.fundingGoal === undefined ? undefined : BigInt(value.fundingGoal);
+      const minInvestmentAmount =
+        value.minInvestmentAmount === undefined
+          ? undefined
+          : BigInt(value.minInvestmentAmount);
+
+      if (fundingGoal === undefined || fundingGoal <= 0n) {
         return helpers.error("any.custom", {
           message:
-            "Organizer stake is required and must be a positive integer string when investment is disabled",
+            "Funding goal is required and must be a positive integer string when investment is enabled",
+        });
+      }
+
+      if (minInvestmentAmount === undefined || minInvestmentAmount <= 0n) {
+        return helpers.error("any.custom", {
+          message:
+            "Minimum investment amount is required and must be a positive integer string when investment is enabled",
+        });
+      }
+
+      if (!value.fundingDeadline) {
+        return helpers.error("any.custom", {
+          message: "Funding deadline is required when investment is enabled",
         });
       }
     }
@@ -201,6 +221,7 @@ const createEventIntentSchema = Joi.object({
   organizerStake: bigIntString.optional(),
   fundingGoal: bigIntString.optional(),
   minStakeRequired: bigIntString.optional(),
+  minInvestmentAmount: bigIntString.optional(),
   fundingDeadline: Joi.date().iso().optional().messages({
     "date.base": "Funding deadline must be a valid date",
   }),
@@ -249,16 +270,31 @@ const createEventIntentSchema = Joi.object({
   usedThreshold: Joi.number().integer().min(1).optional(),
 })
   .custom((value, helpers) => {
-    if (value.investmentEnabled === false) {
-      const organizerStake = value.organizerStake ?? value.minStakeRequired;
-      if (
-        !organizerStake ||
-        !/^[0-9]+$/.test(String(organizerStake)) ||
-        BigInt(organizerStake) <= 0n
-      ) {
+    if (value.investmentEnabled === true) {
+      const fundingGoal =
+        value.fundingGoal === undefined ? undefined : BigInt(value.fundingGoal);
+      const minInvestmentAmount =
+        value.minInvestmentAmount === undefined
+          ? undefined
+          : BigInt(value.minInvestmentAmount);
+
+      if (fundingGoal === undefined || fundingGoal <= 0n) {
         return helpers.error("any.custom", {
           message:
-            "Organizer stake is required and must be a positive integer string when investment is disabled",
+            "Funding goal is required and must be a positive integer string when investment is enabled",
+        });
+      }
+
+      if (minInvestmentAmount === undefined || minInvestmentAmount <= 0n) {
+        return helpers.error("any.custom", {
+          message:
+            "Minimum investment amount is required and must be a positive integer string when investment is enabled",
+        });
+      }
+
+      if (!value.fundingDeadline) {
+        return helpers.error("any.custom", {
+          message: "Funding deadline is required when investment is enabled",
         });
       }
     }
@@ -377,6 +413,8 @@ const updateEventSchema = Joi.object({
       "number.min": "Ticket usage threshold must be at least 0",
       "number.max": "Ticket usage threshold must not exceed 100",
     }),
+  reason: Joi.string().trim().min(1).optional(),
+  txHash: txHashSchema.optional(),
 })
   .min(1)
   .messages({
@@ -421,10 +459,6 @@ const investEventSchema = Joi.object({
   }),
 });
 
-const txHashSchema = Joi.string()
-  .pattern(/^0x([A-Fa-f0-9]{64})$/)
-  .message("must be a valid transaction hash");
-
 const confirmCreateEventSchema = Joi.object({
   txHash: txHashSchema.required(),
   draftEventId: Joi.string()
@@ -441,12 +475,23 @@ const confirmInvestEventSchema = Joi.object({
   investorWallet: ethereumAddress.optional(),
 });
 
+const confirmContributionRefundSchema = Joi.object({
+  txHash: txHashSchema.required(),
+  investorWallet: ethereumAddress.optional(),
+});
+
+const markEventCompletedSchema = Joi.object({
+  txHash: txHashSchema.optional(),
+});
+
 export const eventSchemas = {
   createEvent: createEventSchema,
   createEventIntent: createEventIntentSchema,
   confirmCreateEvent: confirmCreateEventSchema,
   confirmInvestEvent: confirmInvestEventSchema,
+  confirmContributionRefund: confirmContributionRefundSchema,
   updateEvent: updateEventSchema,
   queryEvents: queryEventsSchema,
   investEvent: investEventSchema,
+  markEventCompleted: markEventCompletedSchema,
 };

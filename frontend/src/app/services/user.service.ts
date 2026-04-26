@@ -36,6 +36,25 @@ export interface UserInvestment {
   createdAt: string;
 }
 
+export interface UserRewardItem {
+  eventId?: {
+    _id?: string;
+    title?: string;
+  } | string;
+  eventTitle?: string;
+  rewardAmount: string;
+  claimedAt?: string;
+  txHash?: string;
+  sharePercentage?: number;
+}
+
+export interface UserRewardsSummary {
+  claimed: UserRewardItem[];
+  pending: UserRewardItem[];
+  totalClaimed: string;
+  totalPending: string;
+}
+
 function getAuthHeaders(): HeadersInit {
   const jwtToken = localStorage.getItem("jwtToken");
   return jwtToken ? { Authorization: `Bearer ${jwtToken}` } : {};
@@ -112,5 +131,23 @@ export const userService = {
       { headers: getAuthHeaders() },
     );
     return response.data;
+  },
+
+  getUserRewards: async (): Promise<UserRewardsSummary> => {
+    const response = await api.get<{
+      success: boolean;
+      data: UserRewardsSummary;
+    }>("/users/rewards", {
+      headers: getAuthHeaders(),
+    });
+
+    return (
+      response.data || {
+        claimed: [],
+        pending: [],
+        totalClaimed: "0",
+        totalPending: "0",
+      }
+    );
   },
 };

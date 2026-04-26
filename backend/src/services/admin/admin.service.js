@@ -99,6 +99,61 @@ function calculateAverage(total, count) {
   return (BigInt(total || "0") / BigInt(normalizedCount)).toString();
 }
 
+const CHAIN_CANCELLATION_REASON = {
+  funding_goal_not_met: 0,
+  organizer_cancelled: 1,
+  ticket_sales_not_met: 2,
+};
+
+function normalizeCancellationReason(inputReason, event = null) {
+  const rawReason =
+    typeof inputReason === "string" ? inputReason.trim() : "";
+  const normalizedReason = rawReason.toLowerCase();
+
+  if (CHAIN_CANCELLATION_REASON[normalizedReason] !== undefined) {
+    return {
+      reasonCode: normalizedReason,
+      cancellationNote: null,
+    };
+  }
+
+  let reasonCode = "organizer_cancelled";
+  if (event?.status === "ticketing") {
+    reasonCode = "ticket_sales_not_met";
+  } else if (event?.status === "funding") {
+    const fundingGoal = toBigIntValue(event.fundingGoal, 0n);
+    const currentFunding = toBigIntValue(event.currentFunding, 0n);
+    const fundingDeadline = event?.fundingDeadline
+      ? new Date(event.fundingDeadline)
+      : null;
+    const afterDeadline =
+      fundingDeadline && Number.isFinite(fundingDeadline.getTime())
+        ? fundingDeadline.getTime() <= Date.now()
+        : false;
+
+    if (fundingGoal > 0n && currentFunding < fundingGoal && afterDeadline) {
+      reasonCode = "funding_goal_not_met";
+    }
+  }
+
+  return {
+    reasonCode,
+    cancellationNote: rawReason || null,
+  };
+}
+
+function buildCancellationPatch(reasonMeta, actor = null) {
+  const actorAddress = actor?.walletAddress || actor?.smartAccountAddress;
+
+  return {
+    status: "cancelled",
+    cancellationReason: reasonMeta.reasonCode,
+    cancellationNote: reasonMeta.cancellationNote,
+    cancelledAt: new Date(),
+    ...(actorAddress ? { cancelledBy: actorAddress.toLowerCase() } : {}),
+  };
+}
+
 function resolveImmediateFundingDeadline(event) {
   const startDate = event?.startDate ? new Date(event.startDate) : null;
   if (startDate && Number.isFinite(startDate.getTime())) {
@@ -184,7 +239,8 @@ async function publishDraftEventOnChain(event, eventRepository) {
   const fundWithSigner = fund.connect(signer);
 
   const fundingGoal = toBigIntValue(event.fundingGoal, 0n);
-  const investmentEnabled = fundingGoal > 0n;
+  const investmentEnabled =
+    event.investmentEnabled === false ? false : fundingGoal > 0n;
   const minStakeRequired = investmentEnabled
     ? toBigIntValue(event.minStakeRequired, fundingGoal / 10n)
     : toBigIntValue(
@@ -553,6 +609,7 @@ export async function updateEventStatus(
   }
 
   const eventRepository = repos.eventRepo || eventRepo;
+  const actor = options?.actor || null;
 
   let event = await eventRepository.findById(eventId);
 
@@ -570,6 +627,14 @@ export async function updateEventStatus(
 
   if (!event.contractEventId) {
     if (newStatus === "cancelled" || newStatus === "failed") {
+      if (newStatus === "cancelled") {
+        const reasonMeta = normalizeCancellationReason(options.reason, event);
+        return await eventRepository.updateById(
+          eventId,
+          buildCancellationPatch(reasonMeta, actor),
+        );
+      }
+
       return await eventRepository.updateById(eventId, { status: newStatus });
     }
 
@@ -601,6 +666,71 @@ export async function updateEventStatus(
   let tx;
   let receipt;
   let resolvedStatus = newStatus;
+
+  if (newStatus === "cancelled") {
+    const reasonMeta = normalizeCancellationReason(options.reason, event);
+    const cancellationPatch = buildCancellationPatch(reasonMeta, actor);
+
+    try {
+      if (reasonMeta.reasonCode === "funding_goal_not_met") {
+        tx = await fundWithSigner.finalizeFunding(chainEventId);
+      } else {
+        tx = await fundWithSigner.cancelEvent(
+          chainEventId,
+          CHAIN_CANCELLATION_REASON[reasonMeta.reasonCode],
+        );
+      }
+    } catch (error) {
+      throw new BadRequestError(
+        `Failed to cancel event on-chain: ${getOnChainErrorMessage(error)}`,
+      );
+    }
+
+    receipt = await tx.wait();
+    if (!receipt || Number(receipt.status) !== 1) {
+      throw new BadRequestError("On-chain cancellation failed");
+    }
+
+    await persistLogsFromReceipt({
+      receipt,
+      contract: fund,
+      contractName: "Fund",
+      contractAddress: fundAddress,
+    });
+
+    const parsedEvents = await parseFundEventsFromReceipt(receipt);
+    if (reasonMeta.reasonCode === "funding_goal_not_met") {
+      const finalized = parsedEvents.find(
+        (evt) => evt?.name === "FundingFinalized",
+      );
+      if (!finalized) {
+        throw new BadRequestError(
+          "FundingFinalized event not found in transaction receipt",
+        );
+      }
+
+      resolvedStatus = mapFundStatusToAppStatus(
+        finalized.args?.statusAfterFinalize,
+      );
+      if (resolvedStatus !== "cancelled") {
+        throw new BadRequestError(
+          `Cannot cancel event because funding finalized with status ${resolvedStatus}`,
+        );
+      }
+    } else {
+      const cancelled = parsedEvents.find((evt) => evt?.name === "EventCancelled");
+      if (!cancelled) {
+        throw new BadRequestError(
+          "EventCancelled event not found in transaction receipt",
+        );
+      }
+    }
+
+    return await eventRepository.updateById(eventId, {
+      ...cancellationPatch,
+      status: resolvedStatus,
+    });
+  }
 
   if (newStatus === "ticketing") {
     const ticketType = Number(options.ticketType ?? 0);

@@ -146,6 +146,12 @@ contract Fund is IFund, ReentrancyGuard {
 
     event FundingSuccessful(uint256 indexed eventId);
     event FundingFinalized(uint256 indexed eventId, uint256 totalShares, EventStatus statusAfterFinalize);
+    event EventCancelled(
+        uint256 indexed eventId,
+        CancellationReason reason,
+        bool ticketRefundsEnabled,
+        uint256 refundPoolAmount
+    );
 
     event TicketingStarted(uint256 indexed eventId, uint256 mintedQty, uint8 ticketType);
     event Completed(uint256 indexed eventId, uint256 usedTickets);
@@ -470,12 +476,47 @@ contract Fund is IFund, ReentrancyGuard {
         } else {
             // sau deadline mà chưa đủ goal => Cancelled
             if (e.status != EventStatus.Funded) {
-                e.status = EventStatus.Cancelled;
+                _cancelEvent(eventId, e, CancellationReason.funding_goal_not_met);
             }
         }
 
         e.sharesFinalized = true;
         emit FundingFinalized(eventId, e.totalShares, e.status);
+    }
+
+    // -----------------------
+    // cancelEvent() explicit cancellation
+    // - organizer/admin can cancel before revenue release
+    // - organizer_cancelled: allow Funding/Funded/Ticketing
+    // - ticket_sales_not_met: allow Ticketing only
+    // - funding_goal_not_met is reserved for finalizeFunding() after deadline
+    // -----------------------
+    function cancelEvent(uint256 eventId, CancellationReason reason)
+        external
+        onlyOrganizerOrAdmin(eventId)
+    {
+        EventConfig storage e = _mustGet(eventId);
+
+        if (reason == CancellationReason.funding_goal_not_met) revert BadParam();
+        if (e.status == EventStatus.Cancelled) revert AlreadyFinalized();
+        if (e.status == EventStatus.Completed) revert Unsafe();
+        if (e.revenueReleased) revert Unsafe();
+
+        if (reason == CancellationReason.organizer_cancelled) {
+            if (
+                e.status != EventStatus.Funding &&
+                e.status != EventStatus.Funded &&
+                e.status != EventStatus.Ticketing
+            ) {
+                revert Unsafe();
+            }
+        } else if (reason == CancellationReason.ticket_sales_not_met) {
+            if (e.status != EventStatus.Ticketing) revert Unsafe();
+        } else {
+            revert BadParam();
+        }
+
+        _cancelEvent(eventId, e, reason);
     }
 
     // -----------------------
@@ -649,18 +690,18 @@ contract Fund is IFund, ReentrancyGuard {
     // -----------------------
     // FIX (critical): contribution refunds when funding failed/cancelled
     // -----------------------
-    function claimContributionRefund(uint256 eventId) external nonReentrant {
+    function _claimContributionRefund(uint256 eventId, address donator) internal {
         EventConfig storage e = _mustGet(eventId);
 
         // Only allow refund if event is cancelled (funding failed / deadline passed without goal)
         if (e.status != EventStatus.Cancelled) revert Unsafe();
 
         // shares == contributed wei (1 wei = 1 share)
-        uint256 amount = e.shareOf[msg.sender];
+        uint256 amount = e.shareOf[donator];
         if (amount == 0) revert NothingToClaim();
 
         // FIX: burn user's shares for this event so they can't double-refund
-        e.shareOf[msg.sender] = 0;
+        e.shareOf[donator] = 0;
         if (e.totalShares >= amount) {
             e.totalShares -= amount;
         } else {
@@ -669,40 +710,30 @@ contract Fund is IFund, ReentrancyGuard {
         }
 
         // reset reward tracking (event cancelled => no rewards)
-        e.rewardDebt[msg.sender] = 0;
-        e.pending[msg.sender] = 0;
+        e.rewardDebt[donator] = 0;
+        e.pending[donator] = 0;
 
-        (bool ok, ) = msg.sender.call{value: amount}("");
+        (bool ok, ) = donator.call{value: amount}("");
         if (!ok) revert TransferFailed();
 
-        emit ContributionRefunded(eventId, msg.sender, amount);
+        emit ContributionRefunded(eventId, donator, amount);
+    }
+
+    function claimContributionRefund(uint256 eventId) external nonReentrant {
+        _claimContributionRefund(eventId, msg.sender);
+    }
+
+    // FIX: allow backend relayers / auto-refund jobs to trigger refund for a user
+    function claimContributionRefundFor(uint256 eventId, address donator) external nonReentrant {
+        _claimContributionRefund(eventId, donator);
     }
 
     // -----------------------
-    // FIX: organizer stake withdrawal so stake doesn't stay locked forever
+    // organizer stake is treated as a non-refundable listing fee for now
     // -----------------------
     function withdrawStake(uint256 eventId) external nonReentrant onlyOrganizer(eventId) {
-        EventConfig storage e = _mustGet(eventId);
-
-        // stake can be withdrawn when:
-        // - event cancelled (after finalize)
-        // - event completed and revenue released OR refunds enabled (settlement decision made)
-        bool canWithdraw =
-            (e.status == EventStatus.Cancelled && e.sharesFinalized) ||
-            (e.status == EventStatus.Completed && (e.revenueReleased || e.refundsEnabled)) ||
-            (e.refundsEnabled && e.sharesFinalized);
-
-        if (!canWithdraw) revert Unsafe();
-
-        uint256 amount = e.organizerStakeLocked;
-        if (amount == 0) revert NothingToWithdraw();
-
-        e.organizerStakeLocked = 0;
-
-        (bool ok, ) = e.organizer.call{value: amount}("");
-        if (!ok) revert TransferFailed();
-
-        emit StakeWithdrawn(eventId, e.organizer, amount);
+        _mustGet(eventId);
+        revert Unsafe();
     }
 
     // -----------------------
@@ -770,6 +801,31 @@ contract Fund is IFund, ReentrancyGuard {
 
         // set new debt
         e.rewardDebt[user] = accumulated;
+    }
+
+    function _cancelEvent(
+        uint256 eventId,
+        EventConfig storage e,
+        CancellationReason reason
+    ) internal {
+        e.status = EventStatus.Cancelled;
+        e.sharesFinalized = true;
+
+        bool ticketRefundsEnabled = false;
+        if (e.status == EventStatus.Cancelled) {
+            if (e.escrowedRevenue > 0) {
+                e.refundPool += e.escrowedRevenue;
+                e.escrowedRevenue = 0;
+            }
+
+            if (e.totalMinted > 0 || e.refundPool > 0 || e.refundsEnabled) {
+                e.refundsEnabled = true;
+                ticketRefundsEnabled = true;
+                emit RefundsEnabled(eventId, e.refundPool);
+            }
+        }
+
+        emit EventCancelled(eventId, reason, ticketRefundsEnabled, e.refundPool);
     }
 
     // -----------------------

@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { useWeb3Auth } from "@web3auth/modal/react";
 import {
   Calendar,
   MapPin,
   Users,
   Plus,
+  Ban,
   Edit,
   Trash2,
   CircleDollarSign,
@@ -15,20 +17,31 @@ import { Card, CardContent } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { StatusBadge } from "../../components/StatusBadge";
 import {
+  cancelEventWithWalletFallback,
   deleteEvent,
   getMyEvents,
   type EventItem,
+  type EventStatus,
 } from "../../services/events.service";
 import { useAuth } from "../../contexts/AuthContext";
 
+const OWNER_CANCELABLE_STATUSES = new Set<EventStatus>([
+  "draft",
+  "funding",
+  "funded",
+  "ticketing",
+]);
+
 export const MyEvents: React.FC = () => {
   const navigate = useNavigate();
-  const { user } = useAuth() as any;
+  const { user, connectWallet } = useAuth() as any;
+  const { web3Auth } = useWeb3Auth();
 
   const [events, setEvents] = useState<EventItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [deletingId, setDeletingId] = useState<string>("");
+  const [cancellingId, setCancellingId] = useState<string>("");
 
   const fetchEvents = async () => {
     if (!user?.walletAddress) {
@@ -72,6 +85,57 @@ export const MyEvents: React.FC = () => {
       );
     } finally {
       setDeletingId("");
+    }
+  };
+
+  const handleCancel = async (event: EventItem) => {
+    const eventId = event._id || event.id;
+    if (!eventId) return;
+
+    const ok = window.confirm(
+      `Bạn có chắc muốn hủy sự kiện "${event.title || "Untitled event"}" không?\n\nEvent sẽ được chuyển sang trạng thái cancelled theo flow backend hiện tại.`,
+    );
+    if (!ok) return;
+
+    try {
+      setCancellingId(eventId);
+      if (!web3Auth?.provider) {
+        await connectWallet();
+        alert(
+          "Ví đã được kết nối. Vui lòng bấm Cancel Event thêm một lần nữa để ký giao dịch hủy bằng ví organizer.",
+        );
+        return;
+      }
+
+      const updated = await cancelEventWithWalletFallback(
+        web3Auth?.provider as
+          | {
+              request: (args: {
+                method: string;
+                params?: unknown[];
+              }) => Promise<unknown>;
+            }
+          | undefined,
+        eventId,
+        { status: "cancelled" },
+        user?.walletAddress,
+        user?.smartAccountAddress,
+      );
+      if (!updated) {
+        throw new Error("Không thể hủy sự kiện");
+      }
+
+      setEvents((prev) =>
+        prev.map((item) => ((item._id || item.id) === eventId ? updated : item)),
+      );
+    } catch (err: any) {
+      alert(
+        err?.response?.data?.message ||
+          err?.message ||
+          "Hủy sự kiện thất bại",
+      );
+    } finally {
+      setCancellingId("");
     }
   };
 
@@ -145,6 +209,9 @@ export const MyEvents: React.FC = () => {
                   );
 
             const canDelete = (event.status || "draft") === "draft";
+            const canCancel = OWNER_CANCELABLE_STATUSES.has(
+              (event.status as EventStatus) || "draft",
+            );
 
             return (
               <Card
@@ -176,6 +243,23 @@ export const MyEvents: React.FC = () => {
                         disabled={!eventId}
                       >
                         <Edit className="w-4 h-4" />
+                      </Button>
+
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="border-red-600 hover:bg-red-900/20 text-red-400 disabled:opacity-50"
+                        onClick={() => handleCancel(event)}
+                        disabled={
+                          !eventId || !canCancel || cancellingId === eventId
+                        }
+                        title={
+                          canCancel
+                            ? "Cancel event"
+                            : "This event can no longer be cancelled"
+                        }
+                      >
+                        <Ban className="w-4 h-4" />
                       </Button>
 
                       <Button
@@ -277,6 +361,17 @@ export const MyEvents: React.FC = () => {
                     </div>
 
                     <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        className="border-red-600 hover:bg-red-900/20 text-red-300 disabled:opacity-50"
+                        onClick={() => handleCancel(event)}
+                        disabled={
+                          !eventId || !canCancel || cancellingId === eventId
+                        }
+                      >
+                        {cancellingId === eventId ? "Cancelling..." : "Cancel Event"}
+                      </Button>
+
                       <Button
                         variant="outline"
                         className="border-slate-700 hover:bg-slate-800 text-white"

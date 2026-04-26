@@ -15,7 +15,7 @@ export interface ApiTicket {
   tokenId: string;
   originalPrice?: string;
   ticketType?: string;
-  status?: "minted" | "sold" | "used" | "expired";
+  status?: "minted" | "sold" | "used" | "expired" | "refunded";
   isListed?: boolean;
   currentOwner?: string;
   createdAt?: string;
@@ -83,6 +83,47 @@ export interface ConfirmPurchaseData {
   ticket?: ApiTicket;
 }
 
+export interface RefundIntentTransaction {
+  to: string;
+  data: string;
+  value: string;
+  chainId: string;
+  functionName?: string;
+}
+
+export interface RefundIntentData {
+  tokenId: string;
+  eventId: string;
+  buyer: string;
+  refundAmount: string;
+  transaction: RefundIntentTransaction;
+}
+
+interface RefundIntentResponse {
+  success: boolean;
+  data?: RefundIntentData;
+  message?: string;
+}
+
+export interface ConfirmRefundPayload {
+  txHash: string;
+  tokenId?: string;
+  buyerWallet?: string;
+}
+
+export interface ConfirmRefundData {
+  synced: boolean;
+  alreadySynced: boolean;
+  txHash: string;
+  ticket?: ApiTicket;
+}
+
+interface ConfirmRefundResponse {
+  success: boolean;
+  data?: ConfirmRefundData;
+  message?: string;
+}
+
 interface ConfirmPurchaseResponse {
   success: boolean;
   data?: ConfirmPurchaseData;
@@ -111,6 +152,12 @@ export interface PurchaseTicketResult {
   txHash: string;
   intent: PurchaseIntentData;
   confirmation: ConfirmPurchaseData | null;
+}
+
+export interface ClaimTicketRefundResult {
+  txHash: string;
+  intent: RefundIntentData;
+  confirmation: ConfirmRefundData | null;
 }
 
 const SEND_TX_MAX_RETRIES = 4;
@@ -343,6 +390,37 @@ export async function confirmPurchaseTransaction(
     : null;
 }
 
+export async function createRefundIntent(
+  tokenId: string,
+): Promise<RefundIntentData | null> {
+  const response = await api.post<RefundIntentResponse>(
+    `/tickets/${encodeURIComponent(tokenId)}/refund-intent`,
+    {},
+    { headers: getAuthHeaders() },
+  );
+
+  return response.data || null;
+}
+
+export async function confirmRefundTransaction(
+  payload: ConfirmRefundPayload,
+): Promise<ConfirmRefundData | null> {
+  const response = await api.post<ConfirmRefundResponse>(
+    "/tickets/refund/confirm",
+    payload,
+    { headers: getAuthHeaders() },
+  );
+
+  return response.data
+    ? {
+        ...response.data,
+        ticket: response.data.ticket
+          ? normalizeTicket(response.data.ticket)
+          : undefined,
+      }
+    : null;
+}
+
 function toHexValue(decimalString: string): string {
   const value = BigInt(decimalString);
   return `0x${value.toString(16)}`;
@@ -387,6 +465,45 @@ export async function purchaseTicket(
   };
 }
 
+export async function claimTicketRefundOnChain(
+  provider: Eip1193Provider,
+  tokenId: string,
+  buyerWallet?: string,
+): Promise<ClaimTicketRefundResult> {
+  if (!provider?.request) {
+    throw new Error("Wallet provider is unavailable");
+  }
+
+  const intent = await createRefundIntent(tokenId);
+  if (!intent?.transaction) {
+    throw new Error("Unable to create refund intent");
+  }
+
+  const fromAddress = buyerWallet || intent.buyer;
+  if (!fromAddress) {
+    throw new Error("Buyer wallet address is required");
+  }
+
+  const txHash = await sendPurchaseTransactionWithRetry(provider, {
+    from: fromAddress,
+    to: intent.transaction.to,
+    data: intent.transaction.data,
+    value: toHexValue(intent.transaction.value),
+  });
+
+  const confirmation = await confirmRefundTransaction({
+    txHash,
+    tokenId: intent.tokenId,
+    buyerWallet: fromAddress,
+  });
+
+  return {
+    txHash,
+    intent,
+    confirmation,
+  };
+}
+
 export const ticketsService = {
   getUserTickets,
   getTickets,
@@ -395,5 +512,8 @@ export const ticketsService = {
   markTicketAsUsed,
   createPurchaseIntent,
   confirmPurchaseTransaction,
+  createRefundIntent,
+  confirmRefundTransaction,
   purchaseTicket,
+  claimTicketRefundOnChain,
 };

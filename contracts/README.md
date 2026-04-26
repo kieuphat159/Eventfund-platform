@@ -37,20 +37,24 @@ Terminal 2 (deploy 3 contracts lên localhost):
 npm run deploy:all
 ```
 
+Nếu gặp lỗi `ECONNREFUSED 127.0.0.1:8545` hoặc `HH108: Cannot connect to the network localhost`,
+nghĩa là local chain chưa chạy. Hãy mở terminal khác và chạy `npm run chain` trước.
+Nếu bạn muốn deploy lên Sepolia thay vì local, dùng `npm run deploy:sepolia`.
+
 `deploy:all` sẽ:
 
 - Deploy lần lượt `Ticket`, `Fund`, `Marketplace`.
 - Tự động “wire” các contract để flow chạy end-to-end:
-	- `Ticket.setFundContract(Fund)`
-	- `Fund.setTicketContract(Ticket)`
-	- `Fund.setMarketplaceContract(Marketplace)`
+  - `Ticket.setFundContract(Fund)`
+  - `Fund.setTicketContract(Ticket)`
+  - `Fund.setMarketplaceContract(Marketplace)`
 - Upsert các địa chỉ vào 2 file:
-	- `contracts/.env`
-	- `../backend/.env`
+  - `contracts/.env`
+  - `../backend/.env`
 
 ## Deploy Sepolia testnet
 
-### 1) Chuẩn bị `.env`
+### 1) Chuẩn bị `.env`cls
 
 Tạo/ cập nhật `contracts/.env` với các biến sau:
 

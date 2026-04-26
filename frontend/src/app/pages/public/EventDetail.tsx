@@ -130,8 +130,11 @@ export const EventDetail: React.FC = () => {
     calculatePercentage(event?.currentFunding, event?.fundingGoal, 1),
     100,
   );
+  const investmentMode =
+    event?.investmentEnabled === false ? "Self-funded" : "Investment-enabled";
   const isInvestable =
     event?.status === "funding" && String(event?.fundingGoal || "0") !== "0";
+  const minInvestmentAmount = String(event?.minInvestmentAmount || "0");
 
   const coverImage = event?.imageUrls?.[0] || "";
   const eventDate = event?.startDate ? new Date(event.startDate) : null;
@@ -174,6 +177,17 @@ export const EventDetail: React.FC = () => {
       investmentAmount.trim() === "0"
     ) {
       setInvestError("Contribution amount must be a positive integer string.");
+      return;
+    }
+
+    if (
+      /^[0-9]+$/.test(minInvestmentAmount) &&
+      minInvestmentAmount !== "0" &&
+      BigInt(investmentAmount.trim()) < BigInt(minInvestmentAmount)
+    ) {
+      setInvestError(
+        `Contribution amount must be at least ${minInvestmentAmount} wei.`,
+      );
       return;
     }
 
@@ -327,7 +341,11 @@ export const EventDetail: React.FC = () => {
               <div className="mb-4 flex flex-wrap items-center gap-3">
                 <StatusBadge status={event.status || "draft"} />
                 <span className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-300">
-                  {availableTickets ?? totalTickets} available / {trackedTickets} tracked
+                  {availableTickets ?? totalTickets} available /{" "}
+                  {trackedTickets} tracked
+                </span>
+                <span className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-300">
+                  Investment Mode: {investmentMode}
                 </span>
               </div>
 
@@ -409,6 +427,7 @@ export const EventDetail: React.FC = () => {
                   {fundingDeadline ? (
                     <span>Deadline: {formatDate(fundingDeadline)}</span>
                   ) : null}
+                  <span>Investment Mode: {investmentMode}</span>
                 </div>
               </div>
             </div>
@@ -463,10 +482,10 @@ export const EventDetail: React.FC = () => {
                       {availableTickets === 0
                         ? "Sold Out"
                         : buying
-                        ? "Processing..."
-                        : user?.walletAddress
-                          ? "Buy Ticket"
-                          : "Connect Wallet"}
+                          ? "Processing..."
+                          : user?.walletAddress
+                            ? "Buy Ticket"
+                            : "Connect Wallet"}
                     </Button>
                   </div>
                 ))}
@@ -535,7 +554,9 @@ export const EventDetail: React.FC = () => {
                         key={ticket.tokenId}
                         className="border-b border-slate-800 text-slate-200"
                       >
-                        <td className="py-2 pr-3 font-mono">#{ticket.tokenId}</td>
+                        <td className="py-2 pr-3 font-mono">
+                          #{ticket.tokenId}
+                        </td>
                         <td className="py-2 pr-3">{ticket.status || "-"}</td>
                         <td className="py-2 pr-3 font-mono text-xs">
                           {ticket.currentOwner || "-"}
@@ -599,6 +620,9 @@ export const EventDetail: React.FC = () => {
                   <p className="text-xs text-slate-500 mt-2">
                     Organizer stake is configured separately. This input is for
                     donator contribution only.
+                    {minInvestmentAmount !== "0"
+                      ? ` Minimum investment: ${formatIntegerWithUnit(minInvestmentAmount, "wei")}.`
+                      : ""}
                   </p>
                 </div>
 

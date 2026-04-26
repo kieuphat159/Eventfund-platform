@@ -45,10 +45,12 @@ const eventSchema = new mongoose.Schema(
     // ===== Funding =====
     organizerStake: { type: String, default: "0" },
     minStakeRequired: { type: String, default: "0" },
+    minInvestmentAmount: { type: String, default: "0" },
     fundingGoal: { type: String, default: "0" },
     currentFunding: { type: String, default: "0" },
 
     organizerShareBps: { type: Number, default: 0 },
+    investmentEnabled: { type: Boolean, default: true },
     fundingDeadline: {
       type: Date,
     },
@@ -106,6 +108,28 @@ const eventSchema = new mongoose.Schema(
         "failed",
       ],
       default: "draft",
+    },
+
+    cancellationReason: {
+      type: String,
+      enum: [
+        "funding_goal_not_met",
+        "organizer_cancelled",
+        "ticket_sales_not_met",
+      ],
+    },
+
+    cancellationNote: {
+      type: String,
+      trim: true,
+    },
+
+    cancelledAt: { type: Date },
+
+    cancelledBy: {
+      type: String,
+      lowercase: true,
+      trim: true,
     },
 
     // ===== Access Control =====

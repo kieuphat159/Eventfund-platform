@@ -83,6 +83,20 @@ router.post(
   (req, res, next) => ticketsController.confirmPurchaseTransaction(req, res, next)
 );
 
+router.post(
+  '/:tokenId/refund-intent',
+  authenticate,
+  validate({ params: ticketSchemas.tokenIdParams }),
+  (req, res, next) => ticketsController.createRefundIntent(req, res, next)
+);
+
+router.post(
+  '/refund/confirm',
+  authenticate,
+  validate({ body: ticketSchemas.confirmRefund }),
+  (req, res, next) => ticketsController.confirmRefundTransaction(req, res, next)
+);
+
 /**
  * @swagger
  * /tickets/{tokenId}:

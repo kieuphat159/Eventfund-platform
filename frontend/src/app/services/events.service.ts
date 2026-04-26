@@ -1,5 +1,5 @@
 import { api } from "../lib/api";
-import { createPublicClient, http } from "viem";
+import { createPublicClient, encodeFunctionData, http } from "viem";
 import { sepolia } from "viem/chains";
 
 export interface EventVenue {
@@ -26,6 +26,7 @@ export type EventStatus =
 export interface EventItem {
   _id?: string;
   id?: string;
+  contractEventId?: string;
   title?: string;
   description?: string;
   category?: string;
@@ -41,6 +42,7 @@ export interface EventItem {
   organizer?: string;
   organizerWallet?: string;
   organizerStake?: string | number;
+  investmentEnabled?: boolean;
 
   venue?: EventVenue;
   imageUrls?: string[];
@@ -48,6 +50,7 @@ export interface EventItem {
   fundingGoal?: string | number;
   currentFunding?: string | number;
   minStakeRequired?: string | number;
+  minInvestmentAmount?: string | number;
   fundingDeadline?: string;
 
   totalTickets?: number;
@@ -104,6 +107,7 @@ export interface CreateEventPayload {
   usedThreshold?: number;
 
   minStakeRequired?: string;
+  minInvestmentAmount?: string;
   ticketTiers?: EventTicketTier[];
   imageUrls?: string[];
 }
@@ -126,6 +130,8 @@ export interface UpdateEventPayload {
   ticketTiers?: EventTicketTier[];
   imageUrls?: string[];
   status?: EventStatus;
+  reason?: string;
+  txHash?: string;
 }
 
 export interface CreateEventResponse {
@@ -139,6 +145,33 @@ export interface EventBlockchainConfig {
   chainId: string;
 }
 
+export interface AdminEventInvestmentItem {
+  _id?: string;
+  contributor?: string;
+  amount?: string;
+  contributionAmount?: string;
+  sharePercentage?: number;
+  createdAt?: string;
+}
+
+export interface AdminEventInvestmentsData {
+  docs?: AdminEventInvestmentItem[];
+  summary?: {
+    totalInvestors?: number;
+    totalContributions?: number;
+    totalValue?: string | number;
+  };
+  totalDocs?: number;
+  page?: number;
+  limit?: number;
+}
+
+interface AdminEventInvestmentsResponse {
+  success: boolean;
+  data?: AdminEventInvestmentsData;
+  message?: string;
+}
+
 export interface Eip1193Provider {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
 }
@@ -149,7 +182,33 @@ interface TransactionRequestShape {
   value: string;
 }
 
+type CancellationReasonCode =
+  | "funding_goal_not_met"
+  | "organizer_cancelled"
+  | "ticket_sales_not_met";
+
+const FUND_CANCEL_ABI = [
+  {
+    type: "function",
+    name: "cancelEvent",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "eventId", type: "uint256" },
+      { name: "reason", type: "uint8" },
+    ],
+    outputs: [],
+  },
+  {
+    type: "function",
+    name: "finalizeFunding",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "eventId", type: "uint256" }],
+    outputs: [],
+  },
+] as const;
+
 const WEB3AUTH_TX_GAS_CAP = 16_777_216n;
+const EVENT_TX_FALLBACK_GAS_LIMIT = 1_500_000n;
 
 export interface CreateEventIntentTransaction {
   to: string;
@@ -339,6 +398,34 @@ function toHexValue(decimalString: string): string {
   return `0x${value.toString(16)}`;
 }
 
+function parseHexToBigInt(value: unknown): bigint | null {
+  if (typeof value !== "string") return null;
+  try {
+    return BigInt(value);
+  } catch {
+    return null;
+  }
+}
+
+function toSafeGasHex(
+  estimatedGas: bigint,
+  fallbackGasLimit = EVENT_TX_FALLBACK_GAS_LIMIT,
+): string {
+  const paddedGas = estimatedGas + estimatedGas / 5n + 15_000n;
+  const boundedGas =
+    paddedGas > WEB3AUTH_TX_GAS_CAP ? WEB3AUTH_TX_GAS_CAP : paddedGas;
+
+  if (boundedGas > 0n) {
+    return toHexValue(boundedGas.toString());
+  }
+
+  const safeFallback =
+    fallbackGasLimit > WEB3AUTH_TX_GAS_CAP
+      ? WEB3AUTH_TX_GAS_CAP
+      : fallbackGasLimit;
+  return toHexValue(safeFallback.toString());
+}
+
 function normalizeAddress(value?: string | null): string | null {
   if (!value) return null;
   return value.toLowerCase();
@@ -517,10 +604,117 @@ async function getBalanceWei(
   return BigInt(hex);
 }
 
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error || "Unknown error");
+}
+
+function shouldFallbackToWalletCancellation(message: string): boolean {
+  return message
+    .toLowerCase()
+    .includes("organizer wallet signature required");
+}
+
+function resolveCancellationReason(
+  event: EventItem,
+  requestedReason?: string,
+): CancellationReasonCode {
+  const normalizedReason = requestedReason?.trim().toLowerCase();
+
+  if (
+    normalizedReason === "funding_goal_not_met" ||
+    normalizedReason === "organizer_cancelled" ||
+    normalizedReason === "ticket_sales_not_met"
+  ) {
+    return normalizedReason;
+  }
+
+  const fundingGoal = BigInt(String(event.fundingGoal ?? 0));
+  const currentFunding = BigInt(String(event.currentFunding ?? 0));
+  const fundingDeadline = event.fundingDeadline
+    ? new Date(event.fundingDeadline)
+    : null;
+  const isFundingGoalMissed =
+    event.status === "funding" &&
+    fundingGoal > 0n &&
+    currentFunding < fundingGoal &&
+    !!fundingDeadline &&
+    !Number.isNaN(fundingDeadline.getTime()) &&
+    fundingDeadline.getTime() <= Date.now();
+
+  if (isFundingGoalMissed) {
+    return "funding_goal_not_met";
+  }
+
+  // organizer_cancelled is accepted on-chain for Funding, Funded, and Ticketing,
+  // making it the safest explicit default when we don't have stronger evidence.
+  return "organizer_cancelled";
+}
+
+function buildCancellationTransaction(
+  event: EventItem,
+  reasonCode: CancellationReasonCode,
+): TransactionRequestShape {
+  if (!event.contractEventId) {
+    throw new Error("Event has not been synced on-chain yet.");
+  }
+
+  if (reasonCode === "funding_goal_not_met") {
+    return {
+      to: "",
+      data: encodeFunctionData({
+        abi: FUND_CANCEL_ABI,
+        functionName: "finalizeFunding",
+        args: [BigInt(event.contractEventId)],
+      }),
+      value: "0",
+    };
+  }
+
+  return {
+    to: "",
+    data: encodeFunctionData({
+      abi: FUND_CANCEL_ABI,
+      functionName: "cancelEvent",
+      args: [
+        BigInt(event.contractEventId),
+        reasonCode === "ticket_sales_not_met" ? 2 : 1,
+      ],
+    }),
+    value: "0",
+  };
+}
+
 async function estimateTransactionGas(
+  provider: Eip1193Provider,
   fromAddress: string,
   transaction: TransactionRequestShape,
-): Promise<string | undefined> {
+  fallbackGasLimit = EVENT_TX_FALLBACK_GAS_LIMIT,
+): Promise<string> {
+  const txRequest = {
+    from: fromAddress,
+    to: transaction.to,
+    data: transaction.data,
+    value: toHexValue(transaction.value || "0"),
+  };
+
+  try {
+    const estimated = await provider.request({
+      method: "eth_estimateGas",
+      params: [txRequest],
+    });
+
+    const estimatedGas = parseHexToBigInt(estimated);
+    if (estimatedGas && estimatedGas > 0n) {
+      return toSafeGasHex(estimatedGas, fallbackGasLimit);
+    }
+  } catch (error) {
+    console.warn(
+      "[CreateEvent] Failed to estimate gas via wallet provider, retrying via public RPC.",
+      error,
+    );
+  }
+
   try {
     const publicClient = createPublicClient({
       chain: sepolia,
@@ -533,23 +727,19 @@ async function estimateTransactionGas(
       data: transaction.data as `0x${string}`,
       value: BigInt(transaction.value || "0"),
     });
-
-    // Pad the limit a bit to avoid edge-case underestimation.
-    const paddedGas = estimatedGas + estimatedGas / 5n + 15000n;
-    if (paddedGas > WEB3AUTH_TX_GAS_CAP) {
-      console.warn(
-        `[CreateEvent] Pre-estimated gas ${paddedGas.toString()} exceeds wallet cap ${WEB3AUTH_TX_GAS_CAP.toString()}. Falling back to wallet-side estimation.`,
-      );
-      return undefined;
-    }
-
-    return toHexValue(paddedGas.toString());
+    return toSafeGasHex(estimatedGas, fallbackGasLimit);
   } catch (error) {
     console.warn(
-      "[CreateEvent] Failed to pre-estimate gas via public RPC, falling back to wallet estimation.",
+      `[CreateEvent] Failed to pre-estimate gas; using fallback gas limit ${fallbackGasLimit.toString()}.`,
       error,
     );
-    return undefined;
+    return toHexValue(
+      (
+        fallbackGasLimit > WEB3AUTH_TX_GAS_CAP
+          ? WEB3AUTH_TX_GAS_CAP
+          : fallbackGasLimit
+      ).toString(),
+    );
   }
 }
 
@@ -649,11 +839,16 @@ export async function createEventOnChain(
     );
   }
 
-  const gas = await estimateTransactionGas(fromAddress, {
-    to: intent.transaction.to,
-    data: intent.transaction.data,
-    value: intent.transaction.value,
-  });
+  const gas = await estimateTransactionGas(
+    provider,
+    fromAddress,
+    {
+      to: intent.transaction.to,
+      data: intent.transaction.data,
+      value: intent.transaction.value,
+    },
+    EVENT_TX_FALLBACK_GAS_LIMIT,
+  );
 
   let txHash = "";
   const txParamsBase = {
@@ -668,20 +863,28 @@ export async function createEventOnChain(
       params: [
         {
           ...txParamsBase,
-          ...(gas ? { gas } : {}),
+          gas,
         },
       ],
     })) as string;
   } catch (error) {
     const firstErrorMessage = getRpcErrorMessage(error);
     if (gas && isGasLimitTooHighError(firstErrorMessage)) {
+      const fallbackGas = toHexValue(EVENT_TX_FALLBACK_GAS_LIMIT.toString());
       try {
         txHash = (await provider.request({
           method: "eth_sendTransaction",
-          params: [txParamsBase],
+          params: [
+            {
+              ...txParamsBase,
+              gas: fallbackGas,
+            },
+          ],
         })) as string;
       } catch (retryError) {
-        const retryMessage = mapBundlerAuthError(getRpcErrorMessage(retryError));
+        const retryMessage = mapBundlerAuthError(
+          getRpcErrorMessage(retryError),
+        );
         throw new Error(
           `Create event transaction failed with signer ${fromAddress}: ${retryMessage}`,
         );
@@ -734,6 +937,113 @@ export async function updateEvent(
     payload,
   );
   return response.data || null;
+}
+
+export async function cancelEventWithWalletFallback(
+  provider: Eip1193Provider | undefined,
+  eventId: string,
+  payload: UpdateEventPayload = { status: "cancelled" },
+  organizerWallet?: string,
+  smartAccountAddress?: string,
+): Promise<EventItem | null> {
+  const currentEvent = await getEventById(eventId);
+  if (!currentEvent) {
+    throw new Error("Event not found.");
+  }
+
+  const resolvedReason = resolveCancellationReason(currentEvent, payload.reason);
+  const cancelPayload: UpdateEventPayload = {
+    ...payload,
+    status: "cancelled",
+    reason: resolvedReason,
+  };
+
+  try {
+    return await updateEvent(eventId, cancelPayload);
+  } catch (error) {
+    const message = getErrorMessage(error);
+    if (!shouldFallbackToWalletCancellation(message)) {
+      throw error;
+    }
+
+    if (!provider?.request) {
+      throw new Error(
+        `${message}. Wallet provider is unavailable for organizer-signed cancellation.`,
+      );
+    }
+
+    if (!currentEvent.contractEventId) {
+      throw error;
+    }
+
+    const config = await getEventBlockchainConfig();
+    const transaction = buildCancellationTransaction(
+      currentEvent,
+      resolvedReason,
+    );
+    transaction.to = config.fundAddress;
+
+    await ensureProviderChain(provider, config.chainId);
+
+    const fromAddress = await resolveSignerAddress(
+      provider,
+      organizerWallet,
+      smartAccountAddress,
+    );
+
+    const gas = await estimateTransactionGas(
+      provider,
+      fromAddress,
+      transaction,
+      500_000n,
+    );
+    const txParamsBase = {
+      from: fromAddress,
+      to: transaction.to,
+      data: transaction.data,
+      value: toHexValue(transaction.value),
+    };
+
+    let txHash = "";
+    try {
+      txHash = (await provider.request({
+        method: "eth_sendTransaction",
+        params: [
+          {
+            ...txParamsBase,
+            gas,
+          },
+        ],
+      })) as string;
+    } catch (sendError) {
+      const firstErrorMessage = getRpcErrorMessage(sendError);
+      if (gas && isGasLimitTooHighError(firstErrorMessage)) {
+        const fallbackGas = toHexValue("500000");
+        txHash = (await provider.request({
+          method: "eth_sendTransaction",
+          params: [
+            {
+              ...txParamsBase,
+              gas: fallbackGas,
+            },
+          ],
+        })) as string;
+      } else {
+        throw new Error(
+          `Cancel event transaction failed with signer ${fromAddress}: ${mapBundlerAuthError(firstErrorMessage)}`,
+        );
+      }
+    }
+
+    if (!txHash) {
+      throw new Error("Failed to send cancel event transaction.");
+    }
+
+    return await updateEvent(eventId, {
+      ...cancelPayload,
+      txHash,
+    });
+  }
 }
 
 export async function updateAdminEvent(

@@ -17,10 +17,12 @@ import {
 } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import {
+  claimContributionRefundOnChain,
   getInvestments,
   InvestmentDetail as InvestmentDetailType,
 } from "../../services/investment.service";
 import { useAuth } from "../../contexts/AuthContext";
+import { useWeb3Auth } from "@web3auth/modal/react";
 import {
   addIntegerValues,
   calculatePercentage,
@@ -31,9 +33,11 @@ import {
 import { StatusBadge } from "../../components/StatusBadge";
 
 export const MyInvestments: React.FC = () => {
-  const { user } = useAuth();
+  const { user, connectWallet } = useAuth();
+  const { web3Auth } = useWeb3Auth();
   const [investments, setInvestments] = useState<InvestmentDetailType[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refundingEventId, setRefundingEventId] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchInvestments = async () => {
@@ -53,6 +57,50 @@ export const MyInvestments: React.FC = () => {
       setLoading(false);
     }
   }, [user]);
+
+  const walletProvider = web3Auth?.provider as
+    | {
+        request: (args: {
+          method: string;
+          params?: unknown[];
+        }) => Promise<unknown>;
+      }
+    | undefined;
+
+  const refreshInvestments = async () => {
+    const shares = await getInvestments();
+    setInvestments(shares);
+  };
+
+  const handleClaimRefund = async (investment: InvestmentDetailType) => {
+    const eventId = investment.eventId?._id;
+    if (!eventId) return;
+
+    try {
+      if (!user?.walletAddress) {
+        await connectWallet();
+        return;
+      }
+
+      if (!walletProvider?.request) {
+        throw new Error(
+          "Wallet provider is not ready. Please reconnect wallet and try again.",
+        );
+      }
+
+      setRefundingEventId(eventId);
+      await claimContributionRefundOnChain(
+        walletProvider,
+        eventId,
+        user.walletAddress,
+      );
+      await refreshInvestments();
+    } catch (error) {
+      console.error("Failed to claim contribution refund:", error);
+    } finally {
+      setRefundingEventId(null);
+    }
+  };
 
   const totalInvested = investments.reduce(
     (sum, inv) => addIntegerValues(sum, inv.contributionAmount),
@@ -168,6 +216,10 @@ export const MyInvestments: React.FC = () => {
                   1,
                 );
                 const isProfit = compareIntegerValues(profitLoss, "0") >= 0;
+                const canClaimRefund =
+                  investment.eventId?.status === "cancelled" &&
+                  compareIntegerValues(investment.contributionAmount, "0") > 0;
+                const refundEventId = investment.eventId?._id || null;
 
                 return (
                   <div
@@ -251,6 +303,18 @@ export const MyInvestments: React.FC = () => {
                           View Details
                         </Button>
                       </Link>
+                      {canClaimRefund && refundEventId && (
+                        <Button
+                          size="sm"
+                          className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white"
+                          disabled={refundingEventId === refundEventId}
+                          onClick={() => void handleClaimRefund(investment)}
+                        >
+                          {refundingEventId === refundEventId
+                            ? "Claiming Refund..."
+                            : "Claim Refund"}
+                        </Button>
+                      )}
                     </div>
                   </div>
                 );
