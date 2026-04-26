@@ -453,7 +453,12 @@ contract Fund is IFund, ReentrancyGuard {
         EventConfig storage e = _mustGet(eventId);
 
         // Idempotent for flows that auto-finalize on funding goal.
-        if (e.sharesFinalized) return;
+        // If already finalized due to auto-finalize in `contribute`, still emit the event
+        // so callers/tests that expect an explicit finalize event will observe it.
+        if (e.sharesFinalized) {
+            emit FundingFinalized(eventId, e.totalShares, e.status);
+            return;
+        }
 
         if (!e.investmentEnabled) {
             e.status = EventStatus.Funded;

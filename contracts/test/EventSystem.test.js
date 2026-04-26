@@ -160,6 +160,26 @@ describe("Event Funding & Ticketing System", function () {
       expect(balAfter + gasUsed).to.equal(balBefore + ethers.parseEther("1"));
     });
     it("Should allow user to refund ticket and get money back", async function () {
+      // Prepare a minimal event + ticket so refund flow can be exercised in isolation
+      const deadline = Math.floor(Date.now() / 1000) + 86400; // 24h later
+      await fund.connect(organizer).createEvent(
+        FUNDING_GOAL,
+        deadline,
+        STAKE_AMOUNT,
+        2000,
+        TICKET_PRICE,
+        MAX_TICKETS,
+        1,
+        { value: STAKE_AMOUNT },
+      );
+      const eventId = 1;
+      // fund the event so we can finalize & start ticketing
+      await fund.connect(donator).contribute(eventId, { value: FUNDING_GOAL });
+      await fund.connect(organizer).finalizeFunding(eventId);
+      await fund.connect(organizer).startTicketing(eventId, 0, 1);
+      // Donator purchases ticket #1 so they can later request refund
+      await ticket.connect(donator).purchaseTicket(1, { value: TICKET_PRICE });
+
       // 1. Giả lập Event đã hoàn thành nhưng Organizer bị lỗi nên Admin bật Refund
       await fund.connect(admin).refundTickets(1);
 

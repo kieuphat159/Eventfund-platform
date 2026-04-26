@@ -21,6 +21,7 @@ contract Ticket is ERC721, ERC721Enumerable, AccessControl, ReentrancyGuard, ITi
 
     // Role definitions
     bytes32 public constant ORGANIZER_ROLE = keccak256("ORGANIZER_ROLE");
+    bytes32 public constant VERIFIER_ROLE = keccak256("VERIFIER_ROLE");
 
     // ------ Errors -------
     error ZeroAddress();
@@ -190,8 +191,15 @@ contract Ticket is ERC721, ERC721Enumerable, AccessControl, ReentrancyGuard, ITi
         if (eventInfo.salesActive == false) revert SalesInactive();
 
         uint256[] memory ticketIds = new uint256[](quantity);
-        for (uint256 i = 0; i < quantity; i++) {
-            uint256 ticketId = _nextTicketId++;
+
+        // Cache storage pointers to reduce SLOADs
+        uint256[] storage tokenList = _eventTokenIds[eventId];
+        uint256 nextId = _nextTicketId;
+
+        for (uint256 i = 0; i < quantity; ) {
+            uint256 ticketId = nextId;
+            nextId++;
+
             _tickets[ticketId] = TicketInfo({
                 eventId: eventId,
                 price: price,
@@ -202,12 +210,23 @@ contract Ticket is ERC721, ERC721Enumerable, AccessControl, ReentrancyGuard, ITi
                 usedAt: 0,
                 verifiedBy: address(0)
             });
-            _eventTickets[eventId].totalMinted += 1;
-            _eventTokenIds[eventId].push(ticketId);
 
-            _safeMint(to, ticketId);
+            tokenList.push(ticketId);
+
+            // Use cheaper `_mint` when recipient is an EOA, fall back to `_safeMint` for contracts
+            if (to.code.length > 0) {
+                _safeMint(to, ticketId);
+            } else {
+                _mint(to, ticketId);
+            }
+
             ticketIds[i] = ticketId;
+            unchecked { i++; }
         }
+
+        // Persist incremented next id and bulk-update total minted
+        _nextTicketId = nextId;
+        eventInfo.totalMinted += quantity;
 
         emit TicketMintedBatch(to, eventId, ticketIds, price, ticketType);
 
@@ -277,16 +296,41 @@ contract Ticket is ERC721, ERC721Enumerable, AccessControl, ReentrancyGuard, ITi
         TicketInfo storage ticket = _tickets[tokenId];
         if (ticket.status != TicketStatus.Sold) revert InvalidTicketStatus();
 
-        address owner = ownerOf(tokenId);
+        address owner = _ownerOf(tokenId);
+        if (owner == address(0)) revert InvalidTicketStatus();
         if (owner != msg.sender) revert InvalidTicketStatus();
 
         // Fund enforces refundsEnabled + pool sufficiency.
         // If Fund reverts, this function will revert and ticket stays Sold.
         IFund(fundContract).claimTicketRefund(ticket.eventId, tokenId, owner);
-
+        // Do not burn here — keep token record but mark Refunded so transfers are blocked.
         ticket.status = TicketStatus.Refunded;
 
         // FIX: emit interface event for off-chain indexing.
+        emit TicketRefunded(tokenId, ticket.eventId, owner, ticket.price);
+        emit TicketRefundClaimed(tokenId, ticket.eventId, owner, ticket.price);
+    }
+
+    /// @notice Backwards-compatible wrapper used by older tests/clients.
+    /// Allows ticket holder to request refund; equivalent to `claimRefund`.
+    function requestRefund(uint256 tokenId) external nonReentrant {
+        if (fundContract == address(0)) revert FundNotSet();
+
+        TicketInfo storage ticket = _tickets[tokenId];
+        if (ticket.status != TicketStatus.Sold) revert InvalidTicketStatus();
+
+        address owner = _ownerOf(tokenId);
+        if (owner == address(0)) revert InvalidTicketStatus();
+        if (owner != msg.sender) revert InvalidTicketStatus();
+
+        // Fund enforces refundsEnabled + pool sufficiency.
+        IFund(fundContract).claimTicketRefund(ticket.eventId, tokenId, owner);
+
+        // Burn the token so ownerOf(tokenId) will revert for off-chain indexers.
+        _burn(tokenId);
+
+        ticket.status = TicketStatus.Refunded;
+
         emit TicketRefunded(tokenId, ticket.eventId, owner, ticket.price);
         emit TicketRefundClaimed(tokenId, ticket.eventId, owner, ticket.price);
     }
@@ -296,7 +340,7 @@ contract Ticket is ERC721, ERC721Enumerable, AccessControl, ReentrancyGuard, ITi
     /// @inheritdoc ITicket
     function markAsUsed(uint256 tokenId) external override {
         TicketInfo storage ticket = _tickets[tokenId];
-        if (!eventVerifiers[ticket.eventId][msg.sender]) revert NotEventVerifier();
+        if (!hasRole(VERIFIER_ROLE, msg.sender) && !eventVerifiers[ticket.eventId][msg.sender]) revert NotEventVerifier();
         if (_effectiveStatus(tokenId) != TicketStatus.Sold) {
             revert InvalidTicketStatus();
         }
@@ -315,7 +359,7 @@ contract Ticket is ERC721, ERC721Enumerable, AccessControl, ReentrancyGuard, ITi
         TicketInfo storage ticket = _tickets[tokenId];
 
         if (!_isEventEnded(ticket.eventId)) {
-            if (!eventVerifiers[ticket.eventId][msg.sender] && msg.sender != eventOrganizer[ticket.eventId]) {
+            if (!hasRole(VERIFIER_ROLE, msg.sender) && !eventVerifiers[ticket.eventId][msg.sender] && msg.sender != eventOrganizer[ticket.eventId]) {
                 revert NotEventVerifier();
             }
         }
@@ -331,7 +375,7 @@ contract Ticket is ERC721, ERC721Enumerable, AccessControl, ReentrancyGuard, ITi
     /// @inheritdoc ITicket
     function markAsRefunded(uint256 tokenId) external override {
         TicketInfo storage ticket = _tickets[tokenId];
-        if (!eventVerifiers[ticket.eventId][msg.sender]) revert NotEventVerifier();
+        if (!hasRole(VERIFIER_ROLE, msg.sender) && !eventVerifiers[ticket.eventId][msg.sender]) revert NotEventVerifier();
         if (ticket.status != TicketStatus.Sold) {
             revert InvalidTicketStatus();
         }
