@@ -144,6 +144,13 @@ export const Wallet: React.FC = () => {
             description: `Ticket Purchase - ${eventTitle || `Event ${ticket.eventIdRaw || "-"}`}`,
             amountWei: String(ticket.originalPrice || "0"),
             date: ticket.soldAt,
+            hash:
+              // prefer explicit soldTxHash set by backend, fall back to any transferHistory entry
+              (ticket as any).soldTxHash ||
+              ((ticket as any).transferHistory?.length
+                ? (ticket as any).transferHistory[(ticket as any).transferHistory.length - 1].txHash
+                : null) ||
+              null,
           });
         });
       }
@@ -158,6 +165,7 @@ export const Wallet: React.FC = () => {
             description: `Investment - ${investment.eventId?.title || "Event"}`,
             amountWei: String(investment.contributionAmount || "0"),
             date: investment.createdAt,
+            hash: (investment as any).txHash || (investment as any).transactionHash || null,
           });
         });
       }
@@ -192,6 +200,7 @@ export const Wallet: React.FC = () => {
             description: `Marketplace Sale - ${sale.event || `Ticket #${sale.tokenId}`}`,
             amountWei: String(sale.price || "0"),
             date: sale.time,
+            hash: (sale as any).txHash || (sale as any).transactionHash || null,
           });
         });
       }
