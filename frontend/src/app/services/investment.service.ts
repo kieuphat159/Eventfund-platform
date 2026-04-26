@@ -50,6 +50,33 @@ export interface ConfirmInvestmentData {
   share?: InvestmentDetail;
 }
 
+export interface RefundInvestmentIntentData {
+  eventId: string;
+  contractEventId: string;
+  investor: string;
+  refundableAmount: string;
+  transaction: InvestmentIntentTransaction;
+}
+
+export interface ConfirmContributionRefundPayload {
+  txHash: string;
+  investorWallet?: string;
+}
+
+export interface ConfirmContributionRefundData {
+  synced: boolean;
+  alreadySynced: boolean;
+  txHash: string;
+  refundAmount: string;
+  share?: InvestmentDetail;
+}
+
+export interface ClaimInvestmentRefundResult {
+  txHash: string;
+  intent: RefundInvestmentIntentData;
+  confirmation: ConfirmContributionRefundData | null;
+}
+
 export interface InvestOnChainResult {
   txHash: string;
   intent: InvestmentIntentData;
@@ -221,6 +248,51 @@ export async function confirmInvestmentTransaction(
   return null;
 }
 
+export async function createContributionRefundIntent(
+  eventId: string,
+): Promise<RefundInvestmentIntentData | null> {
+  const response = await api.post<{
+    success: boolean;
+    data?: RefundInvestmentIntentData;
+  }>(`/events/${eventId}/refund-intent`, {});
+
+  return response.data || null;
+}
+
+export async function confirmContributionRefundTransaction(
+  eventId: string,
+  payload: ConfirmContributionRefundPayload,
+  maxRetries = 15,
+  retryDelayMs = 2000,
+): Promise<ConfirmContributionRefundData | null> {
+  for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
+    try {
+      const response = await api.post<{
+        success: boolean;
+        data?: ConfirmContributionRefundData;
+      }>(`/events/${eventId}/refund/confirm`, payload);
+
+      return response.data
+        ? {
+            ...response.data,
+            share: response.data.share
+              ? normalizeInvestment(response.data.share)
+              : undefined,
+          }
+        : null;
+    } catch (error: any) {
+      const isNotMined = error?.message?.includes("Transaction not mined yet");
+      if (isNotMined && attempt < maxRetries) {
+        await sleep(retryDelayMs);
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  return null;
+}
+
 export async function investInEvent(
   eventId: string,
   amount: string,
@@ -261,6 +333,44 @@ export async function investInEventOnChain(
   });
 
   const confirmation = await confirmInvestmentTransaction(eventId, {
+    txHash,
+    investorWallet: fromAddress,
+  });
+
+  return {
+    txHash,
+    intent,
+    confirmation,
+  };
+}
+
+export async function claimContributionRefundOnChain(
+  provider: Eip1193Provider,
+  eventId: string,
+  investorWallet?: string,
+): Promise<ClaimInvestmentRefundResult> {
+  if (!provider?.request) {
+    throw new Error("Wallet provider is unavailable");
+  }
+
+  const intent = await createContributionRefundIntent(eventId);
+  if (!intent?.transaction) {
+    throw new Error("Unable to create refund intent");
+  }
+
+  const fromAddress = investorWallet || intent.investor;
+  if (!fromAddress) {
+    throw new Error("Investor wallet address is required");
+  }
+
+  const txHash = await sendInvestmentTransactionWithRetry(provider, {
+    from: fromAddress,
+    to: intent.transaction.to,
+    data: intent.transaction.data,
+    value: toHexValue(intent.transaction.value),
+  });
+
+  const confirmation = await confirmContributionRefundTransaction(eventId, {
     txHash,
     investorWallet: fromAddress,
   });

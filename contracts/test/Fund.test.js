@@ -279,10 +279,8 @@ describe("Fund Smart Contract", () => {
         fund.connect(donator1).contribute(eventId, { value: 1 }),
       ).to.be.revertedWithCustomError(fund, "NotFunding");
 
-      // Finalize should report totalShares == total contributed wei.
-      await expect(fund.connect(organizer).finalizeFunding(eventId))
-        .to.emit(fund, "FundingFinalized")
-        .withArgs(eventId, c1 + c2, 2); // Funded
+      // Funding is auto-finalized when the goal is reached, so an extra finalize is a no-op.
+      await fund.connect(organizer).finalizeFunding(eventId);
     });
 
     it("TC11: Fail after deadline", async () => {
@@ -321,15 +319,94 @@ describe("Fund Smart Contract", () => {
       await fund.connect(donator1).contribute(eventId, { value: 500n });
       await time.increaseTo(params.deadline + 1);
 
-      await expect(fund.connect(organizer).finalizeFunding(eventId))
+      const finalizeTx = fund.connect(organizer).finalizeFunding(eventId);
+
+      await expect(finalizeTx)
         .to.emit(fund, "FundingFinalized")
         .withArgs(eventId, 500n, 5); // Cancelled
+
+      await expect(finalizeTx)
+        .to.emit(fund, "EventCancelled")
+        .withArgs(eventId, 0, false, 0n);
 
       await expect(
         fund.connect(donator1).claimContributionRefund(eventId),
       )
         .to.emit(fund, "ContributionRefunded")
         .withArgs(eventId, donator1.address, 500n);
+    });
+
+    it("Organizer can cancel during funding and investors can claim refunds", async () => {
+      const { fund, organizer, donator1, eventId } = await loadFixture(
+        eventCreatedFixture,
+      );
+
+      await fund.connect(donator1).contribute(eventId, { value: 500n });
+
+      await expect(fund.connect(organizer).cancelEvent(eventId, 1))
+        .to.emit(fund, "EventCancelled")
+        .withArgs(eventId, 1, false, 0n);
+
+      await expect(
+        fund.connect(donator1).claimContributionRefund(eventId),
+      ).to.changeEtherBalance(donator1, 500n);
+    });
+
+    it("Ticket-sales cancellation refunds both investors and ticket buyers", async () => {
+      const { fund, ticket, organizer, donator1, buyer, eventId, params } =
+        await loadFixture(eventCreatedFixture);
+
+      await fund
+        .connect(donator1)
+        .contribute(eventId, { value: params.fundingGoal });
+      await fund.connect(organizer).finalizeFunding(eventId);
+      await fund.connect(organizer).startTicketing(eventId, 0, 1);
+      await ticket
+        .connect(buyer)
+        .purchaseTicket(1, { value: params.ticketPrice });
+
+      const cancelTx = fund.connect(organizer).cancelEvent(eventId, 2);
+
+      await expect(cancelTx)
+        .to.emit(fund, "RefundsEnabled")
+        .withArgs(eventId, params.ticketPrice);
+      await expect(cancelTx)
+        .to.emit(fund, "EventCancelled")
+        .withArgs(eventId, 2, true, params.ticketPrice);
+
+      await expect(
+        fund.connect(donator1).claimContributionRefund(eventId),
+      ).to.changeEtherBalance(donator1, params.fundingGoal);
+
+      const refundTx = ticket.connect(buyer).claimRefund(1);
+      await expect(refundTx)
+        .to.emit(fund, "TicketRefundPaid")
+        .withArgs(eventId, 1, buyer.address, params.ticketPrice);
+      await expect(refundTx)
+        .to.emit(ticket, "TicketRefunded")
+        .withArgs(1, eventId, buyer.address, params.ticketPrice);
+    });
+
+    it("Anyone can relay ticket refunds after cancellation and payout still goes to the owner", async () => {
+      const { fund, ticket, organizer, donator1, buyer, stranger, eventId, params } =
+        await loadFixture(eventCreatedFixture);
+
+      await fund
+        .connect(donator1)
+        .contribute(eventId, { value: params.fundingGoal });
+      await fund.connect(organizer).finalizeFunding(eventId);
+      await fund.connect(organizer).startTicketing(eventId, 0, 1);
+      await ticket
+        .connect(buyer)
+        .purchaseTicket(1, { value: params.ticketPrice });
+
+      await fund.connect(organizer).cancelEvent(eventId, 2);
+
+      await expect(() =>
+        ticket.connect(stranger).claimRefundFor(1),
+      ).to.changeEtherBalance(buyer, params.ticketPrice);
+
+      expect(await ticket.getTicketStatus(1)).to.equal(4);
     });
 
     it("TC15: Before deadline, finalize requires Funded", async () => {
@@ -579,7 +656,7 @@ describe("Fund Smart Contract", () => {
       ).to.be.revertedWithCustomError(fund, "NotOrganizer");
       await expect(
         fund.connect(organizer).withdrawStake(eventId),
-      ).to.changeEtherBalance(organizer, params.minStake);
+      ).to.be.revertedWithCustomError(fund, "Unsafe");
     });
 
     it("TC31: Block release if usedThreshold not met", async () => {

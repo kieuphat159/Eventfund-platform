@@ -56,6 +56,29 @@ class TicketsController {
     });
   });
 
+  createRefundIntent = asyncHandler(async (req, res) => {
+    const intent = await this.ticketsService.createRefundIntent(
+      req.params.tokenId,
+      req.user.walletAddress,
+    );
+
+    res.status(200).json({
+      success: true,
+      data: intent,
+    });
+  });
+
+  confirmRefundTransaction = asyncHandler(async (req, res) => {
+    const body = req.validated?.body || req.body;
+
+    const result = await this.ticketsService.confirmRefundTransaction(body);
+
+    res.status(200).json({
+      success: true,
+      data: result,
+    });
+  });
+
   getUserTickets = asyncHandler(async (req, res) => {
     const { walletAddress } = req.params;
     const query = req.query;

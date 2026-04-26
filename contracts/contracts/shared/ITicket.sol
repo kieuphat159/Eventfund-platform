@@ -138,6 +138,10 @@ interface ITicket {
     /// @param tokenId The ticket token ID to purchase
     function purchaseTicket(uint256 tokenId) external payable;
 
+    /// @notice Relay-friendly refund entrypoint; payout still goes to the current owner.
+    /// @param tokenId The ticket token ID to refund
+    function claimRefundFor(uint256 tokenId) external;
+
     /// @notice Mark ticket as used (called when ticket is checked-in)
     function markAsUsed(uint256 tokenId) external;
 

@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import React, { useEffect, useMemo, useState } from "react";
+import { Link, useParams } from "react-router-dom";
 import {
   ArrowLeft,
   Calendar,
@@ -10,54 +10,63 @@ import {
   TrendingUp,
   User,
   Wallet,
-} from 'lucide-react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
-import { Button } from '../../components/ui/button';
-import { StatusBadge } from '../../components/StatusBadge';
+} from "lucide-react";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "../../components/ui/card";
+import { Button } from "../../components/ui/button";
+import { StatusBadge } from "../../components/StatusBadge";
 import {
   getAdminEventById,
   getAdminEventInvestments,
   type AdminEventInvestmentsData,
   type EventItem,
-} from '../../services/events.service';
-import {
-  calculatePercentage,
-  formatIntegerWithUnit,
-} from '../../lib/utils';
+} from "../../services/events.service";
+import { calculatePercentage, formatIntegerWithUnit } from "../../lib/utils";
 
 export const AdminEventDetail: React.FC = () => {
   const { id } = useParams();
   const [event, setEvent] = useState<EventItem | null>(null);
-  const [investmentData, setInvestmentData] = useState<AdminEventInvestmentsData | null>(null);
+  const [investmentData, setInvestmentData] =
+    useState<AdminEventInvestmentsData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
 
   useEffect(() => {
     const fetchEvent = async () => {
       if (!id) {
-        setError('Invalid event id');
+        setError("Invalid event id");
         setLoading(false);
         return;
       }
 
       try {
         setLoading(true);
-        setError('');
+        setError("");
 
         const [eventData, investments] = await Promise.all([
           getAdminEventById(id),
-          getAdminEventInvestments(id, { limit: 10, sort: '-contributionAmount' }),
+          getAdminEventInvestments(id, {
+            limit: 10,
+            sort: "-contributionAmount",
+          }),
         ]);
 
         if (!eventData) {
-          setError('Event not found');
+          setError("Event not found");
           return;
         }
 
         setEvent(eventData);
         setInvestmentData(investments);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load event details');
+        setError(
+          err instanceof Error ? err.message : "Failed to load event details",
+        );
       } finally {
         setLoading(false);
       }
@@ -72,6 +81,8 @@ export const AdminEventDetail: React.FC = () => {
       100,
     );
   }, [event?.currentFunding, event?.fundingGoal]);
+  const investmentMode =
+    event?.investmentEnabled === false ? "Self-funded" : "Investment-enabled";
 
   if (loading) {
     return <div className="text-white">Loading event details...</div>;
@@ -80,9 +91,12 @@ export const AdminEventDetail: React.FC = () => {
   if (error || !event) {
     return (
       <div className="space-y-4">
-        <div className="text-red-400">{error || 'Event not found'}</div>
+        <div className="text-red-400">{error || "Event not found"}</div>
         <Link to="/admin/events">
-          <Button variant="outline" className="border-slate-600 hover:bg-slate-700 text-white">
+          <Button
+            variant="outline"
+            className="border-slate-600 hover:bg-slate-700 text-white"
+          >
             <ArrowLeft className="w-4 h-4 mr-2" />
             Back to Events
           </Button>
@@ -104,12 +118,18 @@ export const AdminEventDetail: React.FC = () => {
             <ArrowLeft className="w-4 h-4 mr-2" />
             Back to Events
           </Link>
-          <h1 className="text-3xl font-bold text-white mb-2">{event.title || 'Untitled event'}</h1>
-          <p className="text-slate-400">Admin view for event operations and investment oversight</p>
+          <h1 className="text-3xl font-bold text-white mb-2">
+            {event.title || "Untitled event"}
+          </h1>
+          <p className="text-slate-400">
+            Admin view for event operations and investment oversight
+          </p>
         </div>
 
         <Link to={`/admin/events/edit/${event._id || event.id}`}>
-          <Button className="bg-blue-600 hover:bg-blue-700 text-white">Edit Event</Button>
+          <Button className="bg-blue-600 hover:bg-blue-700 text-white">
+            Edit Event
+          </Button>
         </Link>
       </div>
 
@@ -118,7 +138,7 @@ export const AdminEventDetail: React.FC = () => {
           <CardContent className="p-5">
             <p className="text-sm text-slate-400 mb-1">Current Funding</p>
             <p className="text-2xl font-bold text-white">
-              {formatIntegerWithUnit(event?.currentFunding, 'wei')}
+              {formatIntegerWithUnit(event?.currentFunding, "wei")}
             </p>
           </CardContent>
         </Card>
@@ -126,7 +146,7 @@ export const AdminEventDetail: React.FC = () => {
           <CardContent className="p-5">
             <p className="text-sm text-slate-400 mb-1">Funding Goal</p>
             <p className="text-2xl font-bold text-white">
-              {formatIntegerWithUnit(event?.fundingGoal, 'wei')}
+              {formatIntegerWithUnit(event?.fundingGoal, "wei")}
             </p>
           </CardContent>
         </Card>
@@ -134,14 +154,18 @@ export const AdminEventDetail: React.FC = () => {
           <CardContent className="p-5">
             <p className="text-sm text-slate-400 mb-1">Investors</p>
             <p className="text-2xl font-bold text-white">
-              {investmentData?.summary?.totalInvestors ?? event.adminSummary?.investorCount ?? 0}
+              {investmentData?.summary?.totalInvestors ??
+                event.adminSummary?.investorCount ??
+                0}
             </p>
           </CardContent>
         </Card>
         <Card className="bg-slate-900 border-slate-800">
           <CardContent className="p-5">
             <p className="text-sm text-slate-400 mb-1">Funding Progress</p>
-            <p className="text-2xl font-bold text-white">{fundingProgress.toFixed(1)}%</p>
+            <p className="text-2xl font-bold text-white">
+              {fundingProgress.toFixed(1)}%
+            </p>
           </CardContent>
         </Card>
       </div>
@@ -156,15 +180,17 @@ export const AdminEventDetail: React.FC = () => {
               </CardDescription>
             </div>
 
-            <StatusBadge status={(event.status as any) || 'draft'} />
+            <StatusBadge status={(event.status as any) || "draft"} />
           </div>
         </CardHeader>
 
         <CardContent className="space-y-6">
           <div>
-            <h3 className="text-sm font-medium text-slate-300 mb-2">Description</h3>
+            <h3 className="text-sm font-medium text-slate-300 mb-2">
+              Description
+            </h3>
             <p className="text-slate-400 leading-relaxed">
-              {event.description || 'No description available'}
+              {event.description || "No description available"}
             </p>
           </div>
 
@@ -175,7 +201,9 @@ export const AdminEventDetail: React.FC = () => {
                 <span className="font-medium">Start Date</span>
               </div>
               <p className="text-slate-400">
-                {event.startDate ? new Date(event.startDate).toLocaleString() : 'No date'}
+                {event.startDate
+                  ? new Date(event.startDate).toLocaleString()
+                  : "No date"}
               </p>
             </div>
 
@@ -185,7 +213,7 @@ export const AdminEventDetail: React.FC = () => {
                 <span className="font-medium">Venue</span>
               </div>
               <p className="text-slate-400">
-                {event.venue?.address || 'Unknown location'}
+                {event.venue?.address || "Unknown location"}
               </p>
             </div>
 
@@ -195,23 +223,30 @@ export const AdminEventDetail: React.FC = () => {
                 <span className="font-medium">Organizer</span>
               </div>
               <p className="text-slate-400 break-all">
-                {event.organizer || event.organizerWallet || 'Unknown organizer'}
+                {event.organizer ||
+                  event.organizerWallet ||
+                  "Unknown organizer"}
               </p>
             </div>
 
             <div className="p-4 rounded-lg bg-slate-800/50 border border-slate-700">
               <div className="flex items-center space-x-2 text-slate-300 mb-2">
                 <DollarSign className="w-4 h-4" />
-                <span className="font-medium">Funding / Tickets</span>
+                <span className="font-medium">Organizer Stake / Capital</span>
               </div>
               <p className="text-slate-400">
-                {formatIntegerWithUnit(event.minStakeRequired, 'wei')} organizer
-                minimum stake
+                {formatIntegerWithUnit(event.minStakeRequired, "wei")}{" "}
+                {event?.investmentEnabled === false
+                  ? "organizer capital"
+                  : "locked organizer stake"}
               </p>
               <p className="text-xs text-slate-500 mt-1">
-                {typeof event.totalTickets === 'number'
+                {typeof event.totalTickets === "number"
                   ? `${event.totalTickets} tickets planned`
                   : `From ${event.ticketTiers?.[0]?.price ?? 0} wei ticket price`}
+              </p>
+              <p className="text-xs text-slate-500 mt-1">
+                Mode: {investmentMode}
               </p>
             </div>
 
@@ -220,7 +255,9 @@ export const AdminEventDetail: React.FC = () => {
                 <Tag className="w-4 h-4" />
                 <span className="font-medium">Category</span>
               </div>
-              <p className="text-slate-400">{event.category || 'Uncategorized'}</p>
+              <p className="text-slate-400">
+                {event.category || "Uncategorized"}
+              </p>
             </div>
 
             <div className="p-4 rounded-lg bg-slate-800/50 border border-slate-700">
@@ -229,7 +266,9 @@ export const AdminEventDetail: React.FC = () => {
                 <span className="font-medium">Created At</span>
               </div>
               <p className="text-slate-400">
-                {event.createdAt ? new Date(event.createdAt).toLocaleString() : 'Unknown'}
+                {event.createdAt
+                  ? new Date(event.createdAt).toLocaleString()
+                  : "Unknown"}
               </p>
             </div>
           </div>
@@ -252,7 +291,9 @@ export const AdminEventDetail: React.FC = () => {
 
           {event.ticketTiers && event.ticketTiers.length > 0 && (
             <div>
-              <h3 className="text-sm font-medium text-slate-300 mb-3">Ticket Tiers</h3>
+              <h3 className="text-sm font-medium text-slate-300 mb-3">
+                Ticket Tiers
+              </h3>
               <div className="space-y-3">
                 {event.ticketTiers.map((tier, index) => (
                   <div
@@ -260,18 +301,22 @@ export const AdminEventDetail: React.FC = () => {
                     className="p-4 rounded-lg bg-slate-800/50 border border-slate-700 flex items-center justify-between"
                   >
                     <div>
-                      <p className="text-white font-medium">{tier.name || `Tier ${index + 1}`}</p>
+                      <p className="text-white font-medium">
+                        {tier.name || `Tier ${index + 1}`}
+                      </p>
                       <p className="text-sm text-slate-400">
-                        Supply: {tier.totalSupply ?? 'N/A'}
+                        Supply: {tier.totalSupply ?? "N/A"}
                       </p>
                       {tier.benefits && tier.benefits.length > 0 && (
                         <p className="text-xs text-slate-500 mt-1">
-                          Benefits: {tier.benefits.join(', ')}
+                          Benefits: {tier.benefits.join(", ")}
                         </p>
                       )}
                     </div>
 
-                    <div className="text-white font-semibold">{tier.price ?? 0} wei</div>
+                    <div className="text-white font-semibold">
+                      {tier.price ?? 0} wei
+                    </div>
                   </div>
                 ))}
               </div>
@@ -289,7 +334,9 @@ export const AdminEventDetail: React.FC = () => {
         </CardHeader>
         <CardContent>
           {investorRows.length === 0 ? (
-            <div className="text-slate-400">No investments recorded for this event yet.</div>
+            <div className="text-slate-400">
+              No investments recorded for this event yet.
+            </div>
           ) : (
             <div className="space-y-3">
               {investorRows.map((investment) => (
@@ -300,10 +347,15 @@ export const AdminEventDetail: React.FC = () => {
                   <div>
                     <div className="inline-flex items-center gap-2 text-white">
                       <Wallet className="w-4 h-4 text-cyan-400" />
-                      <span className="font-medium break-all">{investment.holder}</span>
+                      <span className="font-medium break-all">
+                        {investment.holder}
+                      </span>
                     </div>
                     <p className="mt-1 text-sm text-slate-400">
-                      Joined {investment.createdAt ? new Date(investment.createdAt).toLocaleString() : 'Unknown'}
+                      Joined{" "}
+                      {investment.createdAt
+                        ? new Date(investment.createdAt).toLocaleString()
+                        : "Unknown"}
                     </p>
                   </div>
 
@@ -311,7 +363,10 @@ export const AdminEventDetail: React.FC = () => {
                     <div>
                       <p className="text-xs text-slate-500">Contribution</p>
                       <p className="text-sm font-semibold text-white">
-                        {formatIntegerWithUnit(investment.contributionAmount, 'wei')}
+                        {formatIntegerWithUnit(
+                          investment.contributionAmount,
+                          "wei",
+                        )}
                       </p>
                     </div>
                     <div>

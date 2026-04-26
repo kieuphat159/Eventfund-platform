@@ -12,6 +12,12 @@ interface IFund {
         Cancelled
     }
 
+    enum CancellationReason {
+        funding_goal_not_met,
+        organizer_cancelled,
+        ticket_sales_not_met
+    }
+
     enum PenaltyReason {
         cancelled,
         fraud,
@@ -59,6 +65,11 @@ interface IFund {
 
     function finalizeFunding(uint256 eventId) external;
 
+    function cancelEvent(
+        uint256 eventId,
+        CancellationReason reason
+    ) external;
+
     
     function startTicketing(
         uint256 eventId,
@@ -82,4 +93,5 @@ interface IFund {
 
     
     function pendingReward(uint256 eventId, address user) external view returns (uint256);
+
 }

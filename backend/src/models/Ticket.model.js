@@ -76,7 +76,7 @@ const ticketSchema = new mongoose.Schema({
   // Status tracking
   status: {
     type: String,
-    enum: ["minted", "sold", "used", "expired"],
+    enum: ["minted", "sold", "used", "expired", "refunded"],
     default: "minted",
   },
 
@@ -89,6 +89,16 @@ const ticketSchema = new mongoose.Schema({
   },
 
   usedTxHash: {
+    type: String,
+    trim: true,
+    lowercase: true,
+  },
+
+  refundedAt: {
+    type: Date,
+  },
+
+  refundedTxHash: {
     type: String,
     trim: true,
     lowercase: true,
