@@ -175,6 +175,28 @@ export const EventDetail: React.FC = () => {
     });
   };
 
+  const eventDates = useMemo(() => {
+    if (!event) return [] as { label: string; date: Date }[];
+
+    const list: { label: string; date: Date }[] = [];
+
+    const addIf = (label: string, value: any) => {
+      if (!value) return;
+      const d = value instanceof Date ? value : new Date(value);
+      if (!isNaN(d.getTime())) list.push({ label, date: d });
+    };
+
+    addIf("Start Date", event.startDate);
+    addIf("End Date", (event as any).endDate);
+    // fundingStart is not present in backend model; use fundingDeadline
+    addIf("Funding Deadline", event.fundingDeadline);
+    addIf("Ticketing Start", (event as any).ticketingStartAt);
+    addIf("Ticketing End", (event as any).ticketingEndAt);
+    // Only show event-related dates (ticketing/funding/start/end)
+
+    return list;
+  }, [event]);
+
   const getTicketHolderLabel = (ticket: ApiTicket) => {
     if (ticket.status === "minted") {
       return "Organizer inventory";
@@ -375,7 +397,7 @@ export const EventDetail: React.FC = () => {
               </p>
 
               <div className="grid sm:grid-cols-2 gap-3 mb-6">
-                <div className="rounded-xl border border-slate-800 bg-slate-900/90 p-3 text-slate-300">
+                {/* <div className="rounded-xl border border-slate-800 bg-slate-900/90 p-3 text-slate-300">
                   <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-500 mb-1">
                     <Calendar className="w-4 h-4 text-cyan-300" />
                     Date
@@ -389,7 +411,7 @@ export const EventDetail: React.FC = () => {
                     Time
                   </div>
                   <div className="font-medium">{formatTime(eventDate)}</div>
-                </div>
+                </div> */}
 
                 <div className="rounded-xl border border-slate-800 bg-slate-900/90 p-3 text-slate-300 sm:col-span-2">
                   <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-500 mb-1">
@@ -412,6 +434,24 @@ export const EventDetail: React.FC = () => {
                       "Unknown organizer"}
                   </code>
                 </div>
+                {eventDates.length > 0 && (
+                  <div className="rounded-xl border border-slate-800 bg-slate-900/90 p-3 text-slate-300 sm:col-span-2">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-500">
+                        <Clock className="w-4 h-4 text-cyan-300" />
+                        Dates
+                      </div>
+                    </div>
+                    <ul className="text-sm text-slate-400 space-y-2">
+                      {eventDates.map((item) => (
+                        <li key={item.label} className="flex items-center justify-between">
+                          <span className="text-xs text-slate-500">{item.label}</span>
+                          <span className="font-medium">{item.date.toLocaleString()}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
 
               {event?.investmentEnabled !== false ? (
