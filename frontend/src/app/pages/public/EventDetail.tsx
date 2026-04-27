@@ -227,11 +227,11 @@ export const EventDetail: React.FC = () => {
         investmentAmount.trim(),
         user.walletAddress || user.smartAccountAddress,
       );
-      setInvestSuccess(`On-chain contribution submitted: ${result.txHash}`);
+      setInvestSuccess("Contribution successful");
       const refreshedEvent = await getEventById(eventId);
       setEvent(refreshedEvent);
     } catch (err) {
-      setInvestError(err instanceof Error ? err.message : "Investment failed");
+      setInvestError("Contribution failed");
     } finally {
       setInvesting(false);
     }
