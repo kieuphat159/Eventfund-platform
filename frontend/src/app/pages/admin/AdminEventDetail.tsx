@@ -37,6 +37,7 @@ import {
   type EventItem,
 } from "../../services/events.service";
 import { calculatePercentage, formatIntegerWithUnit } from "../../lib/utils";
+import { useLoading } from "../../components/ui/loadingContext";
 
 export const AdminEventDetail: React.FC = () => {
   const { id } = useParams();
@@ -66,6 +67,8 @@ export const AdminEventDetail: React.FC = () => {
         setLoadingVerifiers(true);
         setError("");
 
+        loadingCtx.show("Loading event details...");
+
         const [eventData, investments, verifierOptions] = await Promise.all([
           getAdminEventById(id),
           getAdminEventInvestments(id, {
@@ -92,6 +95,7 @@ export const AdminEventDetail: React.FC = () => {
       } finally {
         setLoading(false);
         setLoadingVerifiers(false);
+        loadingCtx.hide();
       }
     };
 
@@ -133,6 +137,22 @@ export const AdminEventDetail: React.FC = () => {
     [verifierUsers],
   );
 
+  const loadingCtx = useLoading();
+
+  const [searchTerm, setSearchTerm] = useState("");
+
+  const isLikelyAddress = (s: string) => /^0x[a-fA-F0-9]{8,}$/.test(s.trim());
+
+  const filteredAvailableVerifierUsers = useMemo(() => {
+    const q = searchTerm.trim().toLowerCase();
+    if (!q) return availableVerifierUsers;
+    return availableVerifierUsers.filter((verifier) => {
+      const identity = (verifier.username || verifier.email || "").toLowerCase();
+      const wallet = (verifier.walletAddress || "").toLowerCase();
+      return identity.includes(q) || wallet.includes(q);
+    });
+  }, [availableVerifierUsers, searchTerm]);
+
   const formatVerifierOption = (verifier: AdminUserItem) => {
     const identity = verifier.username || verifier.email || "Unnamed verifier";
     return `${identity} - ${verifier.walletAddress}`;
@@ -144,12 +164,16 @@ export const AdminEventDetail: React.FC = () => {
       return;
     }
 
+    // If the current verifierWallet is not in available options, only replace it
+    // when it doesn't look like a manual wallet address. This preserves typed
+    // addresses that admins paste in the search box.
     if (
       verifierWallet &&
       !availableVerifierUsers.some(
         (verifier) =>
           verifier.walletAddress.toLowerCase() === verifierWallet.toLowerCase(),
-      )
+      ) &&
+      !isLikelyAddress(verifierWallet)
     ) {
       setVerifierWallet(
         availableVerifierUsers[0]?.walletAddress.toLowerCase() || "",
@@ -170,10 +194,14 @@ export const AdminEventDetail: React.FC = () => {
       return;
     }
 
+    const MIN_FAKE_MS = 700;
+    const start = Date.now();
+
     try {
       setAssigningVerifierOnChain(true);
       setAssignOnChainError("");
       setAssignOnChainSuccess("");
+      loadingCtx.show("Assigning verifier on-chain...");
 
       const updatedEvent = await assignEventVerifierOnChain(
         eventId,
@@ -181,6 +209,12 @@ export const AdminEventDetail: React.FC = () => {
       );
       if (!updatedEvent) {
         throw new Error("Assign verifier on-chain returned no data.");
+      }
+
+      // ensure minimum fake loading duration for UX
+      const elapsed = Date.now() - start;
+      if (elapsed < MIN_FAKE_MS) {
+        await new Promise((res) => setTimeout(res, MIN_FAKE_MS - elapsed));
       }
 
       setEvent(updatedEvent);
@@ -191,6 +225,7 @@ export const AdminEventDetail: React.FC = () => {
         err instanceof Error ? err.message : "Failed to assign verifier on-chain.",
       );
     } finally {
+      loadingCtx.hide();
       setAssigningVerifierOnChain(false);
     }
   };
@@ -505,34 +540,53 @@ export const AdminEventDetail: React.FC = () => {
 
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_auto]">
-            <Select
-              value={verifierWallet}
-              onValueChange={setVerifierWallet}
-              disabled={loadingVerifiers || availableVerifierUsers.length === 0}
-            >
-              <SelectTrigger className="border-slate-700 bg-slate-800 text-white">
-                <SelectValue
-                  placeholder={
-                    loadingVerifiers
-                      ? "Loading verifier accounts..."
-                      : availableVerifierUsers.length > 0
-                        ? "Select verifier account"
-                        : "No unassigned verifier account available"
-                  }
-                />
-              </SelectTrigger>
-              <SelectContent className="border-slate-700 bg-slate-800">
-                {availableVerifierUsers.map((verifier) => (
-                  <SelectItem
-                    key={verifier.walletAddress}
-                    value={verifier.walletAddress.toLowerCase()}
-                    className="text-white hover:bg-slate-700"
-                  >
-                    {formatVerifierOption(verifier)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div>
+              <input
+                value={searchTerm}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setSearchTerm(v);
+                  setVerifierWallet(v.trim().toLowerCase());
+                }}
+                placeholder={
+                  loadingVerifiers
+                    ? "Loading verifier accounts..."
+                    : "Enter wallet address"
+                }
+                className="w-full rounded border border-slate-700 bg-slate-800 text-white px-3 py-2"
+              />
+
+              <div className="mt-2">
+                <Select
+                  value={verifierWallet}
+                  onValueChange={setVerifierWallet}
+                  disabled={loadingVerifiers || filteredAvailableVerifierUsers.length === 0}
+                >
+                  <SelectTrigger className="border-slate-700 bg-slate-800 text-white">
+                    <SelectValue
+                      placeholder={
+                        searchTerm
+                          ? `Showing ${filteredAvailableVerifierUsers.length} result(s)`
+                          : filteredAvailableVerifierUsers.length > 0
+                            ? "Select verifier account"
+                            : "No unassigned verifier account available"
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent className="border-slate-700 bg-slate-800">
+                    {filteredAvailableVerifierUsers.map((verifier) => (
+                      <SelectItem
+                        key={verifier.walletAddress}
+                        value={verifier.walletAddress.toLowerCase()}
+                        className="text-white hover:bg-slate-700"
+                      >
+                        {formatVerifierOption(verifier)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
 
             <Button
               onClick={handleAssignVerifierOnChain}
@@ -549,7 +603,7 @@ export const AdminEventDetail: React.FC = () => {
                   : "Event is not synced to chain yet"
               }
             >
-              {assigningVerifierOnChain ? "On-chain..." : "Assign On-chain"}
+              {assigningVerifierOnChain ? "On-chain..." : "Assign"}
             </Button>
           </div>
 
