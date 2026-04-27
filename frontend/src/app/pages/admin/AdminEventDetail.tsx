@@ -32,8 +32,8 @@ import {
   getAdminEventById,
   getAdminEventInvestments,
   getVerifierUsers,
-  type AdminUserItem,
   type AdminEventInvestmentsData,
+  type AdminUserItem,
   type EventItem,
 } from "../../services/events.service";
 import { calculatePercentage, formatIntegerWithUnit } from "../../lib/utils";
@@ -104,12 +104,12 @@ export const AdminEventDetail: React.FC = () => {
       100,
     );
   }, [event?.currentFunding, event?.fundingGoal]);
+
   const investmentMode =
     event?.investmentEnabled === false ? "Self-funded" : "Investment-enabled";
 
   const assignedVerifiers = useMemo(
-    () =>
-      new Set((event?.verifiers || []).map((wallet) => wallet.toLowerCase())),
+    () => new Set((event?.verifiers || []).map((wallet) => wallet.toLowerCase())),
     [event?.verifiers],
   );
 
@@ -141,7 +141,10 @@ export const AdminEventDetail: React.FC = () => {
   useEffect(() => {
     if (!verifierWallet && availableVerifierUsers.length > 0) {
       setVerifierWallet(availableVerifierUsers[0].walletAddress.toLowerCase());
-    } else if (
+      return;
+    }
+
+    if (
       verifierWallet &&
       !availableVerifierUsers.some(
         (verifier) =>
@@ -185,9 +188,7 @@ export const AdminEventDetail: React.FC = () => {
       setAssignOnChainSuccess("Verifier assigned on-chain successfully.");
     } catch (err) {
       setAssignOnChainError(
-        err instanceof Error
-          ? err.message
-          : "Failed to assign verifier on-chain.",
+        err instanceof Error ? err.message : "Failed to assign verifier on-chain.",
       );
     } finally {
       setAssigningVerifierOnChain(false);
@@ -205,9 +206,9 @@ export const AdminEventDetail: React.FC = () => {
         <Link to="/admin/events">
           <Button
             variant="outline"
-            className="border-slate-600 hover:bg-slate-700 text-white"
+            className="border-slate-600 text-white hover:bg-slate-700"
           >
-            <ArrowLeft className="w-4 h-4 mr-2" />
+            <ArrowLeft className="mr-2 h-4 w-4" />
             Back to Events
           </Button>
         </Link>
@@ -223,12 +224,12 @@ export const AdminEventDetail: React.FC = () => {
         <div>
           <Link
             to="/admin/events"
-            className="inline-flex items-center text-sm text-slate-400 hover:text-white mb-3"
+            className="mb-3 inline-flex items-center text-sm text-slate-400 hover:text-white"
           >
-            <ArrowLeft className="w-4 h-4 mr-2" />
+            <ArrowLeft className="mr-2 h-4 w-4" />
             Back to Events
           </Link>
-          <h1 className="text-3xl font-bold text-white mb-2">
+          <h1 className="mb-2 text-3xl font-bold text-white">
             {event.title || "Untitled event"}
           </h1>
           <p className="text-slate-400">
@@ -237,32 +238,34 @@ export const AdminEventDetail: React.FC = () => {
         </div>
 
         <Link to={`/admin/events/edit/${event._id || event.id}`}>
-          <Button className="bg-blue-600 hover:bg-blue-700 text-white">
+          <Button className="bg-blue-600 text-white hover:bg-blue-700">
             Edit Event
           </Button>
         </Link>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card className="bg-slate-900 border-slate-800">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+        <Card className="border-slate-800 bg-slate-900">
           <CardContent className="p-5">
-            <p className="text-sm text-slate-400 mb-1">Current Funding</p>
+            <p className="mb-1 text-sm text-slate-400">Current Funding</p>
             <p className="text-2xl font-bold text-white">
-              {formatIntegerWithUnit(event?.currentFunding, "wei")}
+              {formatIntegerWithUnit(event.currentFunding, "wei")}
             </p>
           </CardContent>
         </Card>
-        <Card className="bg-slate-900 border-slate-800">
+
+        <Card className="border-slate-800 bg-slate-900">
           <CardContent className="p-5">
-            <p className="text-sm text-slate-400 mb-1">Funding Goal</p>
+            <p className="mb-1 text-sm text-slate-400">Funding Goal</p>
             <p className="text-2xl font-bold text-white">
-              {formatIntegerWithUnit(event?.fundingGoal, "wei")}
+              {formatIntegerWithUnit(event.fundingGoal, "wei")}
             </p>
           </CardContent>
         </Card>
-        <Card className="bg-slate-900 border-slate-800">
+
+        <Card className="border-slate-800 bg-slate-900">
           <CardContent className="p-5">
-            <p className="text-sm text-slate-400 mb-1">Investors</p>
+            <p className="mb-1 text-sm text-slate-400">Investors</p>
             <p className="text-2xl font-bold text-white">
               {investmentData?.summary?.totalInvestors ??
                 event.adminSummary?.investorCount ??
@@ -270,9 +273,10 @@ export const AdminEventDetail: React.FC = () => {
             </p>
           </CardContent>
         </Card>
-        <Card className="bg-slate-900 border-slate-800">
+
+        <Card className="border-slate-800 bg-slate-900">
           <CardContent className="p-5">
-            <p className="text-sm text-slate-400 mb-1">Funding Progress</p>
+            <p className="mb-1 text-sm text-slate-400">Funding Progress</p>
             <p className="text-2xl font-bold text-white">
               {fundingProgress.toFixed(1)}%
             </p>
@@ -280,7 +284,7 @@ export const AdminEventDetail: React.FC = () => {
         </Card>
       </div>
 
-      <Card className="bg-slate-900 border-slate-800">
+      <Card className="border-slate-800 bg-slate-900">
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
@@ -296,18 +300,18 @@ export const AdminEventDetail: React.FC = () => {
 
         <CardContent className="space-y-6">
           <div>
-            <h3 className="text-sm font-medium text-slate-300 mb-2">
+            <h3 className="mb-2 text-sm font-medium text-slate-300">
               Description
             </h3>
-            <p className="text-slate-400 leading-relaxed">
+            <p className="leading-relaxed text-slate-400">
               {event.description || "No description available"}
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="p-4 rounded-lg bg-slate-800/50 border border-slate-700">
-              <div className="flex items-center space-x-2 text-slate-300 mb-2">
-                <Calendar className="w-4 h-4" />
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-4">
+              <div className="mb-2 flex items-center space-x-2 text-slate-300">
+                <Calendar className="h-4 w-4" />
                 <span className="font-medium">Start Date</span>
               </div>
               <p className="text-slate-400">
@@ -317,9 +321,9 @@ export const AdminEventDetail: React.FC = () => {
               </p>
             </div>
 
-            <div className="p-4 rounded-lg bg-slate-800/50 border border-slate-700">
-              <div className="flex items-center space-x-2 text-slate-300 mb-2">
-                <MapPin className="w-4 h-4" />
+            <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-4">
+              <div className="mb-2 flex items-center space-x-2 text-slate-300">
+                <MapPin className="h-4 w-4" />
                 <span className="font-medium">Venue</span>
               </div>
               <p className="text-slate-400">
@@ -327,42 +331,40 @@ export const AdminEventDetail: React.FC = () => {
               </p>
             </div>
 
-            <div className="p-4 rounded-lg bg-slate-800/50 border border-slate-700">
-              <div className="flex items-center space-x-2 text-slate-300 mb-2">
-                <User className="w-4 h-4" />
+            <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-4">
+              <div className="mb-2 flex items-center space-x-2 text-slate-300">
+                <User className="h-4 w-4" />
                 <span className="font-medium">Organizer</span>
               </div>
-              <p className="text-slate-400 break-all">
-                {event.organizer ||
-                  event.organizerWallet ||
-                  "Unknown organizer"}
+              <p className="break-all text-slate-400">
+                {event.organizer || event.organizerWallet || "Unknown organizer"}
               </p>
             </div>
 
-            <div className="p-4 rounded-lg bg-slate-800/50 border border-slate-700">
-              <div className="flex items-center space-x-2 text-slate-300 mb-2">
-                <DollarSign className="w-4 h-4" />
+            <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-4">
+              <div className="mb-2 flex items-center space-x-2 text-slate-300">
+                <DollarSign className="h-4 w-4" />
                 <span className="font-medium">Organizer Stake / Capital</span>
               </div>
               <p className="text-slate-400">
                 {formatIntegerWithUnit(event.minStakeRequired, "wei")}{" "}
-                {event?.investmentEnabled === false
+                {event.investmentEnabled === false
                   ? "organizer capital"
                   : "locked organizer stake"}
               </p>
-              <p className="text-xs text-slate-500 mt-1">
+              <p className="mt-1 text-xs text-slate-500">
                 {typeof event.totalTickets === "number"
                   ? `${event.totalTickets} tickets planned`
                   : `From ${event.ticketTiers?.[0]?.price ?? 0} wei ticket price`}
               </p>
-              <p className="text-xs text-slate-500 mt-1">
+              <p className="mt-1 text-xs text-slate-500">
                 Mode: {investmentMode}
               </p>
             </div>
 
-            <div className="p-4 rounded-lg bg-slate-800/50 border border-slate-700">
-              <div className="flex items-center space-x-2 text-slate-300 mb-2">
-                <Tag className="w-4 h-4" />
+            <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-4">
+              <div className="mb-2 flex items-center space-x-2 text-slate-300">
+                <Tag className="h-4 w-4" />
                 <span className="font-medium">Category</span>
               </div>
               <p className="text-slate-400">
@@ -370,9 +372,9 @@ export const AdminEventDetail: React.FC = () => {
               </p>
             </div>
 
-            <div className="p-4 rounded-lg bg-slate-800/50 border border-slate-700">
-              <div className="flex items-center space-x-2 text-slate-300 mb-2">
-                <FileText className="w-4 h-4" />
+            <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-4">
+              <div className="mb-2 flex items-center space-x-2 text-slate-300">
+                <FileText className="h-4 w-4" />
                 <span className="font-medium">Created At</span>
               </div>
               <p className="text-slate-400">
@@ -383,15 +385,15 @@ export const AdminEventDetail: React.FC = () => {
             </div>
           </div>
 
-          <div className="rounded-lg bg-slate-800/50 border border-slate-700 p-4">
-            <div className="flex items-center justify-between mb-2 text-sm text-slate-300">
+          <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-4">
+            <div className="mb-2 flex items-center justify-between text-sm text-slate-300">
               <div className="inline-flex items-center gap-2">
-                <TrendingUp className="w-4 h-4 text-emerald-400" />
+                <TrendingUp className="h-4 w-4 text-emerald-400" />
                 <span>Funding progress</span>
               </div>
               <span>{fundingProgress.toFixed(1)}%</span>
             </div>
-            <div className="h-2 rounded-full bg-slate-700 overflow-hidden">
+            <div className="h-2 overflow-hidden rounded-full bg-slate-700">
               <div
                 className="h-full bg-gradient-to-r from-emerald-400 to-cyan-400"
                 style={{ width: `${fundingProgress}%` }}
@@ -401,30 +403,30 @@ export const AdminEventDetail: React.FC = () => {
 
           {event.ticketTiers && event.ticketTiers.length > 0 && (
             <div>
-              <h3 className="text-sm font-medium text-slate-300 mb-3">
+              <h3 className="mb-3 text-sm font-medium text-slate-300">
                 Ticket Tiers
               </h3>
               <div className="space-y-3">
                 {event.ticketTiers.map((tier, index) => (
                   <div
                     key={index}
-                    className="p-4 rounded-lg bg-slate-800/50 border border-slate-700 flex items-center justify-between"
+                    className="flex items-center justify-between rounded-lg border border-slate-700 bg-slate-800/50 p-4"
                   >
                     <div>
-                      <p className="text-white font-medium">
+                      <p className="font-medium text-white">
                         {tier.name || `Tier ${index + 1}`}
                       </p>
                       <p className="text-sm text-slate-400">
                         Supply: {tier.totalSupply ?? "N/A"}
                       </p>
                       {tier.benefits && tier.benefits.length > 0 && (
-                        <p className="text-xs text-slate-500 mt-1">
+                        <p className="mt-1 text-xs text-slate-500">
                           Benefits: {tier.benefits.join(", ")}
                         </p>
                       )}
                     </div>
 
-                    <div className="text-white font-semibold">
+                    <div className="font-semibold text-white">
                       {tier.price ?? 0} wei
                     </div>
                   </div>
@@ -435,7 +437,7 @@ export const AdminEventDetail: React.FC = () => {
         </CardContent>
       </Card>
 
-      <Card className="bg-slate-900 border-slate-800">
+      <Card className="border-slate-800 bg-slate-900">
         <CardHeader>
           <CardTitle className="text-white">Investors</CardTitle>
           <CardDescription className="text-slate-400">
@@ -456,9 +458,9 @@ export const AdminEventDetail: React.FC = () => {
                 >
                   <div>
                     <div className="inline-flex items-center gap-2 text-white">
-                      <Wallet className="w-4 h-4 text-cyan-400" />
-                      <span className="font-medium break-all">
-                        {investment.holder}
+                      <Wallet className="h-4 w-4 text-cyan-400" />
+                      <span className="break-all font-medium">
+                        {investment.contributor || "Unknown investor"}
                       </span>
                     </div>
                     <p className="mt-1 text-sm text-slate-400">
@@ -474,7 +476,7 @@ export const AdminEventDetail: React.FC = () => {
                       <p className="text-xs text-slate-500">Contribution</p>
                       <p className="text-sm font-semibold text-white">
                         {formatIntegerWithUnit(
-                          investment.contributionAmount,
+                          investment.contributionAmount ?? investment.amount,
                           "wei",
                         )}
                       </p>
@@ -493,7 +495,7 @@ export const AdminEventDetail: React.FC = () => {
         </CardContent>
       </Card>
 
-      <Card className="bg-slate-900 border-slate-800">
+      <Card className="border-slate-800 bg-slate-900">
         <CardHeader>
           <CardTitle className="text-white">Verifier Assignment</CardTitle>
           <CardDescription className="text-slate-400">
@@ -508,7 +510,7 @@ export const AdminEventDetail: React.FC = () => {
               onValueChange={setVerifierWallet}
               disabled={loadingVerifiers || availableVerifierUsers.length === 0}
             >
-              <SelectTrigger className="bg-slate-800 border-slate-700 text-white">
+              <SelectTrigger className="border-slate-700 bg-slate-800 text-white">
                 <SelectValue
                   placeholder={
                     loadingVerifiers
@@ -519,7 +521,7 @@ export const AdminEventDetail: React.FC = () => {
                   }
                 />
               </SelectTrigger>
-              <SelectContent className="bg-slate-800 border-slate-700">
+              <SelectContent className="border-slate-700 bg-slate-800">
                 {availableVerifierUsers.map((verifier) => (
                   <SelectItem
                     key={verifier.walletAddress}
@@ -531,6 +533,7 @@ export const AdminEventDetail: React.FC = () => {
                 ))}
               </SelectContent>
             </Select>
+
             <Button
               onClick={handleAssignVerifierOnChain}
               disabled={
@@ -586,6 +589,7 @@ export const AdminEventDetail: React.FC = () => {
               <div className="space-y-2">
                 {event.verifiers.map((wallet) => {
                   const verifier = verifierMap.get(wallet.toLowerCase());
+
                   return (
                     <div
                       key={wallet}
@@ -604,9 +608,7 @@ export const AdminEventDetail: React.FC = () => {
                 })}
               </div>
             ) : (
-              <p className="text-sm text-slate-500">
-                No verifier assigned yet.
-              </p>
+              <p className="text-sm text-slate-500">No verifier assigned yet.</p>
             )}
           </div>
         </CardContent>

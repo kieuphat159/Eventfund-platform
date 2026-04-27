@@ -516,10 +516,6 @@ export const VerifierDashboard: React.FC = () => {
           );
 
           if (result?.confirmation?.synced || result?.confirmation?.alreadySynced) {
-            setManualRecords((prev) => [
-              createManualRecord(normalizedTokenId, "valid", ticket.currentOwner),
-              ...prev,
-            ]);
             await loadSelectedEventData(selectedEvent);
           } else {
             throw new Error(
@@ -594,12 +590,12 @@ export const VerifierDashboard: React.FC = () => {
         return;
       }
 
+      setShowScanner(false);
       await checkInByTokenId(
         payload.tokenId,
         payload.walletAddress,
         payload.eventId,
       );
-      setShowScanner(false);
     },
     [checkInByTokenId, isSubmitting, lastScannedValue],
   );
@@ -956,13 +952,19 @@ export const VerifierDashboard: React.FC = () => {
           </DialogHeader>
           <div className="space-y-4">
             <div className="overflow-hidden rounded-lg border border-slate-700 bg-slate-800">
-              <QrReader
-                delay={150}
-                facingMode="rear"
-                onError={handleScannerError}
-                onScan={handleQRScan}
-                style={{ width: "100%", minHeight: 320, objectFit: "cover" }}
-              />
+              {showScanner && !isSubmitting ? (
+                <QrReader
+                  delay={150}
+                  facingMode="rear"
+                  onError={handleScannerError}
+                  onScan={handleQRScan}
+                  style={{ width: "100%", minHeight: 320, objectFit: "cover" }}
+                />
+              ) : (
+                <div className="flex min-h-[320px] items-center justify-center text-sm text-slate-400">
+                  {isSubmitting ? "Processing scan..." : "Scanner closed"}
+                </div>
+              )}
             </div>
 
             {scannerError && (
