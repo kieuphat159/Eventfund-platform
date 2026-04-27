@@ -1,11 +1,13 @@
-import { api } from "../lib/api";
+import { ApiError, api } from "../lib/api";
 
 export interface ApiEvent {
   _id?: string;
   title?: string;
   startDate?: string;
   endDate?: string;
+  status?: string;
   venue?: {
+    name?: string;
     address?: string;
   };
 }
@@ -44,6 +46,16 @@ interface TicketDetailResponse {
   message?: string;
 }
 
+interface VerifyTicketResponse {
+  success: boolean;
+  data?: {
+    isOwner: boolean;
+    ownerWallet?: string;
+    ticket?: ApiTicket;
+  };
+  message?: string;
+}
+
 export interface PurchaseIntentPayload {
   eventId?: string;
   tokenId?: string;
@@ -67,6 +79,18 @@ export interface PurchaseIntentData {
 interface PurchaseIntentResponse {
   success: boolean;
   data?: PurchaseIntentData;
+  message?: string;
+}
+
+export interface UseTicketIntentData {
+  tokenId: string;
+  verifier: string;
+  transaction: PurchaseIntentTransaction;
+}
+
+interface UseTicketIntentResponse {
+  success: boolean;
+  data?: UseTicketIntentData;
   message?: string;
 }
 
@@ -138,6 +162,17 @@ export interface EventTicketStats {
   availableTickets: number;
 }
 
+export interface VerifyTicketPayload {
+  tokenId: string;
+  eventId: string;
+  walletAddress?: string;
+}
+
+export interface VerifyTicketResult {
+  isOwner: boolean;
+  ticket: ApiTicket | null;
+}
+
 interface EventTicketStatsResponse {
   success: boolean;
   data?: EventTicketStats;
@@ -147,6 +182,9 @@ interface EventTicketStatsResponse {
 export interface Eip1193Provider {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
 }
+
+const WEB3AUTH_TX_GAS_CAP = 16_777_216n;
+const PURCHASE_FALLBACK_GAS_LIMIT = 500_000n;
 
 export interface PurchaseTicketResult {
   txHash: string;
@@ -197,6 +235,28 @@ function isRateLimitError(message: string): boolean {
 }
 
 function mapPurchaseRpcError(message: string): string {
+  const normalized = message.toLowerCase();
+
+  if (
+    normalized.includes("not been authorized by the user") ||
+    normalized.includes("unauthorized")
+  ) {
+    return "Ví chưa cấp quyền cho ứng dụng. Hãy mở MetaMask, bấm Connect và cấp quyền truy cập tài khoản.";
+  }
+
+  if (
+    normalized.includes("user rejected") ||
+    normalized.includes("rejected the request")
+  ) {
+    return "Bạn đã từ chối thao tác trên ví. Vui lòng xác nhận lại trong MetaMask.";
+  }
+
+  if (
+    normalized.includes("invalid parameters: must provide an Ethereum address")
+  ) {
+    return "Địa chỉ ví gửi giao dịch không hợp lệ hoặc chưa được chọn trong MetaMask.";
+  }
+
   if (isRateLimitError(message)) {
     return "RPC đang bị rate-limit (429). Vui lòng đợi 3-5 giây rồi thử lại.";
   }
@@ -204,8 +264,98 @@ function mapPurchaseRpcError(message: string): string {
   return message;
 }
 
+async function ensureWalletAccountAccess(
+  provider: Eip1193Provider,
+  expectedAddress?: string,
+): Promise<string> {
+  const accounts = (await provider.request({
+    method: "eth_requestAccounts",
+  })) as string[];
+
+  if (!Array.isArray(accounts) || accounts.length === 0) {
+    throw new Error("Không tìm thấy tài khoản ví nào đã kết nối.");
+  }
+
+  const normalizedAccounts = accounts.map((account) => account.toLowerCase());
+
+  if (expectedAddress) {
+    const normalizedExpected = expectedAddress.toLowerCase();
+    const matchedIndex = normalizedAccounts.findIndex(
+      (account) => account === normalizedExpected,
+    );
+
+    if (matchedIndex >= 0) {
+      return accounts[matchedIndex];
+    }
+
+    throw new Error(
+      `Ví đang chọn (${accounts[0]}) không khớp với tài khoản yêu cầu (${expectedAddress}). Vui lòng chuyển đúng account trong MetaMask.`,
+    );
+  }
+
+  return accounts[0];
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function parseHexToBigInt(value: unknown): bigint | null {
+  if (typeof value !== "string") return null;
+
+  try {
+    return BigInt(value);
+  } catch {
+    return null;
+  }
+}
+
+function toSafeGasHex(estimatedGas: bigint): string {
+  const paddedGas = estimatedGas + estimatedGas / 5n + 15_000n;
+  const boundedGas =
+    paddedGas > WEB3AUTH_TX_GAS_CAP ? WEB3AUTH_TX_GAS_CAP : paddedGas;
+
+  return toHexValue(boundedGas.toString());
+}
+
+async function estimatePurchaseGasLimit(
+  provider: Eip1193Provider,
+  tx: {
+    from: string;
+    to: string;
+    data: string;
+    value: string;
+  },
+): Promise<string> {
+  const txRequest = {
+    from: tx.from,
+    to: tx.to,
+    data: tx.data,
+    value: tx.value,
+  };
+
+  try {
+    const estimated = await provider.request({
+      method: "eth_estimateGas",
+      params: [txRequest],
+    });
+
+    const estimatedGas = parseHexToBigInt(estimated);
+    if (estimatedGas && estimatedGas > 0n) {
+      return toSafeGasHex(estimatedGas);
+    }
+  } catch (error) {
+    console.warn(
+      "[Tickets] Failed to estimate gas via wallet provider. Falling back to safe default gas limit.",
+      error,
+    );
+  }
+
+  const safeFallback =
+    PURCHASE_FALLBACK_GAS_LIMIT > WEB3AUTH_TX_GAS_CAP
+      ? WEB3AUTH_TX_GAS_CAP
+      : PURCHASE_FALLBACK_GAS_LIMIT;
+  return toHexValue(safeFallback.toString());
 }
 
 async function sendPurchaseTransactionWithRetry(
@@ -218,6 +368,7 @@ async function sendPurchaseTransactionWithRetry(
   },
 ): Promise<string> {
   let lastError: unknown;
+  const gas = await estimatePurchaseGasLimit(provider, tx);
 
   for (let attempt = 1; attempt <= SEND_TX_MAX_RETRIES; attempt += 1) {
     try {
@@ -229,6 +380,7 @@ async function sendPurchaseTransactionWithRetry(
             to: tx.to,
             data: tx.data,
             value: tx.value,
+            gas,
           },
         ],
       })) as string;
@@ -343,20 +495,23 @@ export async function getTicketStats(
   return payload.data || null;
 }
 
-export async function markTicketAsUsed(
-  tokenId: string,
-  eventId?: string,
-): Promise<ApiTicket | null> {
-  const payload = await api.post<TicketDetailResponse>(
-    `/tickets/${encodeURIComponent(tokenId)}/use`,
-    {
-      tokenId,
-      eventId,
-    },
+export async function verifyTicket(
+  payload: VerifyTicketPayload,
+): Promise<VerifyTicketResult | null> {
+  const response = await api.post<VerifyTicketResponse>(
+    "/tickets/verify",
+    payload,
     { headers: getAuthHeaders() },
   );
 
-  return payload.data ? normalizeTicket(payload.data) : null;
+  return response.data
+    ? {
+        isOwner: !!response.data.isOwner,
+        ticket: response.data.ticket
+          ? normalizeTicket(response.data.ticket)
+          : null,
+      }
+    : null;
 }
 
 export async function createPurchaseIntent(
@@ -445,6 +600,8 @@ export async function purchaseTicket(
     throw new Error("Buyer wallet address is required to purchase ticket");
   }
 
+  await ensureWalletAccountAccess(provider, fromAddress);
+
   const txHash = await sendPurchaseTransactionWithRetry(provider, {
     from: fromAddress,
     to: intent.transaction.to,
@@ -456,6 +613,90 @@ export async function purchaseTicket(
     txHash,
     tokenId: intent.tokenId,
     buyerWallet: fromAddress,
+  });
+
+  return {
+    txHash,
+    intent,
+    confirmation,
+  };
+}
+
+export async function createUseTicketIntent(
+  tokenId: string,
+): Promise<UseTicketIntentData | null> {
+  const response = await api.post<UseTicketIntentResponse>(
+    `/tickets/${encodeURIComponent(tokenId)}/use-intent`,
+    {},
+    { headers: getAuthHeaders() },
+  );
+
+  return response.data || null;
+}
+
+export async function confirmUseTicketTransaction(payload: {
+  txHash: string;
+  tokenId?: string;
+  verifierWallet?: string;
+}): Promise<ConfirmPurchaseData | null> {
+  try {
+    const response = await api.post<ConfirmPurchaseResponse>(
+      `/tickets/use/confirm`,
+      payload,
+      { headers: getAuthHeaders() },
+    );
+
+    return response.data || null;
+  } catch (error) {
+    if (
+      error instanceof ApiError &&
+      /transaction failed on-chain/i.test(error.message)
+    ) {
+      throw new Error(
+        "Giao dịch check-in đã bị revert on-chain. Hãy kiểm tra: ví hiện tại có là verifier on-chain cho event, ticket còn trạng thái SOLD, event đang ONGOING, và đúng network Sepolia.",
+      );
+    }
+
+    throw error;
+  }
+}
+
+export async function useTicketOnChain(
+  provider: Eip1193Provider,
+  tokenId: string,
+  verifierWallet?: string,
+): Promise<{
+  txHash: string;
+  intent: UseTicketIntentData;
+  confirmation: ConfirmPurchaseData | null;
+}> {
+  if (!provider?.request) {
+    throw new Error("Wallet provider is unavailable");
+  }
+
+  const intent = await createUseTicketIntent(tokenId);
+  if (!intent?.transaction) {
+    throw new Error("Unable to create use intent");
+  }
+
+  const fromAddress = verifierWallet || intent.verifier;
+  if (!fromAddress) {
+    throw new Error("Verifier wallet address is required to send transaction");
+  }
+
+  await ensureWalletAccountAccess(provider, fromAddress);
+
+  const txHash = await sendPurchaseTransactionWithRetry(provider, {
+    from: fromAddress,
+    to: intent.transaction.to,
+    data: intent.transaction.data,
+    value: toHexValue(intent.transaction.value || "0"),
+  });
+
+  const confirmation = await confirmUseTicketTransaction({
+    txHash,
+    tokenId: intent.tokenId,
+    verifierWallet: fromAddress,
   });
 
   return {
@@ -488,7 +729,7 @@ export async function claimTicketRefundOnChain(
     from: fromAddress,
     to: intent.transaction.to,
     data: intent.transaction.data,
-    value: toHexValue(intent.transaction.value),
+    value: toHexValue(intent.transaction.value || "0"),
   });
 
   const confirmation = await confirmRefundTransaction({
@@ -509,7 +750,10 @@ export const ticketsService = {
   getTickets,
   getTicketByTokenId,
   getTicketStats,
-  markTicketAsUsed,
+  verifyTicket,
+  createUseTicketIntent,
+  confirmUseTicketTransaction,
+  useTicketOnChain,
   createPurchaseIntent,
   confirmPurchaseTransaction,
   createRefundIntent,

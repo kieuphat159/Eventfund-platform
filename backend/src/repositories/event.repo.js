@@ -198,6 +198,7 @@ export async function upsertByContractEventId(contractEventId, data, models = {}
     organizerShareBps: data.organizerShareBps,
     ticketPrice: data.ticketPrice,
     maxTickets: data.maxTickets,
+    totalTickets: data.totalTickets ?? data.maxTickets,
     usedThreshold: data.usedThreshold,
     organizerStake: data.organizerStake, // was organizerStakeLocked — corrected
     status: data.status,
@@ -277,6 +278,101 @@ export async function findByOnChainIdentity(
   models = {},
 ) {
   return findByContractEventId(contractEventId, fundContractAddress, models);
+}
+
+/**
+ * Find on-chain funding events whose deadline has passed and need finalization.
+ * @param {Date} now
+ * @param {number} limit
+ * @param {Object} models - Injected models (optional)
+ * @returns {Promise<Array<Object>>}
+ */
+export async function findDueFundingFinalizationEvents(
+  now = new Date(),
+  limit = 50,
+  models = {},
+) {
+  const Event = models.Event || DefaultEvent;
+  return await Event.find({
+    contractEventId: { $exists: true, $ne: null },
+    status: "funding",
+    fundingDeadline: { $lte: now },
+  })
+    .sort({ fundingDeadline: 1, createdAt: 1 })
+    .limit(limit)
+    .lean();
+}
+
+/**
+ * Find funded on-chain events whose ticketing window has started.
+ * @param {Date} now
+ * @param {number} limit
+ * @param {Object} models - Injected models (optional)
+ * @returns {Promise<Array<Object>>}
+ */
+export async function findDueTicketingStartEvents(
+  now = new Date(),
+  limit = 50,
+  models = {},
+) {
+  const Event = models.Event || DefaultEvent;
+  return await Event.find({
+    contractEventId: { $exists: true, $ne: null },
+    status: { $in: ["funding", "funded"] },
+    ticketingStartAt: {
+      $exists: true,
+      $ne: null,
+    },
+  })
+    .sort({ ticketingStartAt: 1, createdAt: 1 })
+    .limit(limit)
+    .lean();
+}
+
+/**
+ * Find ticketing events whose ticket sales window has ended and need resolution.
+ * @param {Date} now
+ * @param {number} limit
+ * @param {Object} models - Injected models (optional)
+ * @returns {Promise<Array<Object>>}
+ */
+export async function findDueTicketingResolutionEvents(
+  now = new Date(),
+  limit = 50,
+  models = {},
+) {
+  const Event = models.Event || DefaultEvent;
+  return await Event.find({
+    contractEventId: { $exists: true, $ne: null },
+    status: "ticketing",
+    ticketingEndAt: { $lte: now },
+  })
+    .sort({ ticketingEndAt: 1, createdAt: 1 })
+    .limit(limit)
+    .lean();
+}
+
+/**
+ * Find ongoing events whose event end date has passed and need final settlement.
+ * @param {Date} now
+ * @param {number} limit
+ * @param {Object} models - Injected models (optional)
+ * @returns {Promise<Array<Object>>}
+ */
+export async function findDueEventSettlementEvents(
+  now = new Date(),
+  limit = 50,
+  models = {},
+) {
+  const Event = models.Event || DefaultEvent;
+  return await Event.find({
+    contractEventId: { $exists: true, $ne: null },
+    status: "ongoing",
+    endDate: { $lte: now },
+  })
+    .sort({ endDate: 1, createdAt: 1 })
+    .limit(limit)
+    .lean();
 }
 
 /**
@@ -369,4 +465,27 @@ export async function clearProcessedTxHashes(txHashes, models = {}) {
   );
 }
 
-export default { createEvent, findById, findEvents, updateById, deleteById, updateFundingStatus, incrementTicketCounters, countEvents, getRevenueStats, upsertByContractEventId, findByContractEventId, findByOnChainIdentity, findMatchingDraftForOnChainEvent, isTxHashProcessed, markTxHashProcessed, applyIdempotentDeltaByTxHash, updateByContractEventId, clearProcessedTxHashes };
+export default {
+  createEvent,
+  findById,
+  findEvents,
+  updateById,
+  deleteById,
+  updateFundingStatus,
+  incrementTicketCounters,
+  countEvents,
+  getRevenueStats,
+  upsertByContractEventId,
+  findByContractEventId,
+  findByOnChainIdentity,
+  findDueFundingFinalizationEvents,
+  findDueTicketingStartEvents,
+  findDueTicketingResolutionEvents,
+  findDueEventSettlementEvents,
+  findMatchingDraftForOnChainEvent,
+  isTxHashProcessed,
+  markTxHashProcessed,
+  applyIdempotentDeltaByTxHash,
+  updateByContractEventId,
+  clearProcessedTxHashes,
+};

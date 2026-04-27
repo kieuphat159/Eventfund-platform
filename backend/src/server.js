@@ -2,6 +2,10 @@ import app from './app.js';
 import config from './config/env.js';
 import logger from './config/logger.js';
 import { connectDB, disconnectDB } from './config/mongoDB.js';
+import {
+  startAutoEventLifecycleService,
+  stopAutoEventLifecycleService,
+} from "./services/events/autoLifecycle.service.js";
 const PORT = config.port;
 import "./config/env.js";
 
@@ -24,6 +28,8 @@ async function startServer() {
     logger.info('Connecting to MongoDB...');
     await connectDB();
     logger.info('MongoDB connected successfully');
+
+    startAutoEventLifecycleService({ logger });
 
     // TODO: Connect to Redis when rate limiting is implemented
     // logger.info('Connecting to Redis...');
@@ -68,6 +74,7 @@ async function gracefulShutdown(signal) {
     }
 
     // Disconnect from MongoDB
+    stopAutoEventLifecycleService();
     logger.info('Disconnecting from MongoDB...');
     await disconnectDB();
     logger.info('MongoDB disconnected');

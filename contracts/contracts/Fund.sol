@@ -17,8 +17,8 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
  *      - trước deadline: chỉ cho finalize nếu đạt goal (status Funded)
  *      - sau deadline : nếu chưa đạt goal => Cancelled, nếu đạt => giữ Funded
  *  4) startTicketing(): chỉ organizer, chỉ sau Funded + sharesFinalized, gọi Ticket.sol mintBatch()
- *  5) setCompletedIfThresholdMet(): chỉ organizer, check totalUsed từ Ticket.sol >= usedThreshold
- *  6) releaseRevenue(): chỉ organizer, chỉ khi Completed, lấy revenue từ Ticket.sol và chia:
+ *  5) setCompletedIfThresholdMet(): organizer hoặc admin, check totalUsed >= 36% của totalSold
+ *  6) releaseRevenue(): organizer hoặc admin, chỉ khi Completed, lấy revenue từ Ticket.sol và chia:
  *      platform fee -> admin, organizer share -> organizer, phần còn lại -> donatorPool
  *      donatorPool được ghi nhận qua accRewardPerShare
  *  7) claimReward(): donator claim reward
@@ -284,6 +284,11 @@ contract Fund is IFund, ReentrancyGuard {
         return p;
     }
 
+    function getEventStatus(uint256 eventId) external view returns (EventStatus) {
+        EventConfig storage e = _mustGet(eventId);
+        return e.status;
+    }
+
     // -----------------------
     // createEvent() with stake requirement
     // -----------------------
@@ -529,6 +534,24 @@ contract Fund is IFund, ReentrancyGuard {
         uint8 ticketType,
         uint256 quantity
     ) external onlyOrganizerOrAdmin(eventId) returns (uint256[] memory tokenIds) {
+        return _startTicketing(eventId, ticketType, quantity, 0);
+    }
+
+    function startTicketingWithPrice(
+        uint256 eventId,
+        uint8 ticketType,
+        uint256 quantity,
+        uint256 batchPrice
+    ) external onlyOrganizerOrAdmin(eventId) returns (uint256[] memory tokenIds) {
+        return _startTicketing(eventId, ticketType, quantity, batchPrice);
+    }
+
+    function _startTicketing(
+        uint256 eventId,
+        uint8 ticketType,
+        uint256 quantity,
+        uint256 batchPrice
+    ) internal returns (uint256[] memory tokenIds) {
         EventConfig storage e = _mustGet(eventId);
         if (address(ticket) == address(0)) revert TicketContractNotSet();
 
@@ -542,11 +565,14 @@ contract Fund is IFund, ReentrancyGuard {
         // đảm bảo không mint vượt maxTickets
         if (e.totalMinted + quantity > e.maxTickets) revert ExceedsMaxTickets();
 
+        uint256 effectivePrice = batchPrice == 0 ? e.ticketPrice : batchPrice;
+        if (effectivePrice == 0) revert BadParam();
+
         // Ticket mintBatch(to, eventId, price, type, qty)
         tokenIds = ticket.mintBatch(
             e.organizer,
             eventId,
-            e.ticketPrice,
+            effectivePrice,
             ITicket.TicketType(ticketType),
             quantity
         );
@@ -562,19 +588,23 @@ contract Fund is IFund, ReentrancyGuard {
 
     // -----------------------
     // Completed logic (manual) - organizer gọi
-    // - kiểm tra usedThreshold từ Ticket.sol (getUsageStats)
+    // - điều kiện: totalUsed >= 36% của totalSold (dựa trên Ticket.sol usage stats)
     // -----------------------
-    function setCompletedIfThresholdMet(uint256 eventId) external onlyOrganizer(eventId) {
+    function setCompletedIfThresholdMet(uint256 eventId) external onlyOrganizerOrAdmin(eventId) {
         EventConfig storage e = _mustGet(eventId);
         if (address(ticket) == address(0)) revert TicketContractNotSet();
 
         if (e.status != EventStatus.Ticketing) revert NotTicketing();
 
-        // Ticket.sol trả usage stats, lấy totalUsed
-        (, , uint256 totalUsed, ) = ticket.getUsageStats(eventId);
+        // Ticket.sol trả usage stats: totalSold/totalUsed.
+        (, uint256 totalSold, uint256 totalUsed, ) = ticket.getUsageStats(eventId);
 
-        // chưa đạt threshold => không cho Completed
-        if (totalUsed < e.usedThreshold) revert Unsafe();
+        // No sold tickets => cannot complete by usage ratio.
+        if (totalSold == 0) revert Unsafe();
+
+        // Hardcoded completion condition: used >= 36% of sold (rounded up).
+        uint256 requiredUsed = (totalSold * 3600 + (BPS_DENOM - 1)) / BPS_DENOM;
+        if (totalUsed < requiredUsed) revert Unsafe();
 
         e.status = EventStatus.Completed;
         emit Completed(eventId, totalUsed);
@@ -586,7 +616,7 @@ contract Fund is IFund, ReentrancyGuard {
     // - chỉ khi Completed
     // - revenue lấy từ Ticket.sol: getTotalRevenue(eventId)
     // -----------------------
-    function releaseRevenue(uint256 eventId) external nonReentrant onlyOrganizer(eventId) {
+    function releaseRevenue(uint256 eventId) external nonReentrant onlyOrganizerOrAdmin(eventId) {
         EventConfig storage e = _mustGet(eventId);
         if (address(ticket) == address(0)) revert TicketContractNotSet();
 
@@ -729,11 +759,24 @@ contract Fund is IFund, ReentrancyGuard {
     }
 
     // -----------------------
-    // organizer stake is treated as a non-refundable listing fee for now
+    // organizer stake is a refundable deposit after the event is settled.
+    // The actual platform fee is charged once in releaseRevenue().
     // -----------------------
-    function withdrawStake(uint256 eventId) external nonReentrant onlyOrganizer(eventId) {
-        _mustGet(eventId);
-        revert Unsafe();
+    function withdrawStake(uint256 eventId) external nonReentrant onlyOrganizerOrAdmin(eventId) {
+        EventConfig storage e = _mustGet(eventId);
+
+        if (e.status != EventStatus.Completed) revert Unsafe();
+        if (!e.revenueReleased && !e.refundsEnabled) revert Unsafe();
+
+        uint256 amount = e.organizerStakeLocked;
+        if (amount == 0) revert NothingToClaim();
+
+        e.organizerStakeLocked = 0;
+
+        (bool ok, ) = e.organizer.call{value: amount}("");
+        if (!ok) revert TransferFailed();
+
+        emit StakeWithdrawn(eventId, e.organizer, amount);
     }
 
     // -----------------------

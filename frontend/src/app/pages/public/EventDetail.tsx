@@ -16,6 +16,7 @@ import { Input } from "../../components/ui/input";
 import { StatusBadge } from "../../components/StatusBadge";
 import { ImageWithFallback } from "../../components/figma/ImageWithFallback";
 import { useAuth } from "../../contexts/AuthContext";
+import { useLoading } from "../../components/ui/loadingContext";
 import { getEventById, type EventItem } from "../../services/events.service";
 import {
   investInEventOnChain,
@@ -35,6 +36,7 @@ export const EventDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const { connectWallet, user } = useAuth();
   const { web3Auth } = useWeb3Auth();
+  const { show: showLoading, hide: hideLoading } = useLoading();
   const [event, setEvent] = useState<EventItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -100,15 +102,20 @@ export const EventDetail: React.FC = () => {
       try {
         setLoading(true);
         setError("");
+        showLoading("Loading event...");
         const data = await getEventById(id);
         setEvent(data);
-        if (data?._id) {
+        if (data?._id && (data.status === "ticketing" || data.status === "ongoing")) {
           await loadTicketData(data._id);
+        } else {
+          setTicketStats(null);
+          setEventTickets([]);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load event");
       } finally {
         setLoading(false);
+        hideLoading();
       }
     };
 
@@ -126,6 +133,7 @@ export const EventDetail: React.FC = () => {
   const eventId = event?._id || event?.id || "";
   const availableTickets = ticketStats?.availableTickets ?? null;
   const trackedTickets = ticketStats?.totalTickets ?? totalTickets;
+  const ticketingOpen = event?.status === "ticketing" || event?.status === "ongoing";
   const fundingProgress = Math.min(
     calculatePercentage(event?.currentFunding, event?.fundingGoal, 1),
     100,
@@ -134,6 +142,8 @@ export const EventDetail: React.FC = () => {
     event?.investmentEnabled === false ? "Self-funded" : "Investment-enabled";
   const isInvestable =
     event?.status === "funding" && String(event?.fundingGoal || "0") !== "0";
+  const isTicketPurchasable =
+    event?.status === "ticketing" || event?.status === "ongoing";
   const minInvestmentAmount = String(event?.minInvestmentAmount || "0");
 
   const coverImage = event?.imageUrls?.[0] || "";
@@ -163,6 +173,36 @@ export const EventDetail: React.FC = () => {
       hour: "2-digit",
       minute: "2-digit",
     });
+  };
+
+  const eventDates = useMemo(() => {
+    if (!event) return [] as { label: string; date: Date }[];
+
+    const list: { label: string; date: Date }[] = [];
+
+    const addIf = (label: string, value: any) => {
+      if (!value) return;
+      const d = value instanceof Date ? value : new Date(value);
+      if (!isNaN(d.getTime())) list.push({ label, date: d });
+    };
+
+    addIf("Start Date", event.startDate);
+    addIf("End Date", (event as any).endDate);
+    // fundingStart is not present in backend model; use fundingDeadline
+    addIf("Funding Deadline", event.fundingDeadline);
+    addIf("Ticketing Start", (event as any).ticketingStartAt);
+    addIf("Ticketing End", (event as any).ticketingEndAt);
+    // Only show event-related dates (ticketing/funding/start/end)
+
+    return list;
+  }, [event]);
+
+  const getTicketHolderLabel = (ticket: ApiTicket) => {
+    if (ticket.status === "minted") {
+      return "Organizer inventory";
+    }
+
+    return ticket.currentOwner || "-";
   };
 
   const handleInvest = async () => {
@@ -209,11 +249,11 @@ export const EventDetail: React.FC = () => {
         investmentAmount.trim(),
         user.walletAddress || user.smartAccountAddress,
       );
-      setInvestSuccess(`On-chain contribution submitted: ${result.txHash}`);
+      setInvestSuccess("Contribution successful");
       const refreshedEvent = await getEventById(eventId);
       setEvent(refreshedEvent);
     } catch (err) {
-      setInvestError(err instanceof Error ? err.message : "Investment failed");
+      setInvestError("Contribution failed");
     } finally {
       setInvesting(false);
     }
@@ -225,15 +265,9 @@ export const EventDetail: React.FC = () => {
     if (!user?.walletAddress) {
       try {
         await connectWallet();
-        showBuyPopup(
-          "success",
-          "Wallet connected. Please click Purchase Ticket again to continue.",
-        );
+        showBuyPopup("success", "Wallet connected");
       } catch (err) {
-        showBuyPopup(
-          "error",
-          err instanceof Error ? err.message : "Failed to connect wallet",
-        );
+        showBuyPopup("error", "Failed to connect wallet");
       }
       return;
     }
@@ -248,13 +282,12 @@ export const EventDetail: React.FC = () => {
       | undefined;
 
     if (!provider?.request) {
-      showBuyPopup(
-        "error",
-        "Wallet provider is not ready. Please reconnect wallet and try again.",
-      );
+      showBuyPopup("error", "Wallet provider not ready");
       return;
     }
 
+    // show global loading overlay while the purchase is in progress
+    showLoading("Purchasing ticket...");
     setBuying(true);
     try {
       const result = await purchaseTicket(
@@ -262,23 +295,30 @@ export const EventDetail: React.FC = () => {
         { eventId: event._id },
         user.walletAddress,
       );
-      showBuyPopup("success", `Purchase successful. Tx: ${result.txHash}`);
+      showBuyPopup("success", "Purchase successful");
 
       const refreshedEvent = await getEventById(event._id);
       setEvent(refreshedEvent);
       await loadTicketData(event._id);
     } catch (err) {
-      showBuyPopup(
-        "error",
-        err instanceof Error ? err.message : "Ticket purchase failed",
-      );
+      showBuyPopup("error", "Purchase failed");
     } finally {
+      // hide global loading overlay when finished
+      hideLoading();
       setBuying(false);
       setPurchaseConfirmTier(null);
     }
   };
 
   const handlePurchaseClick = async (tierName?: string) => {
+    if (!isTicketPurchasable) {
+      showBuyPopup(
+        "error",
+        "Ticket sales are not open for this event yet.",
+      );
+      return;
+    }
+
     if (!user?.walletAddress) {
       try {
         await connectWallet();
@@ -298,7 +338,7 @@ export const EventDetail: React.FC = () => {
     setPurchaseConfirmTier(tierName || "this ticket");
   };
 
-  if (loading) return <div className="p-8 text-white">Loading event...</div>;
+  
   if (error) return <div className="p-8 text-red-400">{error}</div>;
   if (!event) return <div className="p-8 text-white">Event not found</div>;
 
@@ -357,7 +397,7 @@ export const EventDetail: React.FC = () => {
               </p>
 
               <div className="grid sm:grid-cols-2 gap-3 mb-6">
-                <div className="rounded-xl border border-slate-800 bg-slate-900/90 p-3 text-slate-300">
+                {/* <div className="rounded-xl border border-slate-800 bg-slate-900/90 p-3 text-slate-300">
                   <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-500 mb-1">
                     <Calendar className="w-4 h-4 text-cyan-300" />
                     Date
@@ -371,7 +411,7 @@ export const EventDetail: React.FC = () => {
                     Time
                   </div>
                   <div className="font-medium">{formatTime(eventDate)}</div>
-                </div>
+                </div> */}
 
                 <div className="rounded-xl border border-slate-800 bg-slate-900/90 p-3 text-slate-300 sm:col-span-2">
                   <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-500 mb-1">
@@ -394,42 +434,62 @@ export const EventDetail: React.FC = () => {
                       "Unknown organizer"}
                   </code>
                 </div>
+                {eventDates.length > 0 && (
+                  <div className="rounded-xl border border-slate-800 bg-slate-900/90 p-3 text-slate-300 sm:col-span-2">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-500">
+                        <Clock className="w-4 h-4 text-cyan-300" />
+                        Dates
+                      </div>
+                    </div>
+                    <ul className="text-sm text-slate-400 space-y-2">
+                      {eventDates.map((item) => (
+                        <li key={item.label} className="flex items-center justify-between">
+                          <span className="text-xs text-slate-500">{item.label}</span>
+                          <span className="font-medium">{item.date.toLocaleString()}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
 
-              <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
-                <div className="flex items-center justify-between text-sm text-slate-300 mb-2">
-                  <span className="inline-flex items-center gap-2">
-                    <Gauge className="w-4 h-4 text-cyan-300" />
-                    Funding progress
-                  </span>
-                  <span className="font-medium">
-                    {fundingProgress.toFixed(1)}%
-                  </span>
+              {event?.investmentEnabled !== false ? (
+                <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
+                  <div className="flex items-center justify-between text-sm text-slate-300 mb-2">
+                    <span className="inline-flex items-center gap-2">
+                      <Gauge className="w-4 h-4 text-cyan-300" />
+                      Funding progress
+                    </span>
+                    <span className="font-medium">
+                      {fundingProgress.toFixed(1)}%
+                    </span>
+                  </div>
+                  <div className="h-2 rounded-full bg-slate-800 overflow-hidden mb-3">
+                    <div
+                      className="h-full bg-gradient-to-r from-cyan-400 via-emerald-400 to-amber-300"
+                      style={{ width: `${fundingProgress}%` }}
+                    />
+                  </div>
+                  <div className="grid sm:grid-cols-2 gap-2 text-xs text-slate-400">
+                    <span>
+                      Raised: {" "}
+                      {formatIntegerWithUnit(event?.currentFunding, "wei")}
+                    </span>
+                    <span>
+                      Goal: {formatIntegerWithUnit(event?.fundingGoal, "wei")}
+                    </span>
+                    <span>
+                      Min stake: {" "}
+                      {formatIntegerWithUnit(event?.minStakeRequired, "wei")}
+                    </span>
+                    {fundingDeadline ? (
+                      <span>Deadline: {formatDate(fundingDeadline)}</span>
+                    ) : null}
+                    <span>Investment Mode: {investmentMode}</span>
+                  </div>
                 </div>
-                <div className="h-2 rounded-full bg-slate-800 overflow-hidden mb-3">
-                  <div
-                    className="h-full bg-gradient-to-r from-cyan-400 via-emerald-400 to-amber-300"
-                    style={{ width: `${fundingProgress}%` }}
-                  />
-                </div>
-                <div className="grid sm:grid-cols-2 gap-2 text-xs text-slate-400">
-                  <span>
-                    Raised:{" "}
-                    {formatIntegerWithUnit(event?.currentFunding, "wei")}
-                  </span>
-                  <span>
-                    Goal: {formatIntegerWithUnit(event?.fundingGoal, "wei")}
-                  </span>
-                  <span>
-                    Min stake:{" "}
-                    {formatIntegerWithUnit(event?.minStakeRequired, "wei")}
-                  </span>
-                  {fundingDeadline ? (
-                    <span>Deadline: {formatDate(fundingDeadline)}</span>
-                  ) : null}
-                  <span>Investment Mode: {investmentMode}</span>
-                </div>
-              </div>
+              ) : null}
             </div>
           </div>
         </div>
@@ -477,9 +537,13 @@ export const EventDetail: React.FC = () => {
                     <Button
                       onClick={() => handlePurchaseClick(tier.name)}
                       className="w-full bg-cyan-600 hover:bg-cyan-500 text-white"
-                      disabled={buying || availableTickets === 0}
+                      disabled={
+                        buying || availableTickets === 0 || !isTicketPurchasable
+                      }
                     >
-                      {availableTickets === 0
+                      {!isTicketPurchasable
+                        ? "Sales Not Open"
+                        : availableTickets === 0
                         ? "Sold Out"
                         : buying
                           ? "Processing..."
@@ -505,34 +569,38 @@ export const EventDetail: React.FC = () => {
               Synced from ticket records for this event.
             </p>
 
-            <div className="grid sm:grid-cols-4 gap-3 mb-5">
-              <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3">
-                <div className="text-xs text-slate-500 mb-1">Available</div>
-                <div className="text-lg font-semibold text-emerald-300">
-                  {ticketStats?.availableTickets ?? "-"}
+              <div className="grid sm:grid-cols-4 gap-3 mb-5">
+                <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3">
+                  <div className="text-xs text-slate-500 mb-1">Available</div>
+                  <div className="text-lg font-semibold text-emerald-300">
+                  {ticketingOpen ? ticketStats?.availableTickets ?? "-" : 0}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3">
+                  <div className="text-xs text-slate-500 mb-1">Total Tracked</div>
+                  <div className="text-lg font-semibold text-cyan-300">
+                  {ticketingOpen ? ticketStats?.totalTickets ?? "-" : 0}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3">
+                  <div className="text-xs text-slate-500 mb-1">Sold</div>
+                  <div className="text-lg font-semibold text-amber-300">
+                  {ticketingOpen ? ticketStats?.soldTickets ?? "-" : 0}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3">
+                  <div className="text-xs text-slate-500 mb-1">Used</div>
+                  <div className="text-lg font-semibold text-purple-300">
+                  {ticketingOpen ? ticketStats?.usedTickets ?? "-" : 0}
+                  </div>
                 </div>
               </div>
-              <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3">
-                <div className="text-xs text-slate-500 mb-1">Total Tracked</div>
-                <div className="text-lg font-semibold text-cyan-300">
-                  {ticketStats?.totalTickets ?? "-"}
-                </div>
-              </div>
-              <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3">
-                <div className="text-xs text-slate-500 mb-1">Sold</div>
-                <div className="text-lg font-semibold text-amber-300">
-                  {ticketStats?.soldTickets ?? "-"}
-                </div>
-              </div>
-              <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3">
-                <div className="text-xs text-slate-500 mb-1">Used</div>
-                <div className="text-lg font-semibold text-purple-300">
-                  {ticketStats?.usedTickets ?? "-"}
-                </div>
-              </div>
-            </div>
 
-            {loadingTickets ? (
+            {!ticketingOpen ? (
+              <div className="text-slate-400 text-sm">
+                Ticketing has not started yet for this event.
+              </div>
+            ) : loadingTickets ? (
               <div className="text-slate-400 text-sm">Loading tickets...</div>
             ) : eventTickets.length === 0 ? (
               <div className="text-slate-400 text-sm">
@@ -545,7 +613,7 @@ export const EventDetail: React.FC = () => {
                     <tr className="text-left text-slate-400 border-b border-slate-700">
                       <th className="py-2 pr-3">Token</th>
                       <th className="py-2 pr-3">Status</th>
-                      <th className="py-2 pr-3">Owner</th>
+                      <th className="py-2 pr-3">Holder</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -559,7 +627,7 @@ export const EventDetail: React.FC = () => {
                         </td>
                         <td className="py-2 pr-3">{ticket.status || "-"}</td>
                         <td className="py-2 pr-3 font-mono text-xs">
-                          {ticket.currentOwner || "-"}
+                          {getTicketHolderLabel(ticket)}
                         </td>
                       </tr>
                     ))}
@@ -600,7 +668,7 @@ export const EventDetail: React.FC = () => {
                     onChange={(e) =>
                       setInvestmentAmount(e.target.value.replace(/[^0-9]/g, ""))
                     }
-                    className="w-full border-slate-700 bg-slate-900"
+                    className="w-full border-slate-700 bg-slate-900 text-white"
                     placeholder="1000000000000000000"
                   />
 
@@ -662,9 +730,9 @@ export const EventDetail: React.FC = () => {
           <div className="bg-slate-900 p-6 rounded-xl border border-slate-700 w-[340px]">
             <h3 className="text-white mb-2 font-semibold">Confirm Purchase</h3>
             <p className="text-slate-300 text-sm mb-4">
-              Bạn có muốn mua vé{" "}
+              Are you sure you want to purchase the{" "}
               <span className="font-semibold">{purchaseConfirmTier}</span>{" "}
-              không?
+              ticket?
             </p>
 
             <div className="flex gap-2">

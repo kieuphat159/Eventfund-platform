@@ -22,6 +22,7 @@ import {
   InvestmentDetail as InvestmentDetailType,
 } from "../../services/investment.service";
 import { useAuth } from "../../contexts/AuthContext";
+import { useLoading } from "../../components/ui/loadingContext";
 import { useWeb3Auth } from "@web3auth/modal/react";
 import {
   addIntegerValues,
@@ -35,6 +36,7 @@ import { StatusBadge } from "../../components/StatusBadge";
 export const MyInvestments: React.FC = () => {
   const { user, connectWallet } = useAuth();
   const { web3Auth } = useWeb3Auth();
+  const { show: showLoading, hide: hideLoading } = useLoading();
   const [investments, setInvestments] = useState<InvestmentDetailType[]>([]);
   const [loading, setLoading] = useState(true);
   const [refundingEventId, setRefundingEventId] = useState<string | null>(null);
@@ -42,12 +44,14 @@ export const MyInvestments: React.FC = () => {
   useEffect(() => {
     const fetchInvestments = async () => {
       try {
+        showLoading('Loading investments...');
         const shares = await getInvestments();
         setInvestments(shares);
       } catch (error) {
         console.error("Failed to load investments:", error);
       } finally {
         setLoading(false);
+        hideLoading();
       }
     };
 
@@ -89,6 +93,7 @@ export const MyInvestments: React.FC = () => {
       }
 
       setRefundingEventId(eventId);
+      showLoading('Claiming refund...');
       await claimContributionRefundOnChain(
         walletProvider,
         eventId,
@@ -99,6 +104,7 @@ export const MyInvestments: React.FC = () => {
       console.error("Failed to claim contribution refund:", error);
     } finally {
       setRefundingEventId(null);
+      hideLoading();
     }
   };
 
@@ -217,7 +223,9 @@ export const MyInvestments: React.FC = () => {
                 );
                 const isProfit = compareIntegerValues(profitLoss, "0") >= 0;
                 const canClaimRefund =
-                  investment.eventId?.status === "cancelled" &&
+                  ["cancelled", "failed"].includes(
+                    investment.eventId?.status || "",
+                  ) &&
                   compareIntegerValues(investment.contributionAmount, "0") > 0;
                 const refundEventId = investment.eventId?._id || null;
 

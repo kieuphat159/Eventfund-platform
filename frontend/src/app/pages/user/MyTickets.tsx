@@ -28,11 +28,24 @@ import {
 } from "@/app/services/listings.service";
 import { QRCodeCanvas } from "qrcode.react";
 import { useWeb3Auth } from "@web3auth/modal/react";
+import { useLoading } from "../../components/ui/loadingContext";
 
 const ETH_ADDRESS_REGEX = /^0x[a-fA-F0-9]{40}$/;
 
+const resolveTicketEventId = (ticket: ApiTicket): string | null => {
+  if (ticket.eventIdRaw) return ticket.eventIdRaw;
+  if (typeof ticket.eventId === "string") return ticket.eventId;
+  if (typeof ticket.eventId === "object" && ticket.eventId?._id) {
+    return ticket.eventId._id;
+  }
+  return null;
+};
+
 const buildQR = (ticket: ApiTicket) => {
-  return `http://localhost:3000/tickets/verify/${ticket.tokenId}`;
+  const tokenId = String(ticket.tokenId).trim();
+  const eventId = (resolveTicketEventId(ticket) || "").trim();
+
+  return `eft1:${tokenId}:${eventId}`;
 };
 
 const getTicketQrCanvasId = (ticket: ApiTicket) => {
@@ -212,6 +225,8 @@ export const MyTickets: React.FC = () => {
     setTickets(data);
   };
 
+  const { show: showLoading, hide: hideLoading } = useLoading();
+
   const handleClaimRefund = async (ticket: ApiTicket) => {
     try {
       if (!user?.walletAddress) {
@@ -332,7 +347,8 @@ export const MyTickets: React.FC = () => {
               .join(" - ") || "Unknown venue";
           const purchasePrice = ticket.originalPrice || "0";
           const canClaimRefund =
-            ticket.status === "sold" && event?.status === "cancelled";
+            ticket.status === "sold" &&
+            ["cancelled", "failed"].includes(event?.status || "");
 
           return (
             <Card
@@ -392,6 +408,9 @@ export const MyTickets: React.FC = () => {
                       id={getTicketQrCanvasId(ticket)}
                       value={buildQR(ticket)}
                       size={800}
+                      level="L"
+                      bgColor="#ffffff"
+                      fgColor="#111111"
                       includeMargin
                     />
                   </div>
@@ -484,16 +503,25 @@ export const MyTickets: React.FC = () => {
       )}
       {selectedTicket && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-          <div className="bg-slate-900 p-6 rounded-xl border border-slate-700 text-center w-[300px]">
+          <div className="bg-slate-900 p-6 rounded-xl border border-slate-700 text-center w-[380px] max-w-[92vw]">
             <h3 className="text-white mb-4 font-semibold">
               Ticket #{selectedTicket.tokenId}
             </h3>
 
             <div className="flex justify-center items-center">
-              <QRCodeCanvas value={buildQR(selectedTicket)} size={200} />
+              <QRCodeCanvas
+                value={buildQR(selectedTicket)}
+                size={280}
+                level="L"
+                bgColor="#ffffff"
+                fgColor="#111111"
+                includeMargin
+              />
             </div>
 
-            <p className="text-slate-400 text-xs mt-3">Scan to verify ticket</p>
+            <p className="text-slate-400 text-xs mt-3">
+              Verifier sẽ quét mã này để xác thực vé
+            </p>
 
             <Button
               className="mt-4 w-full"
@@ -566,17 +594,13 @@ export const MyTickets: React.FC = () => {
                   try {
                     if (!user?.walletAddress) {
                       await connectWallet();
-                      showListingPopup(
-                        "success",
-                        "Wallet connected. Please click Confirm again.",
-                      );
+                      showListingPopup("success", "Wallet connected");
                       return;
                     }
 
                     if (!walletProvider?.request) {
-                      throw new Error(
-                        "Wallet provider is not ready. Please reconnect wallet and try again.",
-                      );
+                      showListingPopup("error", "Wallet provider not ready");
+                      return;
                     }
 
                     if (!listingTicket._id) {
@@ -584,6 +608,7 @@ export const MyTickets: React.FC = () => {
                     }
 
                     setListingLoading(true);
+                    showLoading("Listing ticket...");
 
                     const result = await listTicketOnchain(
                       walletProvider,
@@ -593,10 +618,7 @@ export const MyTickets: React.FC = () => {
                       },
                       user.walletAddress,
                     );
-                    showListingPopup(
-                      "success",
-                      `Ticket listed on-chain. Tx: ${result.txHash}`,
-                    );
+                    showListingPopup("success", "Listing successful");
                     setTickets((prevTickets) =>
                       prevTickets.map((ticket) =>
                         ticket._id === listingTicket._id
@@ -609,8 +631,9 @@ export const MyTickets: React.FC = () => {
                   } catch (err: any) {
                     const message = err?.message || "Failed to list ticket";
                     setListingError(message);
-                    showListingPopup("error", `Listing failed: ${message}`);
+                    showListingPopup("error", "Listing failed");
                   } finally {
+                    hideLoading();
                     setListingLoading(false);
                   }
                 }}

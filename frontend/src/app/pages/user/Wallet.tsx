@@ -5,7 +5,9 @@ import {
   Download,
   ArrowUpRight,
   ArrowDownLeft,
+  Check,
 } from "lucide-react";
+import { DepositModal } from "../../components/shared/DepositModal";
 import { formatEther } from "ethers";
 import {
   Card,
@@ -16,6 +18,7 @@ import {
 } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { useAuth } from "../../contexts/AuthContext";
+import { useLoading } from "../../components/ui/loadingContext";
 import { getUserTickets } from "../../services/tickets.service";
 import { getInvestments } from "../../services/investment.service";
 import { getMarketplaceHistory } from "../../services/listings.service";
@@ -84,6 +87,7 @@ function truncateHash(hash?: string | null): string {
 export const Wallet: React.FC = () => {
   const { user } = useAuth();
   const walletAddress = user?.walletAddress;
+  const { show: showLoading, hide: hideLoading } = useLoading();
 
   const [balance, setBalance] = useState<WalletBalance>({
     wei: "0",
@@ -91,6 +95,8 @@ export const Wallet: React.FC = () => {
   });
   const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isDepositModalOpen, setIsDepositModalOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     const loadWalletData = async () => {
@@ -102,6 +108,7 @@ export const Wallet: React.FC = () => {
       }
 
       setLoading(true);
+      showLoading('Loading wallet...');
 
       const [
         balanceResult,
@@ -144,6 +151,13 @@ export const Wallet: React.FC = () => {
             description: `Ticket Purchase - ${eventTitle || `Event ${ticket.eventIdRaw || "-"}`}`,
             amountWei: String(ticket.originalPrice || "0"),
             date: ticket.soldAt,
+            hash:
+              // prefer explicit soldTxHash set by backend, fall back to any transferHistory entry
+              (ticket as any).soldTxHash ||
+              ((ticket as any).transferHistory?.length
+                ? (ticket as any).transferHistory[(ticket as any).transferHistory.length - 1].txHash
+                : null) ||
+              null,
           });
         });
       }
@@ -158,6 +172,7 @@ export const Wallet: React.FC = () => {
             description: `Investment - ${investment.eventId?.title || "Event"}`,
             amountWei: String(investment.contributionAmount || "0"),
             date: investment.createdAt,
+            hash: (investment as any).txHash || (investment as any).transactionHash || null,
           });
         });
       }
@@ -192,6 +207,7 @@ export const Wallet: React.FC = () => {
             description: `Marketplace Sale - ${sale.event || `Ticket #${sale.tokenId}`}`,
             amountWei: String(sale.price || "0"),
             date: sale.time,
+            hash: (sale as any).txHash || (sale as any).transactionHash || null,
           });
         });
       }
@@ -203,6 +219,7 @@ export const Wallet: React.FC = () => {
 
       setTransactions(nextTransactions.slice(0, 20));
       setLoading(false);
+      hideLoading();
     };
 
     loadWalletData();
@@ -246,6 +263,18 @@ export const Wallet: React.FC = () => {
 
   const isNetPositive = compareIntegerValues(netChange, "0") >= 0;
 
+  const handleDepositSuccess = async () => {
+    // Reload wallet balance after successful deposit
+    if (walletAddress) {
+      try {
+        const newBalance = await fetchWalletBalance(walletAddress);
+        setBalance(newBalance);
+      } catch (error) {
+        console.error("Failed to reload balance:", error);
+      }
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -254,6 +283,13 @@ export const Wallet: React.FC = () => {
           Manage your digital assets and transactions
         </p>
       </div>
+
+      {/* Deposit Modal */}
+      <DepositModal
+        isOpen={isDepositModalOpen}
+        onClose={() => setIsDepositModalOpen(false)}
+        onSuccess={handleDepositSuccess}
+      />
 
       <Card className="bg-gradient-to-br from-purple-900/50 to-blue-900/50 border-purple-500/30">
         <CardContent className="p-8">
@@ -269,15 +305,28 @@ export const Wallet: React.FC = () => {
                 <Button
                   variant="outline"
                   size="sm"
-                  className="border-purple-500/30 hover:bg-purple-500/10"
-                  onClick={() => {
-                    if (walletAddress) {
-                      navigator.clipboard.writeText(walletAddress);
+                  className={`border-purple-500/30 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-transform ${
+                    copied ? "bg-emerald-600 text-white scale-105" : "hover:bg-purple-500/10"
+                  }`}
+                  onClick={async () => {
+                    if (!walletAddress) return;
+                    try {
+                      await navigator.clipboard.writeText(walletAddress);
+                      setCopied(true);
+                      window.setTimeout(() => setCopied(false), 1800);
+                    } catch {
+                      // ignore clipboard errors silently
                     }
                   }}
                   disabled={!walletAddress}
                 >
-                  Copy
+                  {copied ? (
+                    <>
+                      <Check className="w-4 h-4 mr-2 text-emerald-200" /> Copied
+                    </>
+                  ) : (
+                    "Copy"
+                  )}
                 </Button>
               </div>
             </div>
@@ -308,8 +357,8 @@ export const Wallet: React.FC = () => {
               Send
             </Button>
             <Button
-              className="bg-slate-900/50 hover:bg-slate-900/70 text-white border border-purple-500/30"
-              disabled
+              className="bg-purple-600 hover:bg-purple-700 text-white border-0"
+              onClick={() => setIsDepositModalOpen(true)}
             >
               <Download className="w-4 h-4 mr-2" />
               Receive

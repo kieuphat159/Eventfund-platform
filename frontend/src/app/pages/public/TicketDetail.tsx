@@ -24,6 +24,7 @@ import { Card, CardContent } from "../../components/ui/card";
 import { Badge } from "../../components/ui/badge";
 import { ImageWithFallback } from "../../components/figma/ImageWithFallback";
 import { useAuth } from "../../contexts/AuthContext";
+import { useLoading } from "../../components/ui/loadingContext";
 import { useWeb3Auth } from "@web3auth/modal/react";
 import {
   listingService,
@@ -152,17 +153,20 @@ export const TicketDetail: React.FC = () => {
   React.useEffect(() => {
     const fetchData = async () => {
       try {
+        showLoading("Loading listing...");
         const res = await listingService.getById(id!);
         setListing(res);
       } catch (err) {
         console.error(err);
       } finally {
         setLoading(false);
+        hideLoading();
       }
     };
 
     fetchData();
   }, [id]);
+  const { show: showLoading, hide: hideLoading } = useLoading();
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center text-white">

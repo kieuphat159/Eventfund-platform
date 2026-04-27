@@ -206,6 +206,7 @@ export interface TransactionHistory {
   seller: string | null;
   time: string | null;
   tokenId: string;
+  txHash?: string | null;
 }
 
 export interface GetHistoryParams {

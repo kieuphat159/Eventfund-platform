@@ -93,6 +93,9 @@ export const web3AuthConfig: Web3AuthContextConfig = {
       // Work around Web3Auth confirm-modal crashes during tx/sign flows by
       // avoiding the SDK modal confirmation path.
       confirmationStrategy: "auto-approve",
+      whiteLabel: {
+        showWidgetButton: false,
+      },
     } as any,
     // widgetType is a runtime-only field (not in UIConfig .d.ts but required by LoginModal).
     // Without it, Web3Auth v10 defaults to "embed" mode and throws
