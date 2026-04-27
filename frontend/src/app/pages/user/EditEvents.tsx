@@ -15,6 +15,7 @@ import { Label } from "../../components/ui/label";
 import { StatusBadge } from "../../components/StatusBadge";
 import { getEventById, updateEvent, type EventItem, type EventStatus } from "../../services/events.service";
 import { useAuth } from "../../contexts/AuthContext";
+import { useLoading } from "../../components/ui/loadingContext";
 
 type TicketTierForm = {
   name: string;
@@ -64,6 +65,7 @@ export const EditEvent: React.FC = () => {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
+  const { show: showLoading, hide: hideLoading } = useLoading();
 
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -103,6 +105,8 @@ export const EditEvent: React.FC = () => {
 
         setLoading(true);
         setError("");
+        // show global loader
+        showLoading("Loading event...");
 
         const data = await getEventById(id);
 
@@ -143,6 +147,7 @@ export const EditEvent: React.FC = () => {
         );
       } finally {
         setLoading(false);
+        hideLoading();
       }
     };
 
@@ -221,6 +226,7 @@ export const EditEvent: React.FC = () => {
       }
 
       setSubmitting(true);
+      showLoading("Saving changes...");
       const updatePayload = {
         title: title.trim(),
         description: description.trim(),
@@ -248,12 +254,10 @@ export const EditEvent: React.FC = () => {
       );
     } finally {
       setSubmitting(false);
+      hideLoading();
     }
   };
 
-  if (loading) {
-    return <div className="text-white">Loading event...</div>;
-  }
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">

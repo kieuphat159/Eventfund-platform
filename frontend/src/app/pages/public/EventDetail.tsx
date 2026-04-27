@@ -16,6 +16,7 @@ import { Input } from "../../components/ui/input";
 import { StatusBadge } from "../../components/StatusBadge";
 import { ImageWithFallback } from "../../components/figma/ImageWithFallback";
 import { useAuth } from "../../contexts/AuthContext";
+import { useLoading } from "../../components/ui/loadingContext";
 import { getEventById, type EventItem } from "../../services/events.service";
 import {
   investInEventOnChain,
@@ -35,6 +36,7 @@ export const EventDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const { connectWallet, user } = useAuth();
   const { web3Auth } = useWeb3Auth();
+  const { show: showLoading, hide: hideLoading } = useLoading();
   const [event, setEvent] = useState<EventItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -100,6 +102,7 @@ export const EventDetail: React.FC = () => {
       try {
         setLoading(true);
         setError("");
+        showLoading("Loading event...");
         const data = await getEventById(id);
         setEvent(data);
         if (data?._id) {
@@ -109,6 +112,7 @@ export const EventDetail: React.FC = () => {
         setError(err instanceof Error ? err.message : "Failed to load event");
       } finally {
         setLoading(false);
+        hideLoading();
       }
     };
 
@@ -298,7 +302,7 @@ export const EventDetail: React.FC = () => {
     setPurchaseConfirmTier(tierName || "this ticket");
   };
 
-  if (loading) return <div className="p-8 text-white">Loading event...</div>;
+  
   if (error) return <div className="p-8 text-red-400">{error}</div>;
   if (!event) return <div className="p-8 text-white">Event not found</div>;
 

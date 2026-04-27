@@ -1,12 +1,14 @@
 import React, { useEffect } from "react";
 import { Wallet } from "lucide-react";
 import { useAuth } from "../../contexts/AuthContext";
+import { useLoading } from "../../components/ui/loadingContext";
 import { Button } from "../../components/ui/button";
 import { useNavigate } from "react-router-dom";
 
 export const LoginPage: React.FC = () => {
   const { connectWallet, isLoading, error, user } = useAuth();
   const navigate = useNavigate();
+  const { show: showLoading, hide: hideLoading } = useLoading();
 
   useEffect(() => {
     if (!user || user.role === "public") return;
@@ -26,9 +28,12 @@ export const LoginPage: React.FC = () => {
 
   const handleLogin = async () => {
     try {
+      showLoading("Connecting...");
       await connectWallet();
     } catch (err) {
       console.error("Login failed:", err);
+    } finally {
+      hideLoading();
     }
   };
 

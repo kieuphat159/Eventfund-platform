@@ -16,6 +16,7 @@ import {
 } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { useAuth } from "../../contexts/AuthContext";
+import { useLoading } from "../../components/ui/loadingContext";
 import { getUserTickets } from "../../services/tickets.service";
 import { getInvestments } from "../../services/investment.service";
 import { getMarketplaceHistory } from "../../services/listings.service";
@@ -84,6 +85,7 @@ function truncateHash(hash?: string | null): string {
 export const Wallet: React.FC = () => {
   const { user } = useAuth();
   const walletAddress = user?.walletAddress;
+  const { show: showLoading, hide: hideLoading } = useLoading();
 
   const [balance, setBalance] = useState<WalletBalance>({
     wei: "0",
@@ -102,6 +104,7 @@ export const Wallet: React.FC = () => {
       }
 
       setLoading(true);
+      showLoading('Loading wallet...');
 
       const [
         balanceResult,
@@ -212,6 +215,7 @@ export const Wallet: React.FC = () => {
 
       setTransactions(nextTransactions.slice(0, 20));
       setLoading(false);
+      hideLoading();
     };
 
     loadWalletData();

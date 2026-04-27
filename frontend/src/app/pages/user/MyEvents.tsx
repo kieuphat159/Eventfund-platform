@@ -24,6 +24,7 @@ import {
   type EventStatus,
 } from "../../services/events.service";
 import { useAuth } from "../../contexts/AuthContext";
+import { useLoading } from "../../components/ui/LoadingContext";
 
 const OWNER_CANCELABLE_STATUSES = new Set<EventStatus>([
   "draft",
@@ -36,6 +37,7 @@ export const MyEvents: React.FC = () => {
   const navigate = useNavigate();
   const { user, connectWallet } = useAuth() as any;
   const { web3Auth } = useWeb3Auth();
+  const { show: showLoading, hide: hideLoading } = useLoading();
 
   const [events, setEvents] = useState<EventItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -53,12 +55,14 @@ export const MyEvents: React.FC = () => {
     try {
       setLoading(true);
       setError("");
+      showLoading('Loading events...');
       const data = await getMyEvents(user.walletAddress);
       setEvents(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load events");
     } finally {
       setLoading(false);
+      hideLoading();
     }
   };
 
@@ -77,6 +81,7 @@ export const MyEvents: React.FC = () => {
 
     try {
       setDeletingId(eventId);
+      showLoading('Deleting event...');
       await deleteEvent(eventId);
       setEvents((prev) => prev.filter((e) => (e._id || e.id) !== eventId));
     } catch (err: any) {
@@ -85,6 +90,7 @@ export const MyEvents: React.FC = () => {
       );
     } finally {
       setDeletingId("");
+      hideLoading();
     }
   };
 
@@ -136,6 +142,7 @@ export const MyEvents: React.FC = () => {
       );
     } finally {
       setCancellingId("");
+      hideLoading();
     }
   };
 

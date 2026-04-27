@@ -14,10 +14,12 @@ import { ImageWithFallback } from '../../components/figma/ImageWithFallback';
 import { StatusBadge } from '../../components/StatusBadge';
 import { getEvents, type EventItem } from '../../services/events.service';
 import { useAuth } from '../../contexts/AuthContext';
+import { useLoading } from '../../components/ui/loadingContext';
 
 export const Explore: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { show: showLoading, hide: hideLoading } = useLoading();
 
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [searchQuery, setSearchQuery] = useState('');
@@ -33,12 +35,14 @@ export const Explore: React.FC = () => {
       try {
         setLoading(true);
         setError('');
+        showLoading('Loading events...');
         const data = await getEvents();
         setEvents(data);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load events');
       } finally {
         setLoading(false);
+        hideLoading();
       }
     };
 
