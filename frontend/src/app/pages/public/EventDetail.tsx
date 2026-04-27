@@ -175,6 +175,28 @@ export const EventDetail: React.FC = () => {
     });
   };
 
+  const eventDates = useMemo(() => {
+    if (!event) return [] as { label: string; date: Date }[];
+
+    const list: { label: string; date: Date }[] = [];
+
+    const addIf = (label: string, value: any) => {
+      if (!value) return;
+      const d = value instanceof Date ? value : new Date(value);
+      if (!isNaN(d.getTime())) list.push({ label, date: d });
+    };
+
+    addIf("Start Date", event.startDate);
+    addIf("End Date", (event as any).endDate);
+    // fundingStart is not present in backend model; use fundingDeadline
+    addIf("Funding Deadline", event.fundingDeadline);
+    addIf("Ticketing Start", (event as any).ticketingStartAt);
+    addIf("Ticketing End", (event as any).ticketingEndAt);
+    // Only show event-related dates (ticketing/funding/start/end)
+
+    return list;
+  }, [event]);
+
   const getTicketHolderLabel = (ticket: ApiTicket) => {
     if (ticket.status === "minted") {
       return "Organizer inventory";
@@ -227,11 +249,11 @@ export const EventDetail: React.FC = () => {
         investmentAmount.trim(),
         user.walletAddress || user.smartAccountAddress,
       );
-      setInvestSuccess(`On-chain contribution submitted: ${result.txHash}`);
+      setInvestSuccess("Contribution successful");
       const refreshedEvent = await getEventById(eventId);
       setEvent(refreshedEvent);
     } catch (err) {
-      setInvestError(err instanceof Error ? err.message : "Investment failed");
+      setInvestError("Contribution failed");
     } finally {
       setInvesting(false);
     }
@@ -243,15 +265,9 @@ export const EventDetail: React.FC = () => {
     if (!user?.walletAddress) {
       try {
         await connectWallet();
-        showBuyPopup(
-          "success",
-          "Wallet connected. Please click Purchase Ticket again to continue.",
-        );
+        showBuyPopup("success", "Wallet connected");
       } catch (err) {
-        showBuyPopup(
-          "error",
-          err instanceof Error ? err.message : "Failed to connect wallet",
-        );
+        showBuyPopup("error", "Failed to connect wallet");
       }
       return;
     }
@@ -266,13 +282,12 @@ export const EventDetail: React.FC = () => {
       | undefined;
 
     if (!provider?.request) {
-      showBuyPopup(
-        "error",
-        "Wallet provider is not ready. Please reconnect wallet and try again.",
-      );
+      showBuyPopup("error", "Wallet provider not ready");
       return;
     }
 
+    // show global loading overlay while the purchase is in progress
+    showLoading("Purchasing ticket...");
     setBuying(true);
     try {
       const result = await purchaseTicket(
@@ -280,17 +295,16 @@ export const EventDetail: React.FC = () => {
         { eventId: event._id },
         user.walletAddress,
       );
-      showBuyPopup("success", `Purchase successful. Tx: ${result.txHash}`);
+      showBuyPopup("success", "Purchase successful");
 
       const refreshedEvent = await getEventById(event._id);
       setEvent(refreshedEvent);
       await loadTicketData(event._id);
     } catch (err) {
-      showBuyPopup(
-        "error",
-        err instanceof Error ? err.message : "Ticket purchase failed",
-      );
+      showBuyPopup("error", "Purchase failed");
     } finally {
+      // hide global loading overlay when finished
+      hideLoading();
       setBuying(false);
       setPurchaseConfirmTier(null);
     }
@@ -383,7 +397,7 @@ export const EventDetail: React.FC = () => {
               </p>
 
               <div className="grid sm:grid-cols-2 gap-3 mb-6">
-                <div className="rounded-xl border border-slate-800 bg-slate-900/90 p-3 text-slate-300">
+                {/* <div className="rounded-xl border border-slate-800 bg-slate-900/90 p-3 text-slate-300">
                   <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-500 mb-1">
                     <Calendar className="w-4 h-4 text-cyan-300" />
                     Date
@@ -397,7 +411,7 @@ export const EventDetail: React.FC = () => {
                     Time
                   </div>
                   <div className="font-medium">{formatTime(eventDate)}</div>
-                </div>
+                </div> */}
 
                 <div className="rounded-xl border border-slate-800 bg-slate-900/90 p-3 text-slate-300 sm:col-span-2">
                   <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-500 mb-1">
@@ -420,6 +434,24 @@ export const EventDetail: React.FC = () => {
                       "Unknown organizer"}
                   </code>
                 </div>
+                {eventDates.length > 0 && (
+                  <div className="rounded-xl border border-slate-800 bg-slate-900/90 p-3 text-slate-300 sm:col-span-2">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-500">
+                        <Clock className="w-4 h-4 text-cyan-300" />
+                        Dates
+                      </div>
+                    </div>
+                    <ul className="text-sm text-slate-400 space-y-2">
+                      {eventDates.map((item) => (
+                        <li key={item.label} className="flex items-center justify-between">
+                          <span className="text-xs text-slate-500">{item.label}</span>
+                          <span className="font-medium">{item.date.toLocaleString()}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
 
               {event?.investmentEnabled !== false ? (
@@ -698,9 +730,9 @@ export const EventDetail: React.FC = () => {
           <div className="bg-slate-900 p-6 rounded-xl border border-slate-700 w-[340px]">
             <h3 className="text-white mb-2 font-semibold">Confirm Purchase</h3>
             <p className="text-slate-300 text-sm mb-4">
-              Bạn có muốn mua vé{" "}
+              Are you sure you want to purchase the{" "}
               <span className="font-semibold">{purchaseConfirmTier}</span>{" "}
-              không?
+              ticket?
             </p>
 
             <div className="flex gap-2">

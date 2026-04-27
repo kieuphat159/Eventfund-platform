@@ -28,6 +28,7 @@ import {
 } from "@/app/services/listings.service";
 import { QRCodeCanvas } from "qrcode.react";
 import { useWeb3Auth } from "@web3auth/modal/react";
+import { useLoading } from "../../components/ui/loadingContext";
 
 const ETH_ADDRESS_REGEX = /^0x[a-fA-F0-9]{40}$/;
 
@@ -223,6 +224,8 @@ export const MyTickets: React.FC = () => {
     const data = await getUserTickets(walletAddress);
     setTickets(data);
   };
+
+  const { show: showLoading, hide: hideLoading } = useLoading();
 
   const handleClaimRefund = async (ticket: ApiTicket) => {
     try {
@@ -591,17 +594,13 @@ export const MyTickets: React.FC = () => {
                   try {
                     if (!user?.walletAddress) {
                       await connectWallet();
-                      showListingPopup(
-                        "success",
-                        "Wallet connected. Please click Confirm again.",
-                      );
+                      showListingPopup("success", "Wallet connected");
                       return;
                     }
 
                     if (!walletProvider?.request) {
-                      throw new Error(
-                        "Wallet provider is not ready. Please reconnect wallet and try again.",
-                      );
+                      showListingPopup("error", "Wallet provider not ready");
+                      return;
                     }
 
                     if (!listingTicket._id) {
@@ -609,6 +608,7 @@ export const MyTickets: React.FC = () => {
                     }
 
                     setListingLoading(true);
+                    showLoading("Listing ticket...");
 
                     const result = await listTicketOnchain(
                       walletProvider,
@@ -618,10 +618,7 @@ export const MyTickets: React.FC = () => {
                       },
                       user.walletAddress,
                     );
-                    showListingPopup(
-                      "success",
-                      `Ticket listed on-chain. Tx: ${result.txHash}`,
-                    );
+                    showListingPopup("success", "Listing successful");
                     setTickets((prevTickets) =>
                       prevTickets.map((ticket) =>
                         ticket._id === listingTicket._id
@@ -634,8 +631,9 @@ export const MyTickets: React.FC = () => {
                   } catch (err: any) {
                     const message = err?.message || "Failed to list ticket";
                     setListingError(message);
-                    showListingPopup("error", `Listing failed: ${message}`);
+                    showListingPopup("error", "Listing failed");
                   } finally {
+                    hideLoading();
                     setListingLoading(false);
                   }
                 }}
