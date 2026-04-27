@@ -16,6 +16,7 @@ import { Input } from "../../components/ui/input";
 import { StatusBadge } from "../../components/StatusBadge";
 import { ImageWithFallback } from "../../components/figma/ImageWithFallback";
 import { useAuth } from "../../contexts/AuthContext";
+import { useLoading } from "../../components/ui/loadingContext";
 import { getEventById, type EventItem } from "../../services/events.service";
 import {
   investInEventOnChain,
@@ -35,6 +36,7 @@ export const EventDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const { connectWallet, user } = useAuth();
   const { web3Auth } = useWeb3Auth();
+  const { show: showLoading, hide: hideLoading } = useLoading();
   const [event, setEvent] = useState<EventItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -100,6 +102,7 @@ export const EventDetail: React.FC = () => {
       try {
         setLoading(true);
         setError("");
+        showLoading("Loading event...");
         const data = await getEventById(id);
         setEvent(data);
         if (data?._id && (data.status === "ticketing" || data.status === "ongoing")) {
@@ -112,6 +115,7 @@ export const EventDetail: React.FC = () => {
         setError(err instanceof Error ? err.message : "Failed to load event");
       } finally {
         setLoading(false);
+        hideLoading();
       }
     };
 
@@ -320,7 +324,7 @@ export const EventDetail: React.FC = () => {
     setPurchaseConfirmTier(tierName || "this ticket");
   };
 
-  if (loading) return <div className="p-8 text-white">Loading event...</div>;
+  
   if (error) return <div className="p-8 text-red-400">{error}</div>;
   if (!event) return <div className="p-8 text-white">Event not found</div>;
 
@@ -418,40 +422,42 @@ export const EventDetail: React.FC = () => {
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
-                <div className="flex items-center justify-between text-sm text-slate-300 mb-2">
-                  <span className="inline-flex items-center gap-2">
-                    <Gauge className="w-4 h-4 text-cyan-300" />
-                    Funding progress
-                  </span>
-                  <span className="font-medium">
-                    {fundingProgress.toFixed(1)}%
-                  </span>
+              {event?.investmentEnabled !== false ? (
+                <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
+                  <div className="flex items-center justify-between text-sm text-slate-300 mb-2">
+                    <span className="inline-flex items-center gap-2">
+                      <Gauge className="w-4 h-4 text-cyan-300" />
+                      Funding progress
+                    </span>
+                    <span className="font-medium">
+                      {fundingProgress.toFixed(1)}%
+                    </span>
+                  </div>
+                  <div className="h-2 rounded-full bg-slate-800 overflow-hidden mb-3">
+                    <div
+                      className="h-full bg-gradient-to-r from-cyan-400 via-emerald-400 to-amber-300"
+                      style={{ width: `${fundingProgress}%` }}
+                    />
+                  </div>
+                  <div className="grid sm:grid-cols-2 gap-2 text-xs text-slate-400">
+                    <span>
+                      Raised: {" "}
+                      {formatIntegerWithUnit(event?.currentFunding, "wei")}
+                    </span>
+                    <span>
+                      Goal: {formatIntegerWithUnit(event?.fundingGoal, "wei")}
+                    </span>
+                    <span>
+                      Min stake: {" "}
+                      {formatIntegerWithUnit(event?.minStakeRequired, "wei")}
+                    </span>
+                    {fundingDeadline ? (
+                      <span>Deadline: {formatDate(fundingDeadline)}</span>
+                    ) : null}
+                    <span>Investment Mode: {investmentMode}</span>
+                  </div>
                 </div>
-                <div className="h-2 rounded-full bg-slate-800 overflow-hidden mb-3">
-                  <div
-                    className="h-full bg-gradient-to-r from-cyan-400 via-emerald-400 to-amber-300"
-                    style={{ width: `${fundingProgress}%` }}
-                  />
-                </div>
-                <div className="grid sm:grid-cols-2 gap-2 text-xs text-slate-400">
-                  <span>
-                    Raised:{" "}
-                    {formatIntegerWithUnit(event?.currentFunding, "wei")}
-                  </span>
-                  <span>
-                    Goal: {formatIntegerWithUnit(event?.fundingGoal, "wei")}
-                  </span>
-                  <span>
-                    Min stake:{" "}
-                    {formatIntegerWithUnit(event?.minStakeRequired, "wei")}
-                  </span>
-                  {fundingDeadline ? (
-                    <span>Deadline: {formatDate(fundingDeadline)}</span>
-                  ) : null}
-                  <span>Investment Mode: {investmentMode}</span>
-                </div>
-              </div>
+              ) : null}
             </div>
           </div>
         </div>
@@ -630,7 +636,7 @@ export const EventDetail: React.FC = () => {
                     onChange={(e) =>
                       setInvestmentAmount(e.target.value.replace(/[^0-9]/g, ""))
                     }
-                    className="w-full border-slate-700 bg-slate-900"
+                    className="w-full border-slate-700 bg-slate-900 text-white"
                     placeholder="1000000000000000000"
                   />
 

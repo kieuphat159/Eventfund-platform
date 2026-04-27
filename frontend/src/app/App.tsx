@@ -4,6 +4,8 @@ import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { PublicLayout } from "./layouts/PublicLayout";
 import { UserLayout } from "./layouts/UserLayout";
 import { AdminLayout } from "./layouts/AdminLayout";
+import { LoadingProvider } from "./components/ui/loadingContext";
+
 
 // Public Pages
 import { Home } from "./pages/public/Home";
@@ -248,7 +250,9 @@ const AppRoutes: React.FC = () => {
 const App: React.FC = () => {
   return (
     <AuthProvider>
-      <AppRoutes />
+      <LoadingProvider>
+        <AppRoutes />
+      </LoadingProvider>
     </AuthProvider>
   );
 };

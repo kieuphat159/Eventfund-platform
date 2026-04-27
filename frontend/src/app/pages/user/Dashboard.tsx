@@ -4,6 +4,7 @@ import { Calendar, Ticket, TrendingUp, Wallet, ArrowRight } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { useAuth } from '../../contexts/AuthContext';
+import { useLoading } from '../../components/ui/loadingContext';
 import { getUserTickets, type ApiTicket } from '../../services/tickets.service';
 import { getMyEvents, type EventItem } from '../../services/events.service';
 import {
@@ -31,6 +32,7 @@ type TicketActivity = {
 
 export const Dashboard: React.FC = () => {
   const { user } = useAuth();
+  const { show: showLoading, hide: hideLoading } = useLoading();
   const [tickets, setTickets] = useState<ApiTicket[]>([]);
   const [myEvents, setMyEvents] = useState<EventItem[]>([]);
   const [investments, setInvestments] = useState<InvestmentDetail[]>([]);
@@ -39,6 +41,8 @@ export const Dashboard: React.FC = () => {
 
   useEffect(() => {
     const fetchDashboardData = async () => {
+      try {
+        showLoading('Loading dashboard...');
       if (!walletAddress || !ETH_ADDRESS_REGEX.test(walletAddress)) {
         setTickets([]);
         setMyEvents([]);
@@ -60,6 +64,11 @@ export const Dashboard: React.FC = () => {
       setInvestments(
         investmentsResult.status === 'fulfilled' ? investmentsResult.value : [],
       );
+      } catch (err) {
+        console.error('Failed to load dashboard data:', err);
+      } finally {
+        hideLoading();
+      }
     };
 
     fetchDashboardData();

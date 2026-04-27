@@ -17,6 +17,7 @@ import {
 } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { useAuth } from "../../contexts/AuthContext";
+import { useLoading } from "../../components/ui/loadingContext";
 import { getUserTickets } from "../../services/tickets.service";
 import { getInvestments } from "../../services/investment.service";
 import { getMarketplaceHistory } from "../../services/listings.service";
@@ -85,6 +86,7 @@ function truncateHash(hash?: string | null): string {
 export const Wallet: React.FC = () => {
   const { user } = useAuth();
   const walletAddress = user?.walletAddress;
+  const { show: showLoading, hide: hideLoading } = useLoading();
 
   const [balance, setBalance] = useState<WalletBalance>({
     wei: "0",
@@ -104,6 +106,7 @@ export const Wallet: React.FC = () => {
       }
 
       setLoading(true);
+      showLoading('Loading wallet...');
 
       const [
         balanceResult,
@@ -146,6 +149,13 @@ export const Wallet: React.FC = () => {
             description: `Ticket Purchase - ${eventTitle || `Event ${ticket.eventIdRaw || "-"}`}`,
             amountWei: String(ticket.originalPrice || "0"),
             date: ticket.soldAt,
+            hash:
+              // prefer explicit soldTxHash set by backend, fall back to any transferHistory entry
+              (ticket as any).soldTxHash ||
+              ((ticket as any).transferHistory?.length
+                ? (ticket as any).transferHistory[(ticket as any).transferHistory.length - 1].txHash
+                : null) ||
+              null,
           });
         });
       }
@@ -160,6 +170,7 @@ export const Wallet: React.FC = () => {
             description: `Investment - ${investment.eventId?.title || "Event"}`,
             amountWei: String(investment.contributionAmount || "0"),
             date: investment.createdAt,
+            hash: (investment as any).txHash || (investment as any).transactionHash || null,
           });
         });
       }
@@ -194,6 +205,7 @@ export const Wallet: React.FC = () => {
             description: `Marketplace Sale - ${sale.event || `Ticket #${sale.tokenId}`}`,
             amountWei: String(sale.price || "0"),
             date: sale.time,
+            hash: (sale as any).txHash || (sale as any).transactionHash || null,
           });
         });
       }
@@ -205,6 +217,7 @@ export const Wallet: React.FC = () => {
 
       setTransactions(nextTransactions.slice(0, 20));
       setLoading(false);
+      hideLoading();
     };
 
     loadWalletData();

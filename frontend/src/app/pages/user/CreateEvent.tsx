@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { MapPin, Upload, Plus, Trash2 } from "lucide-react";
+import { MapPin, Upload, Plus, Trash2, Info, AlertTriangle, Clock } from "lucide-react";
 import { useWeb3Auth } from "@web3auth/modal/react";
 import {
   Card,
@@ -13,8 +13,10 @@ import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Textarea } from "../../components/ui/textarea";
 import { Label } from "../../components/ui/label";
+import Loading from "../../components/ui/loading";
 import { createEventOnChain } from "../../services/events.service";
 import { useAuth } from "../../contexts/AuthContext";
+import { cn } from "@/app/lib/utils";
 
 type TicketTierForm = {
   name: string;
@@ -56,6 +58,15 @@ export const CreateEvent: React.FC = () => {
   const [success, setSuccess] = useState("");
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
+  // Fake submit/loading helpers for long on-chain create flows (always enabled in dev)
+  const [fakeSubmitEnabled, setFakeSubmitEnabled] = useState(true);
+  const [fakeSubmitMs, setFakeSubmitMs] = useState<number>(3000);
+  const [fakeStepIndex, setFakeStepIndex] = useState(0);
+  const [fakeTxHash, setFakeTxHash] = useState<string | null>(null);
+  const [fakeStepMessage, setFakeStepMessage] = useState<string | undefined>(
+    undefined,
+  );
+
   const [ticketTiers, setTicketTiers] = useState<TicketTierForm[]>([
     { name: "General", price: "", supply: "" },
   ]);
@@ -78,6 +89,30 @@ export const CreateEvent: React.FC = () => {
     setFieldErrors({});
     setError("");
     setSuccess("");
+  };
+
+  const AlertBox: React.FC<{
+    variant?: "info" | "warning" | "muted";
+    title?: string;
+    children?: React.ReactNode;
+  }> = ({ variant = "info", title, children }) => {
+    const base = "w-full rounded-md p-3 flex gap-3 items-start";
+    const styles: Record<string, string> = {
+      info: "bg-slate-800 border border-slate-700 text-slate-100",
+      warning: "bg-amber-900/10 border border-amber-600 text-amber-200",
+      muted: "bg-slate-900 border border-slate-800 text-slate-300",
+    };
+    const Icon = variant === "warning" ? AlertTriangle : Info;
+
+    return (
+      <div className={`${base} ${styles[variant]}`}>
+        <Icon className="w-5 h-5 mt-1 text-current" />
+        <div className="flex-1 text-sm">
+          {title && <div className="font-semibold text-white mb-1">{title}</div>}
+          <div className="text-sm">{children}</div>
+        </div>
+      </div>
+    );
   };
 
   const addTier = () => {
@@ -518,20 +553,71 @@ export const CreateEvent: React.FC = () => {
     }
   };
 
+  // Fake progress simulation while submitting (does not interfere with actual flow)
+  React.useEffect(() => {
+    if (!submitting || !fakeSubmitEnabled) {
+      setFakeStepIndex(0);
+      setFakeTxHash(null);
+      setFakeStepMessage(undefined);
+      return;
+    }
+
+    // generate fake tx hash once
+    const genHash = () => {
+      const hex = Array.from({ length: 64 })
+        .map(() => "0123456789abcdef"[Math.floor(Math.random() * 16)])
+        .join("");
+      return `0x${hex}`;
+    };
+
+    const tx = genHash();
+    setFakeTxHash(tx);
+
+    const steps = [
+      "Preparing event metadata...",
+      "Uploading metadata to IPFS...",
+      "Estimating gas and preparing transaction...",
+      `Sending transaction ${tx.slice(0, 10)}...`,
+      "Waiting for transaction to be mined (0/3 confirmations)...",
+      "Confirming on-chain and syncing database...",
+    ];
+
+    let idx = 0;
+    setFakeStepIndex(0);
+    setFakeStepMessage(steps[0]);
+
+    const iv = setInterval(() => {
+      idx = Math.min(idx + 1, steps.length - 1);
+      setFakeStepIndex(idx);
+      setFakeStepMessage(steps[idx]);
+    }, Math.max(500, fakeSubmitMs));
+
+    return () => {
+      clearInterval(iv);
+    };
+  }, [submitting, fakeSubmitEnabled, fakeSubmitMs]);
+
   const handleSubmit = async () => {
     await submitEvent();
   };
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-white mb-2">Create Event</h1>
-        <p className="text-slate-400">
-          Every event charges a fixed creation fee equal to 5% of total ticket
-          value. If investment is off, organizer receives 100% of net revenue.
-          If investment is on, revenue is split 70% organizer and 30% investors.
-        </p>
-      </div>
+          <div>
+            <h1 className="text-3xl font-bold text-white mb-2">Create Event</h1>
+            <AlertBox title="Creation fee & revenue split" variant="info">
+              <div className="space-y-1">
+                <div>
+                  Creation fee: <span className="font-semibold">5% of total ticket value</span>
+                </div>
+                <div>
+                  Revenue split: <span className="font-semibold">Organizer 100%</span> when
+                  investment is off; <span className="font-semibold">Organizer 70% / Investors 30%</span> when investment is enabled.
+                </div>
+                <div className="text-xs text-slate-400 mt-1">These values are applied automatically during on-chain creation.</div>
+              </div>
+            </AlertBox>
+          </div>
 
       {!!error && (
         <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
@@ -629,10 +715,13 @@ export const CreateEvent: React.FC = () => {
                     return next;
                   });
                 }}
-                className={getInputClass(
-                  !!fieldErrors.startAt ||
-                    !!fieldErrors.ticketingStartAt ||
-                    !!fieldErrors.ticketingEndAt,
+                className={cn(
+                  getInputClass(
+                    !!fieldErrors.startAt ||
+                      !!fieldErrors.ticketingStartAt ||
+                      !!fieldErrors.ticketingEndAt,
+                  ),
+                  "[color-scheme:dark]",
                 )}
               />
               {fieldErrors.startAt && (
@@ -658,7 +747,7 @@ export const CreateEvent: React.FC = () => {
                     return next;
                   });
                 }}
-                className={getInputClass(!!fieldErrors.endAt)}
+                className={cn(getInputClass(!!fieldErrors.endAt), "[color-scheme:dark]")}
               />
               {fieldErrors.endAt && (
                 <p className="mt-1 text-sm text-red-400">{fieldErrors.endAt}</p>
@@ -684,9 +773,12 @@ export const CreateEvent: React.FC = () => {
                     return next;
                   });
                 }}
-                className={getInputClass(
-                  !!fieldErrors.ticketingStartAt ||
-                    !!fieldErrors.ticketingEndAt,
+                className={cn(
+                  getInputClass(
+                    !!fieldErrors.ticketingStartAt ||
+                      !!fieldErrors.ticketingEndAt,
+                  ),
+                  "[color-scheme:dark]",
                 )}
               />
               {fieldErrors.ticketingStartAt && (
@@ -712,7 +804,7 @@ export const CreateEvent: React.FC = () => {
                     return next;
                   });
                 }}
-                className={getInputClass(!!fieldErrors.ticketingEndAt)}
+                className={cn(getInputClass(!!fieldErrors.ticketingEndAt), "[color-scheme:dark]")}
               />
               {fieldErrors.ticketingEndAt && (
                 <p className="mt-1 text-sm text-red-400">
@@ -969,8 +1061,11 @@ export const CreateEvent: React.FC = () => {
         <CardHeader>
           <CardTitle className="text-white">Investment Options</CardTitle>
           <CardDescription className="text-slate-400">
-            Every event pays 5% creation fee from total ticket value. Investment
-            mode adds outside investors and applies a 70/30 split.
+            <AlertBox variant="muted">
+              <div className="mt-0.5">
+                Investment mode allows outside investors and changes distribution to <span className="font-semibold">70% organizer / 30% investors</span> when enabled.
+              </div>
+            </AlertBox>
           </CardDescription>
         </CardHeader>
 
@@ -1129,16 +1224,18 @@ export const CreateEvent: React.FC = () => {
           )}
 
           {investmentEnabled && (
-            <p className="text-xs text-slate-500">
-              Funding deadline must be entered manually and must fall between
-              the current time and the event start time.
-            </p>
+            <div className="mt-2">
+              <AlertBox variant="muted" title="Funding deadline requirement">
+                Funding deadline must be set and must fall between the current time and the event start time.
+              </AlertBox>
+            </div>
           )}
 
-          <p className="text-xs text-slate-500">
-            Ticket tier prices, funding goal, and minimum investment amount use
-            integer wei values.
-          </p>
+          <div className="mt-3">
+            <AlertBox variant="muted" title="Numeric values">
+              Enter ticket tier prices, funding goal, and minimum investment amounts as integer wei values (no decimals).
+            </AlertBox>
+          </div>
         </CardContent>
       </Card>
 
@@ -1152,6 +1249,25 @@ export const CreateEvent: React.FC = () => {
           {submitting ? "Submitting..." : "Submit"}
         </Button>
       </div>
+      <Loading
+        visible={submitting}
+        message={fakeSubmitEnabled ? fakeStepMessage || "Creating event..." : "Creating event..."}
+      >
+        {fakeSubmitEnabled && (
+          <div className="w-full text-left">
+            <p className="text-xs text-slate-400 mb-2">Tx: <span className="font-mono text-sm text-white break-all">{fakeTxHash}</span></p>
+            <div className="space-y-1">
+              <p className="text-sm text-slate-300 font-medium">{fakeStepMessage}</p>
+              <div className="h-2 bg-slate-800 rounded overflow-hidden mt-2">
+                <div
+                  className="bg-purple-400 h-2 rounded"
+                  style={{ width: `${Math.min(100, (fakeStepIndex + 1) * 16)}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+      </Loading>
     </div>
   );
 };

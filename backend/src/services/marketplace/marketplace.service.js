@@ -793,6 +793,7 @@ export async function getMarketplaceTransactionHistory(
     buyer: listing.soldTo || null,
     seller: listing.seller || null,
     time: listing.soldAt || null,
+    txHash: listing.soldTxHash || listing.transactionHash || null,
     tokenId: listing.ticketId?.tokenId || String(listing.tokenId || ""),
   }));
 

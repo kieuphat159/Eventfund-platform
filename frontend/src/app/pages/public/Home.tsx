@@ -3,11 +3,13 @@ import { Link } from 'react-router-dom';
 import { Wallet, Ticket, TrendingUp, Shield, ArrowRight, Zap } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { useAuth } from '../../contexts/AuthContext';
+import { useLoading } from '../../components/ui/loadingContext';
 import { ImageWithFallback } from '../../components/figma/ImageWithFallback';
 import { getEvents, type EventItem } from '../../services/events.service';
 
 export const Home: React.FC = () => {
   const { connectWallet, isLoading } = useAuth();
+  const { show: showLoading, hide: hideLoading } = useLoading();
   const [events, setEvents] = useState<EventItem[]>([]);
   const [eventsLoading, setEventsLoading] = useState(true);
 
@@ -39,12 +41,14 @@ export const Home: React.FC = () => {
   useEffect(() => {
     const fetchEvents = async () => {
       try {
+        showLoading('Loading events...');
         const data = await getEvents();
         setEvents(data);
       } catch {
         setEvents([]);
       } finally {
         setEventsLoading(false);
+        hideLoading();
       }
     };
 
