@@ -4,6 +4,7 @@ import { QRCodeCanvas } from "qrcode.react";
 import { useWeb3Auth } from "@web3auth/modal/react";
 import {
   ArrowUpRight,
+  Ban,
   Calendar,
   CircleDollarSign,
   Download,
@@ -12,10 +13,6 @@ import {
   MapPin,
   Plus,
   QrCode,
-  Ban,
-  Edit,
-  Trash2,
-  CircleDollarSign,
   Ticket,
   Trash2,
   Users,
@@ -39,11 +36,15 @@ import {
   type EventItem,
   type EventStatus,
 } from "../../services/events.service";
-import {
-  getTickets,
-  type ApiTicket,
-} from "../../services/tickets.service";
+import { getTickets, type ApiTicket } from "../../services/tickets.service";
 import { useAuth } from "../../contexts/AuthContext";
+
+const OWNER_CANCELABLE_STATUSES = new Set<EventStatus>([
+  "draft",
+  "funding",
+  "funded",
+  "ticketing",
+]);
 
 function formatWei(value?: string | number) {
   try {
@@ -54,10 +55,7 @@ function formatWei(value?: string | number) {
 }
 
 function buildTicketQrPayload(ticket: ApiTicket, eventId: string) {
-  const tokenId = String(ticket.tokenId).trim();
-  const normalizedEventId = eventId.trim();
-
-  return `eft1:${tokenId}:${normalizedEventId}`;
+  return `eft1:${String(ticket.tokenId).trim()}:${eventId.trim()}`;
 }
 
 function getTicketQrCanvasId(ticket: ApiTicket) {
@@ -69,10 +67,7 @@ function downloadTicketQR(ticket: ApiTicket) {
   const canvas = document.getElementById(
     getTicketQrCanvasId(ticket),
   ) as HTMLCanvasElement | null;
-
-  if (!canvas) {
-    return;
-  }
+  if (!canvas) return;
 
   const url = canvas.toDataURL("image/png");
   const link = document.createElement("a");
@@ -98,17 +93,13 @@ function getTicketStatusBadgeVariant(status?: ApiTicket["status"]) {
   }
 }
 
-export const MyEvents: React.FC = () => {
-  const navigate = useNavigate();
-  const { user } = useAuth();
+function getTicketHolderLabel(ticket: ApiTicket) {
+  if (ticket.status === "minted") {
+    return "Organizer inventory";
+  }
 
-  const isVerifierView = user?.role === "verifier";
-const OWNER_CANCELABLE_STATUSES = new Set<EventStatus>([
-  "draft",
-  "funding",
-  "funded",
-  "ticketing",
-]);
+  return ticket.currentOwner || "Unknown";
+}
 
 export const MyEvents: React.FC = () => {
   const navigate = useNavigate();
@@ -118,7 +109,9 @@ export const MyEvents: React.FC = () => {
   const [events, setEvents] = useState<EventItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [deletingId, setDeletingId] = useState<string>("");
+  const [deletingId, setDeletingId] = useState("");
+  const [cancellingId, setCancellingId] = useState("");
+
   const [ticketDialogEvent, setTicketDialogEvent] = useState<EventItem | null>(
     null,
   );
@@ -128,30 +121,31 @@ export const MyEvents: React.FC = () => {
   const [selectedQrTicket, setSelectedQrTicket] = useState<ApiTicket | null>(
     null,
   );
-  const [cancellingId, setCancellingId] = useState<string>("");
 
-  const fetchEvents = async () => {
-    if (!user?.walletAddress) {
-      setEvents([]);
-      setLoading(false);
-      return;
-    }
-
-    try {
-      setLoading(true);
-      setError("");
-      const data = isVerifierView
-        ? await getManagedEvents(user.walletAddress)
-        : await getMyEvents(user.walletAddress);
-      setEvents(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load events");
-    } finally {
-      setLoading(false);
-    }
-  };
+  const isVerifierView = user?.role === "verifier";
 
   useEffect(() => {
+    const fetchEvents = async () => {
+      if (!user?.walletAddress) {
+        setEvents([]);
+        setLoading(false);
+        return;
+      }
+
+      try {
+        setLoading(true);
+        setError("");
+        const data = isVerifierView
+          ? await getManagedEvents(user.walletAddress)
+          : await getMyEvents(user.walletAddress);
+        setEvents(data);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to load events");
+      } finally {
+        setLoading(false);
+      }
+    };
+
     fetchEvents();
   }, [isVerifierView, user?.walletAddress]);
 
@@ -170,12 +164,63 @@ export const MyEvents: React.FC = () => {
       setEvents((prev) => prev.filter((e) => (e._id || e.id) !== eventId));
     } catch (err: any) {
       alert(
-        err?.response?.data?.message ||
-          err?.message ||
-          "Xoá sự kiện thất bại",
+        err?.response?.data?.message || err?.message || "Xoá sự kiện thất bại",
       );
     } finally {
       setDeletingId("");
+    }
+  };
+
+  const handleCancel = async (event: EventItem) => {
+    const eventId = event._id || event.id;
+    if (!eventId) return;
+
+    const ok = window.confirm(
+      `Bạn có chắc muốn hủy sự kiện "${event.title || "Untitled event"}" không?\n\nEvent sẽ được chuyển sang trạng thái cancelled theo flow backend hiện tại.`,
+    );
+    if (!ok) return;
+
+    try {
+      setCancellingId(eventId);
+
+      if (!web3Auth?.provider) {
+        await connectWallet();
+        alert(
+          "Ví đã được kết nối. Vui lòng bấm Cancel Event thêm một lần nữa để ký giao dịch hủy bằng ví organizer.",
+        );
+        return;
+      }
+
+      const updated = await cancelEventWithWalletFallback(
+        web3Auth.provider as
+          | {
+              request: (args: {
+                method: string;
+                params?: unknown[];
+              }) => Promise<unknown>;
+            }
+          | undefined,
+        eventId,
+        { status: "cancelled" },
+        user?.walletAddress,
+        user?.smartAccountAddress,
+      );
+
+      if (!updated) {
+        throw new Error("Không thể hủy sự kiện");
+      }
+
+      setEvents((prev) =>
+        prev.map((item) =>
+          (item._id || item.id) === eventId ? updated : item,
+        ),
+      );
+    } catch (err: any) {
+      alert(
+        err?.response?.data?.message || err?.message || "Hủy sự kiện thất bại",
+      );
+    } finally {
+      setCancellingId("");
     }
   };
 
@@ -196,8 +241,8 @@ export const MyEvents: React.FC = () => {
         limit: 100,
         sort: "-createdAt",
       });
-      setEventTickets(payload.docs);
-      setSelectedQrTicket(payload.docs[0] || null);
+      setEventTickets(payload.docs || []);
+      setSelectedQrTicket((payload.docs || [])[0] || null);
     } catch (err) {
       setTicketsError(
         err instanceof Error ? err.message : "Failed to load event tickets",
@@ -215,7 +260,9 @@ export const MyEvents: React.FC = () => {
       },
       {
         label: "Ongoing",
-        value: events.filter((event) => event.status === "ongoing").length.toString(),
+        value: events
+          .filter((event) => event.status === "ongoing")
+          .length.toString(),
       },
       {
         label: "Total Tickets Sold",
@@ -230,7 +277,10 @@ export const MyEvents: React.FC = () => {
               .reduce((sum, event) => sum + (event.totalTicketsUsed || 0), 0)
               .toString()
           : events
-              .reduce((sum, event) => sum + Number(event.currentFunding || 0), 0)
+              .reduce(
+                (sum, event) => sum + Number(event.currentFunding || 0),
+                0,
+              )
               .toString(),
       },
     ],
@@ -240,84 +290,16 @@ export const MyEvents: React.FC = () => {
   if (loading) {
     return (
       <div className="text-white">
-        {isVerifierView ? "Loading managed events..." : "Loading your events..."}
+        {isVerifierView
+          ? "Loading managed events..."
+          : "Loading your events..."}
       </div>
     );
   }
 
-  const handleCancel = async (event: EventItem) => {
-    const eventId = event._id || event.id;
-    if (!eventId) return;
-
-    const ok = window.confirm(
-      `Bạn có chắc muốn hủy sự kiện "${event.title || "Untitled event"}" không?\n\nEvent sẽ được chuyển sang trạng thái cancelled theo flow backend hiện tại.`,
-    );
-    if (!ok) return;
-
-    try {
-      setCancellingId(eventId);
-      if (!web3Auth?.provider) {
-        await connectWallet();
-        alert(
-          "Ví đã được kết nối. Vui lòng bấm Cancel Event thêm một lần nữa để ký giao dịch hủy bằng ví organizer.",
-        );
-        return;
-      }
-
-      const updated = await cancelEventWithWalletFallback(
-        web3Auth?.provider as
-          | {
-              request: (args: {
-                method: string;
-                params?: unknown[];
-              }) => Promise<unknown>;
-            }
-          | undefined,
-        eventId,
-        { status: "cancelled" },
-        user?.walletAddress,
-        user?.smartAccountAddress,
-      );
-      if (!updated) {
-        throw new Error("Không thể hủy sự kiện");
-      }
-
-      setEvents((prev) =>
-        prev.map((item) => ((item._id || item.id) === eventId ? updated : item)),
-      );
-    } catch (err: any) {
-      alert(
-        err?.response?.data?.message ||
-          err?.message ||
-          "Hủy sự kiện thất bại",
-      );
-    } finally {
-      setCancellingId("");
-    }
-  };
-
-  const stats = [
-    { label: "Total Events", value: events.length.toString() },
-    {
-      label: "Draft",
-      value: events.filter((e) => e.status === "draft").length.toString(),
-    },
-    {
-      label: "Total Tickets Sold",
-      value: events
-        .reduce((sum, e) => sum + (e.ticketsSold || 0), 0)
-        .toString(),
-    },
-    {
-      label: "Funding Raised",
-      value: events
-        .reduce((sum, e) => sum + Number(e.currentFunding || 0), 0)
-        .toString(),
-    },
-  ];
-
-  if (loading) return <div className="text-white">Loading your events...</div>;
-  if (error) return <div className="text-red-400">{error}</div>;
+  if (error) {
+    return <div className="text-red-400">{error}</div>;
+  }
 
   return (
     <div className="space-y-6">
@@ -383,7 +365,7 @@ export const MyEvents: React.FC = () => {
                 className="border-slate-800 bg-slate-900/90 transition-colors hover:border-cyan-400/40"
               >
                 <CardContent className="p-6">
-                  <div className="mb-4 flex items-start justify-between">
+                  <div className="mb-4 flex items-start justify-between gap-3">
                     <div className="flex-1">
                       <div className="mb-2 flex items-center space-x-3">
                         <h3 className="text-xl font-semibold text-white">
@@ -399,13 +381,16 @@ export const MyEvents: React.FC = () => {
                     </div>
 
                     {!isVerifierView && (
-                      <div className="flex space-x-2">
+                      <div className="flex items-center space-x-2">
                         <Button
                           variant="outline"
                           size="icon"
                           className="border-slate-700 text-slate-200 hover:bg-slate-800"
-                          onClick={() => navigate(`/app/events/edit/${eventId}`)}
+                          onClick={() =>
+                            navigate(`/app/events/edit/${eventId}`)
+                          }
                           disabled={!eventId}
+                          title="Edit event"
                         >
                           <Edit className="h-4 w-4" />
                         </Button>
@@ -413,9 +398,28 @@ export const MyEvents: React.FC = () => {
                         <Button
                           variant="outline"
                           size="icon"
-                          className="border-red-600 text-red-400 disabled:opacity-50 hover:bg-red-900/20"
+                          className="border-red-600 text-red-400 hover:bg-red-900/20 disabled:opacity-50"
+                          onClick={() => handleCancel(event)}
+                          disabled={
+                            !eventId || !canCancel || cancellingId === eventId
+                          }
+                          title={
+                            canCancel
+                              ? "Cancel event"
+                              : "This event can no longer be cancelled"
+                          }
+                        >
+                          <Ban className="h-4 w-4" />
+                        </Button>
+
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          className="border-red-600 text-red-400 hover:bg-red-900/20 disabled:opacity-50"
                           onClick={() => handleDelete(event)}
-                          disabled={!eventId || !canDelete || deletingId === eventId}
+                          disabled={
+                            !eventId || !canDelete || deletingId === eventId
+                          }
                           title={
                             canDelete
                               ? "Delete event"
@@ -426,40 +430,6 @@ export const MyEvents: React.FC = () => {
                         </Button>
                       </div>
                     )}
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        className="border-red-600 hover:bg-red-900/20 text-red-400 disabled:opacity-50"
-                        onClick={() => handleCancel(event)}
-                        disabled={
-                          !eventId || !canCancel || cancellingId === eventId
-                        }
-                        title={
-                          canCancel
-                            ? "Cancel event"
-                            : "This event can no longer be cancelled"
-                        }
-                      >
-                        <Ban className="w-4 h-4" />
-                      </Button>
-
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        className="border-red-600 hover:bg-red-900/20 text-red-400 disabled:opacity-50"
-                        onClick={() => handleDelete(event)}
-                        disabled={
-                          !eventId || !canDelete || deletingId === eventId
-                        }
-                        title={
-                          canDelete
-                            ? "Delete event"
-                            : "Only draft events can be deleted"
-                        }
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    </div>
                   </div>
 
                   <div className="mb-4 grid gap-4 md:grid-cols-3">
@@ -544,34 +514,10 @@ export const MyEvents: React.FC = () => {
                     </div>
 
                     <div className="flex gap-2">
-                      {!isVerifierView && (
-                        <Button
-                          variant="outline"
-                          className="border-slate-700 text-white hover:bg-slate-800"
-                          onClick={() => navigate(`/app/events/edit/${eventId}`)}
-                          disabled={!eventId}
-                        >
-                          Edit Event
-                        </Button>
-                      )}
-
                       <Button
                         variant="outline"
                         className="border-slate-700 text-white hover:bg-slate-800"
                         onClick={() => openTicketDialog(event)}
-                        className="border-red-600 hover:bg-red-900/20 text-red-300 disabled:opacity-50"
-                        onClick={() => handleCancel(event)}
-                        disabled={
-                          !eventId || !canCancel || cancellingId === eventId
-                        }
-                      >
-                        {cancellingId === eventId ? "Cancelling..." : "Cancel Event"}
-                      </Button>
-
-                      <Button
-                        variant="outline"
-                        className="border-slate-700 hover:bg-slate-800 text-white"
-                        onClick={() => navigate(`/app/events/edit/${eventId}`)}
                         disabled={!eventId}
                       >
                         <QrCode className="mr-1 h-4 w-4" />
@@ -683,7 +629,7 @@ export const MyEvents: React.FC = () => {
                           </Badge>
                         </div>
                         <p className="text-sm text-slate-400">
-                          Owner: {ticket.currentOwner || "Unknown"}
+                          Holder: {getTicketHolderLabel(ticket)}
                         </p>
                         <p className="text-sm text-slate-500">
                           Price: {formatWei(ticket.originalPrice)} wei
@@ -708,7 +654,7 @@ export const MyEvents: React.FC = () => {
                       Ticket #{selectedQrTicket.tokenId}
                     </h4>
                     <p className="text-sm text-slate-400">
-                      Wallet: {selectedQrTicket.currentOwner || "Unknown"}
+                      Holder: {getTicketHolderLabel(selectedQrTicket)}
                     </p>
                   </div>
 
@@ -728,7 +674,10 @@ export const MyEvents: React.FC = () => {
                   </div>
 
                   <div className="rounded-lg border border-slate-800 bg-slate-950/70 p-3 text-xs text-slate-400">
-                    {buildTicketQrPayload(selectedQrTicket, ticketDialogEvent._id)}
+                    {buildTicketQrPayload(
+                      selectedQrTicket,
+                      ticketDialogEvent._id,
+                    )}
                   </div>
 
                   <Button

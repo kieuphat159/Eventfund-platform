@@ -318,6 +318,7 @@ const TICKET_USAGE_ABI = [
 
 const WEB3AUTH_TX_GAS_CAP = 16_777_216n;
 const EVENT_TX_FALLBACK_GAS_LIMIT = 1_500_000n;
+const COMPLETION_USAGE_PERCENT = 36n;
 
 export interface CreateEventIntentTransaction {
   to: string;
@@ -824,12 +825,8 @@ async function validateCompletionReadiness(
 
   const publicClient = getPublicClient();
   const chainEventId = BigInt(event.contractEventId);
-
   let totalUsed = BigInt(event.totalTicketsUsed ?? 0);
   let totalSold = BigInt(event.ticketsSold ?? 0);
-  const usedThreshold = BigInt(
-    event.usedThreshold ?? event.totalTickets ?? event.ticketUsageThreshold ?? 0,
-  );
 
   try {
     const ticketAddress = await publicClient.readContract({
@@ -860,9 +857,16 @@ async function validateCompletionReadiness(
     );
   }
 
-  if (usedThreshold > 0n && totalUsed < usedThreshold) {
+  if (totalSold <= 0n) {
     throw new Error(
-      `Event chưa đủ điều kiện completed on-chain: mới check-in ${totalUsed.toString()}/${usedThreshold.toString()} vé. Tổng vé đã bán hiện tại: ${totalSold.toString()}.`,
+      "Event chưa có vé bán ra nên chưa thể completed theo tỷ lệ check-in.",
+    );
+  }
+
+  const requiredUsed = (totalSold * COMPLETION_USAGE_PERCENT + 99n) / 100n;
+  if (totalUsed < requiredUsed) {
+    throw new Error(
+      `Event chưa đủ điều kiện completed on-chain: mới check-in ${totalUsed.toString()}/${requiredUsed.toString()} vé (36% theo ${totalSold.toString()} vé đã bán).`,
     );
   }
 
@@ -890,9 +894,15 @@ async function validateCompletionReadiness(
     }
 
     if (errorName === "Unsafe") {
-      if (usedThreshold > 0n && totalUsed < usedThreshold) {
+      if (totalSold <= 0n) {
         throw new Error(
-          `Event chưa đủ điều kiện completed on-chain: mới check-in ${totalUsed.toString()}/${usedThreshold.toString()} vé.`,
+          "Event chưa có vé bán ra nên chưa thể completed theo tỷ lệ check-in.",
+        );
+      }
+
+      if (totalUsed < requiredUsed) {
+        throw new Error(
+          `Event chưa đủ điều kiện completed on-chain: mới check-in ${totalUsed.toString()}/${requiredUsed.toString()} vé (36% theo ${totalSold.toString()} vé đã bán).`,
         );
       }
 

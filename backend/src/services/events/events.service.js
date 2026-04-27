@@ -40,6 +40,14 @@ let cachedNoInvestCreateSupport = null;
 const TX_RECEIPT_WAIT_TIMEOUT_MS = Number(
   process.env.TX_RECEIPT_WAIT_TIMEOUT_MS || 120000,
 );
+const COMPLETION_THRESHOLD_BPS = 3600n;
+const BPS_DENOMINATOR = 10000n;
+
+function getHardcodedUsedThreshold(maxTickets) {
+  // Hardcoded temporary policy: completed when >= 36% tickets are used.
+  // Round up to avoid allowing less than 36% because of integer truncation.
+  return (maxTickets * COMPLETION_THRESHOLD_BPS + (BPS_DENOMINATOR - 1n)) / BPS_DENOMINATOR;
+}
 
 function getBackendSigner() {
   const privateKey = process.env.BACKEND_SIGNER_PRIVATE_KEY;
@@ -55,9 +63,7 @@ function getBackendSigner() {
 function parseOnChainEventId(event) {
   const contractEventId = String(event?.contractEventId || "").trim();
   if (!contractEventId) {
-    throw new BadRequestError(
-      "Event has not been synced to on-chain yet",
-    );
+    throw new BadRequestError("Event has not been synced to on-chain yet");
   }
 
   if (!/^\d+$/.test(contractEventId)) {
@@ -69,7 +75,6 @@ function parseOnChainEventId(event) {
   return BigInt(contractEventId);
 }
 
-function getBlockchainErrorMessage(error) {
 function getRawBlockchainErrorMessage(error) {
   if (!error || typeof error !== "object") {
     return String(error || "Unknown blockchain error");
@@ -815,9 +820,7 @@ export async function createEvent(eventData, user, repos = {}) {
     investmentEnabled,
   );
 
-  const usedThreshold = BigInt(
-    eventData.usedThreshold ?? eventData.totalTickets,
-  );
+  const usedThreshold = getHardcodedUsedThreshold(maxTickets);
 
   if (usedThreshold <= 0n || usedThreshold > maxTickets) {
     throw new BadRequestError(
@@ -1047,9 +1050,7 @@ export async function createCreateEventIntent(eventData, user, repos = {}) {
     investmentEnabled,
   );
 
-  const usedThreshold = BigInt(
-    eventData.usedThreshold ?? eventData.totalTickets,
-  );
+  const usedThreshold = getHardcodedUsedThreshold(maxTickets);
 
   if (usedThreshold <= 0n || usedThreshold > maxTickets) {
     throw new BadRequestError(
@@ -1456,7 +1457,9 @@ export async function assignVerifierOnChain(eventId, verifier, user) {
     const receipt = await tx.wait();
 
     if (!receipt || Number(receipt.status) !== 1) {
-      throw new BadRequestError("Verifier assignment transaction failed on-chain");
+      throw new BadRequestError(
+        "Verifier assignment transaction failed on-chain",
+      );
     }
   }
 
@@ -1751,7 +1754,8 @@ export async function updateEvent(eventId, updates, user, repos = {}) {
         contractAddress: fundAddress,
       });
 
-      const completedEvents = await parseFundEventsFromReceipt(completionReceipt);
+      const completedEvents =
+        await parseFundEventsFromReceipt(completionReceipt);
       const completedEvent = findParsedFundEventByNameAndEventId(
         completedEvents,
         "Completed",
@@ -1844,7 +1848,7 @@ export async function updateEvent(eventId, updates, user, repos = {}) {
 
     if (!completedEvent) {
       throw new BadRequestError(
-        "Completed event not found in transaction receipt. Event may not have met usage threshold.",
+        "Completed event not found in transaction receipt for this event.",
       );
     }
 
@@ -2653,7 +2657,7 @@ export async function deleteEventImage(
 }
 
 /**
- * Mark event as completed when ticket threshold is met
+ * Mark event as completed when usage threshold is met on-chain
  * @param {string} eventId - Event ID
  * @param {Object} payload - Payload with optional txHash for polling
  * @param {Object} user - User object with walletAddress (organizer)
@@ -2739,7 +2743,7 @@ export async function markEventAsCompleted(
 
   if (!completedEvent) {
     throw new BadRequestError(
-      "Completed event not found in transaction receipt. Event may not have met usage threshold.",
+      "Completed event not found in transaction receipt for this event.",
     );
   }
 

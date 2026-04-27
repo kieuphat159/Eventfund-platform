@@ -249,7 +249,9 @@ function mapPurchaseRpcError(message: string): string {
     return "Bạn đã từ chối thao tác trên ví. Vui lòng xác nhận lại trong MetaMask.";
   }
 
-  if (normalized.includes("invalid parameters: must provide an Ethereum address")) {
+  if (
+    normalized.includes("invalid parameters: must provide an Ethereum address")
+  ) {
     return "Địa chỉ ví gửi giao dịch không hợp lệ hoặc chưa được chọn trong MetaMask.";
   }
 
@@ -630,9 +632,11 @@ export async function createUseTicketIntent(
   return response.data || null;
 }
 
-export async function confirmUseTicketTransaction(
-  payload: { txHash: string; tokenId?: string; verifierWallet?: string },
-): Promise<ConfirmPurchaseData | null> {
+export async function confirmUseTicketTransaction(payload: {
+  txHash: string;
+  tokenId?: string;
+  verifierWallet?: string;
+}): Promise<ConfirmPurchaseData | null> {
   try {
     const response = await api.post<ConfirmPurchaseResponse>(
       `/tickets/use/confirm`,
@@ -659,22 +663,46 @@ export async function useTicketOnChain(
   provider: Eip1193Provider,
   tokenId: string,
   verifierWallet?: string,
-): Promise<{ txHash: string; intent: UseTicketIntentData; confirmation: ConfirmPurchaseData | null }> {
+): Promise<{
+  txHash: string;
+  intent: UseTicketIntentData;
+  confirmation: ConfirmPurchaseData | null;
+}> {
   if (!provider?.request) {
-    throw new Error('Wallet provider is unavailable');
+    throw new Error("Wallet provider is unavailable");
   }
 
   const intent = await createUseTicketIntent(tokenId);
   if (!intent?.transaction) {
-    throw new Error('Unable to create use intent');
+    throw new Error("Unable to create use intent");
   }
 
   const fromAddress = verifierWallet || intent.verifier;
   if (!fromAddress) {
-    throw new Error('Verifier wallet address is required to send transaction');
+    throw new Error("Verifier wallet address is required to send transaction");
   }
 
   await ensureWalletAccountAccess(provider, fromAddress);
+
+  const txHash = await sendPurchaseTransactionWithRetry(provider, {
+    from: fromAddress,
+    to: intent.transaction.to,
+    data: intent.transaction.data,
+    value: toHexValue(intent.transaction.value || "0"),
+  });
+
+  const confirmation = await confirmUseTicketTransaction({
+    txHash,
+    tokenId: intent.tokenId,
+    verifierWallet: fromAddress,
+  });
+
+  return {
+    txHash,
+    intent,
+    confirmation,
+  };
+}
 
 export async function claimTicketRefundOnChain(
   provider: Eip1193Provider,
@@ -699,14 +727,7 @@ export async function claimTicketRefundOnChain(
     from: fromAddress,
     to: intent.transaction.to,
     data: intent.transaction.data,
-    value: toHexValue(intent.transaction.value || '0'),
-  });
-
-  const confirmation = await confirmUseTicketTransaction({
-    txHash,
-    tokenId: intent.tokenId,
-    verifierWallet: fromAddress,
-    value: toHexValue(intent.transaction.value),
+    value: toHexValue(intent.transaction.value || "0"),
   });
 
   const confirmation = await confirmRefundTransaction({

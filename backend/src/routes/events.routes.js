@@ -491,6 +491,8 @@ router.post(
   authenticate,
   requireAdmin,
   controller.assignVerifierOnChain,
+);
+
 /**
  * @swagger
  * /events/{id}/mark-completed:

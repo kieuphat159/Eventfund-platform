@@ -204,11 +204,12 @@ class EventsController {
 
   confirmContributionRefundTransaction = asyncHandler(async (req, res) => {
     const payload = req.validated?.body || req.body;
-    const result = await this.eventsService.confirmContributionRefundTransaction(
-      req.params.id,
-      payload,
-      req.user,
-    );
+    const result =
+      await this.eventsService.confirmContributionRefundTransaction(
+        req.params.id,
+        payload,
+        req.user,
+      );
 
     res.status(200).json({
       success: true,
@@ -276,6 +277,16 @@ class EventsController {
     const event = await this.eventsService.assignVerifierOnChain(
       req.params.id,
       verifier,
+      req.user,
+    );
+
+    res.status(200).json({
+      success: true,
+      data: event,
+    });
+  });
+
+  /**
    * POST /events/:id/mark-completed
    * Mark event as completed when ticket usage threshold is met
    */
