@@ -38,7 +38,7 @@ import {
 } from "../../services/events.service";
 import { getTickets, type ApiTicket } from "../../services/tickets.service";
 import { useAuth } from "../../contexts/AuthContext";
-import { useLoading } from "../../components/ui/LoadingContext";
+import { useLoading } from "../../components/ui/loadingContext";
 
 const OWNER_CANCELABLE_STATUSES = new Set<EventStatus>([
   "draft",
@@ -162,12 +162,14 @@ export const MyEvents: React.FC = () => {
 
     try {
       setDeletingId(eventId);
-      showLoading('Deleting event...');
+      showLoading("Deleting event...");
       await deleteEvent(eventId);
       setEvents((prev) => prev.filter((e) => (e._id || e.id) !== eventId));
     } catch (err: any) {
       alert(
-        err?.response?.data?.message || err?.message || "Failed to delete event",
+        err?.response?.data?.message ||
+          err?.message ||
+          "Failed to delete event",
       );
     } finally {
       setDeletingId("");
