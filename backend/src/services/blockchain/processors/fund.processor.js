@@ -22,8 +22,7 @@ import revenueDistributionRepo from "../../../repositories/revenueDistribution.r
 import rewardClaimRepo from "../../../repositories/rewardClaim.repo.js";
 import penaltyRepo from "../../../repositories/penalty.repo.js";
 import chainLogRepo from "../../../repositories/chainLog.repo.js";
-import { scheduleAutoRefundForCancelledEvent } from "../../tickets/autoRefund.service.js";
-import { scheduleAutoContributionRefundForEvent } from "../../events/autoContributionRefund.service.js";
+import { scheduleAutoRefundsForTerminalEvent } from "../../events/terminalRefunds.service.js";
 
 const CONTRACT_NAME = "Fund";
 const PROCESSOR_NAME = "FundProcessor";
@@ -312,6 +311,7 @@ async function handleEventCreated(log) {
         organizerShareBps: toNumberSafe(args.organizerShareBps),
         ticketPrice: normalizedTicketPrice,
         maxTickets: normalizedMaxTickets,
+        totalTickets: normalizedMaxTickets,
         usedThreshold: normalizedUsedThreshold,
         organizerStake: toStringId(args.stakeAmount),
         status: "funding",
@@ -409,11 +409,7 @@ async function handleEventCancelled(log, eventDoc) {
     $set: patch,
   });
 
-  if (args.ticketRefundsEnabled) {
-    scheduleAutoRefundForCancelledEvent(updatedEvent || { ...eventDoc, ...patch });
-  }
-
-  scheduleAutoContributionRefundForEvent(updatedEvent || { ...eventDoc, ...patch });
+  scheduleAutoRefundsForTerminalEvent(updatedEvent || { ...eventDoc, ...patch });
 }
 
 async function handleTicketingStarted(log, eventDoc) {

@@ -102,8 +102,11 @@ export const EventDetail: React.FC = () => {
         setError("");
         const data = await getEventById(id);
         setEvent(data);
-        if (data?._id) {
+        if (data?._id && (data.status === "ticketing" || data.status === "ongoing")) {
           await loadTicketData(data._id);
+        } else {
+          setTicketStats(null);
+          setEventTickets([]);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load event");
@@ -126,6 +129,7 @@ export const EventDetail: React.FC = () => {
   const eventId = event?._id || event?.id || "";
   const availableTickets = ticketStats?.availableTickets ?? null;
   const trackedTickets = ticketStats?.totalTickets ?? totalTickets;
+  const ticketingOpen = event?.status === "ticketing" || event?.status === "ongoing";
   const fundingProgress = Math.min(
     calculatePercentage(event?.currentFunding, event?.fundingGoal, 1),
     100,
@@ -527,34 +531,38 @@ export const EventDetail: React.FC = () => {
               Synced from ticket records for this event.
             </p>
 
-            <div className="grid sm:grid-cols-4 gap-3 mb-5">
-              <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3">
-                <div className="text-xs text-slate-500 mb-1">Available</div>
-                <div className="text-lg font-semibold text-emerald-300">
-                  {ticketStats?.availableTickets ?? "-"}
+              <div className="grid sm:grid-cols-4 gap-3 mb-5">
+                <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3">
+                  <div className="text-xs text-slate-500 mb-1">Available</div>
+                  <div className="text-lg font-semibold text-emerald-300">
+                  {ticketingOpen ? ticketStats?.availableTickets ?? "-" : 0}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3">
+                  <div className="text-xs text-slate-500 mb-1">Total Tracked</div>
+                  <div className="text-lg font-semibold text-cyan-300">
+                  {ticketingOpen ? ticketStats?.totalTickets ?? "-" : 0}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3">
+                  <div className="text-xs text-slate-500 mb-1">Sold</div>
+                  <div className="text-lg font-semibold text-amber-300">
+                  {ticketingOpen ? ticketStats?.soldTickets ?? "-" : 0}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3">
+                  <div className="text-xs text-slate-500 mb-1">Used</div>
+                  <div className="text-lg font-semibold text-purple-300">
+                  {ticketingOpen ? ticketStats?.usedTickets ?? "-" : 0}
+                  </div>
                 </div>
               </div>
-              <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3">
-                <div className="text-xs text-slate-500 mb-1">Total Tracked</div>
-                <div className="text-lg font-semibold text-cyan-300">
-                  {ticketStats?.totalTickets ?? "-"}
-                </div>
-              </div>
-              <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3">
-                <div className="text-xs text-slate-500 mb-1">Sold</div>
-                <div className="text-lg font-semibold text-amber-300">
-                  {ticketStats?.soldTickets ?? "-"}
-                </div>
-              </div>
-              <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3">
-                <div className="text-xs text-slate-500 mb-1">Used</div>
-                <div className="text-lg font-semibold text-purple-300">
-                  {ticketStats?.usedTickets ?? "-"}
-                </div>
-              </div>
-            </div>
 
-            {loadingTickets ? (
+            {!ticketingOpen ? (
+              <div className="text-slate-400 text-sm">
+                Ticketing has not started yet for this event.
+              </div>
+            ) : loadingTickets ? (
               <div className="text-slate-400 text-sm">Loading tickets...</div>
             ) : eventTickets.length === 0 ? (
               <div className="text-slate-400 text-sm">

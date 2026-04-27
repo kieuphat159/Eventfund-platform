@@ -10,10 +10,13 @@ const mockFundWithSigner = {
   cancelEvent: jest.fn(),
   startTicketing: jest.fn(),
   setCompletedIfThresholdMet: jest.fn(),
+  releaseRevenue: jest.fn(),
+  withdrawStake: jest.fn(),
 };
 
 const mockFund = {
   getAddress: jest.fn(),
+  getEventStatus: jest.fn(),
   connect: jest.fn(() => mockFundWithSigner),
   interface: {
     parseLog: jest.fn(),
@@ -30,6 +33,7 @@ const mockTicket = {
 const mockPersistLogsFromReceipt = jest.fn();
 const mockGetFund = jest.fn(() => mockFund);
 const mockGetTicket = jest.fn(() => mockTicket);
+const mockScheduleAutoRefundsForTerminalEvent = jest.fn();
 
 jest.unstable_mockModule("../../../services/blockchain/index.js", () => ({
   provider: {},
@@ -44,6 +48,10 @@ jest.unstable_mockModule(
   }),
 );
 
+jest.unstable_mockModule("../../../services/events/terminalRefunds.service.js", () => ({
+  scheduleAutoRefundsForTerminalEvent: mockScheduleAutoRefundsForTerminalEvent,
+}));
+
 const { getEventInvestments, updateEventStatus } = await import(
   "../../../services/admin/admin.service.js"
 );
@@ -57,7 +65,11 @@ describe("admin.service updateEventStatus", () => {
     mockGetFund.mockReturnValue(mockFund);
     mockGetTicket.mockReturnValue(mockTicket);
     mockFund.getAddress.mockResolvedValue(fundAddress);
+    mockFund.getEventStatus.mockResolvedValue(2);
     mockFund.connect.mockReturnValue(mockFundWithSigner);
+    mockFundWithSigner.withdrawStake.mockResolvedValue({
+      wait: jest.fn().mockResolvedValue({ status: 1, logs: [] }),
+    });
     mockTicket.getAddress.mockResolvedValue(ticketAddress);
     mockTicket.interface.parseLog.mockImplementation(() => {
       throw new Error("Unknown ticket log");
@@ -181,12 +193,12 @@ describe("admin.service updateEventStatus", () => {
       7000n,
       1n,
       100n,
-      100n,
+      36n,
       false,
       { value: 5n },
     );
     expect(mockFundWithSigner.finalizeFunding).not.toHaveBeenCalled();
-    expect(mockFundWithSigner.startTicketing).toHaveBeenCalledWith(9n, 0, 10n);
+    expect(mockFundWithSigner.startTicketing).toHaveBeenCalledWith(9n, 0, 100n);
     expect(repository.updateById).toHaveBeenNthCalledWith(
       1,
       draftEvent._id,
@@ -205,6 +217,131 @@ describe("admin.service updateEventStatus", () => {
       contractEventId: "9",
       status: "ticketing",
     });
+  });
+
+  test("finalizes on-chain funding first when db is funded but chain is still funding", async () => {
+    const fundedEvent = {
+      _id: "507f1f77bcf86cd799439014",
+      title: "Funded but not finalized yet",
+      organizer: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      status: "funded",
+      fundingGoal: "1000",
+      minStakeRequired: "5",
+      organizerStake: "5",
+      contractEventId: "9",
+      ticketPrice: 1,
+      totalTickets: 100,
+      ticketTiers: [{ name: "General", price: 1, totalSupply: 100 }],
+      startDate: new Date("2026-06-01T10:00:00.000Z").toISOString(),
+      ticketingStartAt: new Date("2026-04-26T10:00:00.000Z").toISOString(),
+    };
+
+    mockFund.getEventStatus.mockResolvedValueOnce(1);
+
+    const repository = {
+      findById: jest.fn().mockResolvedValue(fundedEvent),
+      updateById: jest
+        .fn()
+        .mockResolvedValueOnce({
+          ...fundedEvent,
+          status: "funded",
+        })
+        .mockResolvedValueOnce({
+          ...fundedEvent,
+          status: "ticketing",
+        }),
+    };
+
+    const result = await updateEventStatus(
+      fundedEvent._id,
+      "ticketing",
+      { quantity: 10, ticketType: 0 },
+      { eventRepo: repository },
+    );
+
+    expect(mockFundWithSigner.finalizeFunding).toHaveBeenCalledWith(9n);
+    expect(mockFundWithSigner.startTicketing).toHaveBeenCalledWith(9n, 0, 100n);
+    expect(repository.updateById).toHaveBeenNthCalledWith(
+      1,
+      fundedEvent._id,
+      expect.objectContaining({
+        status: "funded",
+      }),
+    );
+    expect(repository.updateById).toHaveBeenNthCalledWith(
+      2,
+      fundedEvent._id,
+      { status: "ticketing" },
+    );
+    expect(result).toMatchObject({
+      contractEventId: "9",
+      status: "ticketing",
+    });
+  });
+
+  test("blocks ticketing before the configured ticketing start time", async () => {
+    const draftEvent = {
+      _id: "507f1f77bcf86cd799439012",
+      title: "Future ticketing window",
+      organizer: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      status: "funded",
+      contractEventId: "9",
+      fundingGoal: "0",
+      minStakeRequired: "5",
+      organizerStake: "5",
+      ticketPrice: 1,
+      totalTickets: 100,
+      ticketTiers: [{ name: "General", price: 1, totalSupply: 100 }],
+      startDate: new Date("2026-06-01T10:00:00.000Z").toISOString(),
+      ticketingStartAt: new Date("2026-05-30T10:00:00.000Z").toISOString(),
+    };
+
+    const repository = {
+      findById: jest.fn().mockResolvedValue(draftEvent),
+    };
+
+    await expect(
+      updateEventStatus(
+        draftEvent._id,
+        "ticketing",
+        { quantity: 10, ticketType: 0 },
+        { eventRepo: repository },
+      ),
+    ).rejects.toThrow(
+      /Cannot start ticketing before ticketingStartAt/i,
+    );
+
+    expect(mockFundWithSigner.startTicketing).not.toHaveBeenCalled();
+  });
+
+  test("does not mint tickets again when event is already ticketing", async () => {
+    const ticketingEvent = {
+      _id: "507f1f77bcf86cd799439013",
+      title: "Already ticketing",
+      organizer: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      status: "ticketing",
+      contractEventId: "9",
+      ticketPrice: 1,
+      totalTickets: 5,
+      ticketTiers: [{ name: "General", price: 1, totalSupply: 5 }],
+      startDate: new Date("2026-06-01T10:00:00.000Z").toISOString(),
+      ticketingStartAt: new Date("2026-05-30T10:00:00.000Z").toISOString(),
+    };
+
+    const repository = {
+      findById: jest.fn().mockResolvedValue(ticketingEvent),
+    };
+
+    const result = await updateEventStatus(
+      ticketingEvent._id,
+      "ticketing",
+      { quantity: 5, ticketType: 0 },
+      { eventRepo: repository },
+    );
+
+    expect(mockFundWithSigner.finalizeFunding).not.toHaveBeenCalled();
+    expect(mockFundWithSigner.startTicketing).not.toHaveBeenCalled();
+    expect(result).toEqual(ticketingEvent);
   });
 
   test("returns empty investments summary for self-funded event without investors", async () => {

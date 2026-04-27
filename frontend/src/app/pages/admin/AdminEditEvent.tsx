@@ -48,6 +48,22 @@ const isPositiveWeiInteger = (value: string) => {
   return /^[0-9]+$/.test(trimmed) && BigInt(trimmed) > 0n;
 };
 
+const toLocalDateTimeInputValue = (value?: string | null) => {
+  if (!value) return "";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+
+  const pad = (num: number) => String(num).padStart(2, "0");
+  const year = date.getFullYear();
+  const month = pad(date.getMonth() + 1);
+  const day = pad(date.getDate());
+  const hours = pad(date.getHours());
+  const minutes = pad(date.getMinutes());
+
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+};
+
 export const AdminEditEvent: React.FC = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -109,21 +125,15 @@ export const AdminEditEvent: React.FC = () => {
           status: EVENT_STATUSES.includes((foundEvent.status || 'draft') as EventStatus)
             ? (foundEvent.status as EventStatus)
             : 'draft',
-          startDate: foundEvent.startDate
-            ? new Date(foundEvent.startDate).toISOString().slice(0, 16)
-            : "",
-          endDate: foundEvent.endDate
-            ? new Date(foundEvent.endDate).toISOString().slice(0, 16)
-            : '',
+          startDate: toLocalDateTimeInputValue(foundEvent.startDate),
+          endDate: toLocalDateTimeInputValue(foundEvent.endDate),
           fundingGoal:
             foundEvent.fundingGoal != null ? String(foundEvent.fundingGoal) : '',
           minStakeRequired:
             foundEvent.minStakeRequired != null
               ? String(foundEvent.minStakeRequired)
               : '',
-          fundingDeadline: foundEvent.fundingDeadline
-            ? new Date(foundEvent.fundingDeadline).toISOString().slice(0, 16)
-            : '',
+          fundingDeadline: toLocalDateTimeInputValue(foundEvent.fundingDeadline),
           venueName: foundEvent.venue?.name || '',
           venueAddress: foundEvent.venue?.address || '',
           quantity: String(foundEvent.totalTickets && foundEvent.totalTickets > 0 ? foundEvent.totalTickets : 1),
@@ -195,14 +205,7 @@ export const AdminEditEvent: React.FC = () => {
       setError("");
       setSuccess("");
 
-      const quantity = Number(formData.quantity);
       const ticketType = Number(formData.ticketType);
-
-      if (formData.status === 'ticketing') {
-        if (!Number.isInteger(quantity) || quantity <= 0) {
-          throw new Error('Quantity must be a positive integer for ticketing status');
-        }
-      }
 
       const filledTiers = ticketTiers
         .filter(
@@ -213,15 +216,6 @@ export const AdminEditEvent: React.FC = () => {
         price: Number.parseInt(tier.price.trim(), 10),
         totalSupply: Number(tier.supply),
       }));
-
-      let resolvedStatus = currentStatus;
-      if (formData.status !== currentStatus) {
-        const statusResult = await updateAdminEventStatus(id, formData.status, {
-          quantity: formData.status === 'ticketing' ? quantity : undefined,
-          ticketType: formData.status === 'ticketing' ? ticketType : undefined,
-        });
-        resolvedStatus = (statusResult?.status as EventStatus) || formData.status;
-      }
 
       if (!normalizedTiers.length) {
         setError("At least one valid ticket tier is required");
@@ -254,8 +248,9 @@ export const AdminEditEvent: React.FC = () => {
         (sum, tier) => sum + tier.totalSupply,
         0,
       );
+      const quantity = totalTickets;
 
-      await updateAdminEvent(id, {
+      const updatedEvent = await updateAdminEvent(id, {
         title: formData.title,
         description: formData.description,
         category: formData.category,
@@ -272,6 +267,18 @@ export const AdminEditEvent: React.FC = () => {
         totalTickets,
         ticketTiers: normalizedTiers,
       });
+
+      let resolvedStatus = currentStatus;
+      if (formData.status !== currentStatus) {
+        const statusResult = await updateAdminEventStatus(id, formData.status, {
+          quantity: formData.status === 'ticketing' ? quantity : undefined,
+          ticketType: formData.status === 'ticketing' ? ticketType : undefined,
+        });
+        resolvedStatus =
+          (statusResult?.status as EventStatus) ||
+          (updatedEvent?.status as EventStatus) ||
+          formData.status;
+      }
 
       setSuccess("Event updated successfully");
       setCurrentStatus(resolvedStatus);

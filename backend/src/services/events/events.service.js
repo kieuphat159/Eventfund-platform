@@ -22,6 +22,7 @@ import Share from "../../models/Share.model.js";
 import Event from "../../models/Event.model.js";
 import { getFund, getTicket, provider } from "../blockchain/index.js";
 import { persistLogsFromReceipt } from "../blockchain/core/receiptChainLog.js";
+import { scheduleAutoRefundsForTerminalEvent } from "./terminalRefunds.service.js";
 
 // Default upload service instance (lazy initialization for future use)
 let defaultUploadService = null;
@@ -244,6 +245,32 @@ async function tryReleaseRevenueAfterCompletion(
       contractName: "Fund",
       contractAddress: fundAddress,
     });
+
+    try {
+      const stakeTx = await fundWithSigner.withdrawStake(chainEventId);
+      const stakeReceipt = await stakeTx.wait();
+
+      if (stakeReceipt && Number(stakeReceipt.status) === 1) {
+        await persistLogsFromReceipt({
+          receipt: stakeReceipt,
+          contract: fund,
+          contractName: "Fund",
+          contractAddress: fundAddress,
+        });
+      }
+    } catch (stakeError) {
+      const { code, message } = getBlockchainErrorMeta(stakeError);
+      const normalizedMessage = String(message || "").toLowerCase();
+      if (
+        code !== "Unsafe" &&
+        code !== "NothingToClaim" &&
+        !normalizedMessage.includes("nothingtoclaim") &&
+        !normalizedMessage.includes("missing revert data") &&
+        !normalizedMessage.includes("estimate gas")
+      ) {
+        throw stakeError;
+      }
+    }
   } catch (error) {
     if (shouldIgnoreReleaseRevenueError(error)) {
       return;
@@ -495,7 +522,7 @@ function resolveOwnerStatusTransition(currentStatus, requestedStatus) {
   const allowedTransitions = {
     draft: ["cancelled"],
     funding: ["cancelled"],
-    funded: ["cancelled"],
+    funded: ["cancelled", "ticketing"],
     ticketing: ["cancelled", "ongoing"],
     ongoing: ["completed"],
     completed: [],
@@ -521,6 +548,37 @@ function resolveDraftTicketPriceNumber(eventData) {
   if (firstTierPrice === undefined || firstTierPrice === null) return 0;
 
   return Number(firstTierPrice);
+}
+
+function resolveTotalTickets(eventData) {
+  const tierTotal = Array.isArray(eventData.ticketTiers)
+    ? eventData.ticketTiers.reduce((sum, tier) => {
+        const supply = Number(tier?.totalSupply ?? 0);
+        return Number.isInteger(supply) && supply > 0 ? sum + supply : sum;
+      }, 0)
+    : 0;
+
+  const requestedTotal = Number(eventData.totalTickets);
+
+  if (tierTotal > 0) {
+    if (
+      Number.isInteger(requestedTotal) &&
+      requestedTotal > 0 &&
+      requestedTotal !== tierTotal
+    ) {
+      throw new BadRequestError(
+        "totalTickets must equal the sum of ticketTiers totalSupply",
+      );
+    }
+
+    return tierTotal;
+  }
+
+  if (!Number.isInteger(requestedTotal) || requestedTotal <= 0) {
+    throw new BadRequestError("totalTickets must be greater than 0");
+  }
+
+  return requestedTotal;
 }
 
 function calculateCreationFeeWei(ticketPrice, maxTickets) {
@@ -807,10 +865,8 @@ export async function createEvent(eventData, user, repos = {}) {
     );
   }
 
-  const maxTickets = BigInt(eventData.totalTickets);
-  if (maxTickets <= 0n) {
-    throw new BadRequestError("totalTickets must be greater than 0");
-  }
+  const resolvedTotalTickets = resolveTotalTickets(eventData);
+  const maxTickets = BigInt(resolvedTotalTickets);
 
   const creationFeeWei = calculateCreationFeeWei(ticketPrice, maxTickets);
   const organizerStake = creationFeeWei;
@@ -851,6 +907,7 @@ export async function createEvent(eventData, user, repos = {}) {
 
   const event = await repository.createEvent({
     ...eventData,
+    totalTickets: resolvedTotalTickets,
     investmentEnabled,
     organizerShareBps,
     ticketPrice,
@@ -862,13 +919,13 @@ export async function createEvent(eventData, user, repos = {}) {
     minInvestmentAmount: minInvestmentAmount.toString(),
     fundingGoal: fundingGoal.toString(),
     fundingDeadline: fundingDeadlineDate,
-    ticketingStartAt,
-    ticketingEndAt,
     maxTickets: Number(maxTickets),
     currentFunding: "0",
     ticketsSold: 0,
     totalTicketsUsed: 0,
     metadataUri,
+    ...(ticketingStartAt ? { ticketingStartAt } : {}),
+    ...(ticketingEndAt ? { ticketingEndAt } : {}),
   });
 
   try {
@@ -1037,10 +1094,8 @@ export async function createCreateEventIntent(eventData, user, repos = {}) {
     );
   }
 
-  const maxTickets = BigInt(eventData.totalTickets);
-  if (maxTickets <= 0n) {
-    throw new BadRequestError("totalTickets must be greater than 0");
-  }
+  const resolvedTotalTickets = resolveTotalTickets(eventData);
+  const maxTickets = BigInt(resolvedTotalTickets);
 
   const creationFeeWei = calculateCreationFeeWei(ticketPrice, maxTickets);
   const organizerStake = creationFeeWei;
@@ -1083,6 +1138,7 @@ export async function createCreateEventIntent(eventData, user, repos = {}) {
 
   const draftEvent = await repository.createEvent({
     ...eventData,
+    totalTickets: resolvedTotalTickets,
     investmentEnabled,
     organizer,
     status: "draft",
@@ -1094,13 +1150,13 @@ export async function createCreateEventIntent(eventData, user, repos = {}) {
     minInvestmentAmount: minInvestmentAmount.toString(),
     fundingGoal: fundingGoal.toString(),
     fundingDeadline: fundingDeadlineDate,
-    ticketingStartAt,
-    ticketingEndAt,
     maxTickets: Number(maxTickets),
     currentFunding: "0",
     ticketsSold: 0,
     totalTicketsUsed: 0,
     metadataUri,
+    ...(ticketingStartAt ? { ticketingStartAt } : {}),
+    ...(ticketingEndAt ? { ticketingEndAt } : {}),
   });
 
   const [fundAddress, network] = await Promise.all([
@@ -1545,6 +1601,17 @@ export async function updateEvent(eventId, updates, user, repos = {}) {
     sanitizedUpdates.status = nextStatus;
   }
 
+  if (
+    sanitizedUpdates.ticketTiers !== undefined ||
+    sanitizedUpdates.totalTickets !== undefined
+  ) {
+    sanitizedUpdates.totalTickets = resolveTotalTickets({
+      ...event,
+      ...sanitizedUpdates,
+    });
+    sanitizedUpdates.maxTickets = sanitizedUpdates.totalTickets;
+  }
+
   // Prevent changing funding goal after funding starts
   if (
     updates.fundingGoal !== undefined &&
@@ -1566,10 +1633,12 @@ export async function updateEvent(eventId, updates, user, repos = {}) {
     const activeFundContext = await assertEventUsesCurrentFundContract(event);
 
     if (!event.contractEventId) {
-      return await repository.updateById(eventId, {
+      const updatedEvent = await repository.updateById(eventId, {
         ...sanitizedUpdates,
         ...cancellationPatch,
       });
+      scheduleAutoRefundsForTerminalEvent(updatedEvent);
+      return updatedEvent;
     }
 
     if (updates.txHash) {
@@ -1711,10 +1780,12 @@ export async function updateEvent(eventId, updates, user, repos = {}) {
       }
     }
 
-    return await repository.updateById(eventId, {
+    const updatedEvent = await repository.updateById(eventId, {
       ...sanitizedUpdates,
       ...cancellationPatch,
     });
+    scheduleAutoRefundsForTerminalEvent(updatedEvent);
+    return updatedEvent;
   }
 
   if (nextStatus === "completed") {

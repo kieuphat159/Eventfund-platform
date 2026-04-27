@@ -299,6 +299,13 @@ const FUND_COMPLETE_ABI = [
     inputs: [{ name: "eventId", type: "uint256" }],
     outputs: [],
   },
+  {
+    type: "function",
+    name: "withdrawStake",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "eventId", type: "uint256" }],
+    outputs: [],
+  },
 ] as const;
 
 const TICKET_USAGE_ABI = [
@@ -1017,6 +1024,22 @@ function buildReleaseRevenueTransaction(
   };
 }
 
+function buildWithdrawStakeTransaction(event: EventItem): TransactionRequestShape {
+  if (!event.contractEventId) {
+    throw new Error("Event has not been synced on-chain yet.");
+  }
+
+  return {
+    to: "",
+    data: encodeFunctionData({
+      abi: FUND_COMPLETE_ABI,
+      functionName: "withdrawStake",
+      args: [BigInt(event.contractEventId)],
+    }),
+    value: "0",
+  };
+}
+
 function resolveCancellationReason(
   event: EventItem,
   requestedReason?: string,
@@ -1493,8 +1516,10 @@ export async function completeEventWithWalletFallback(
     const config = await getEventBlockchainConfig();
     const completionTransaction = buildCompletionTransaction(currentEvent);
     const releaseTransaction = buildReleaseRevenueTransaction(currentEvent);
+    const withdrawStakeTransaction = buildWithdrawStakeTransaction(currentEvent);
     completionTransaction.to = config.fundAddress;
     releaseTransaction.to = config.fundAddress;
+    withdrawStakeTransaction.to = config.fundAddress;
 
     await ensureProviderChain(provider, config.chainId);
 
@@ -1613,6 +1638,42 @@ export async function completeEventWithWalletFallback(
 
     if (!releaseTxHash) {
       throw new Error("Failed to send release revenue transaction.");
+    }
+
+    const releaseReceipt = await waitForPublicTransactionReceipt(releaseTxHash);
+    if (releaseReceipt.status !== "success") {
+      throw new Error("Release revenue transaction failed on-chain.");
+    }
+
+    try {
+      const withdrawGas = await estimateTransactionGas(
+        provider,
+        fromAddress,
+        withdrawStakeTransaction,
+        250_000n,
+      );
+
+      await provider.request({
+        method: "eth_sendTransaction",
+        params: [
+          {
+            ...txParamsBase,
+            data: withdrawStakeTransaction.data,
+            gas: withdrawGas,
+          },
+        ],
+      });
+    } catch (withdrawError) {
+      const message = getRpcErrorMessage(withdrawError).toLowerCase();
+      if (
+        !message.includes("nothingtoclaim") &&
+        !message.includes("missing revert data") &&
+        !message.includes("estimate gas")
+      ) {
+        throw new Error(
+          `Withdraw organizer stake transaction failed with signer ${fromAddress}: ${mapBundlerAuthError(getRpcErrorMessage(withdrawError))}`,
+        );
+      }
     }
 
     return await updateEvent(eventId, {

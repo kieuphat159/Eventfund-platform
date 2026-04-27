@@ -11,6 +11,7 @@ import { NotFoundError, BadRequestError } from "../../utils/customErrors.js";
 import { getFund, getTicket, provider } from "../blockchain/index.js";
 import { persistLogsFromReceipt } from "../blockchain/core/receiptChainLog.js";
 import { addBigInt, compareBigInt } from "../../utils/bigint.js";
+import { scheduleAutoRefundsForTerminalEvent } from "../events/terminalRefunds.service.js";
 
 // Default upload service instance (lazy initialization for future use)
 let defaultUploadService = null;
@@ -182,6 +183,44 @@ function buildTicketMintPlan(event, options = {}) {
   ];
 }
 
+function resolveTotalTicketsFromUpdate(currentEvent, updates) {
+  const nextTicketTiers =
+    updates.ticketTiers !== undefined
+      ? updates.ticketTiers
+      : currentEvent.ticketTiers;
+  const tierTotal = Array.isArray(nextTicketTiers)
+    ? nextTicketTiers.reduce((sum, tier) => {
+        const supply = Number(tier?.totalSupply ?? 0);
+        return Number.isInteger(supply) && supply > 0 ? sum + supply : sum;
+      }, 0)
+    : 0;
+
+  const requestedTotal =
+    updates.totalTickets !== undefined
+      ? Number(updates.totalTickets)
+      : Number(currentEvent.totalTickets);
+
+  if (tierTotal > 0) {
+    if (
+      Number.isInteger(requestedTotal) &&
+      requestedTotal > 0 &&
+      requestedTotal !== tierTotal
+    ) {
+      throw new BadRequestError(
+        "totalTickets must equal the sum of ticketTiers totalSupply",
+      );
+    }
+
+    return tierTotal;
+  }
+
+  if (!Number.isInteger(requestedTotal) || requestedTotal <= 0) {
+    throw new BadRequestError("totalTickets must be greater than 0");
+  }
+
+  return requestedTotal;
+}
+
 function requiresPerTierPricing(mintPlan, event) {
   const basePrice = toBigIntValue(
     event?.ticketPrice,
@@ -291,6 +330,32 @@ function resolveImmediateFundingDeadline(event) {
   }
 
   return BigInt(Math.floor(Date.now() / 1000));
+}
+
+function isWithinTicketingWindow(event, now = new Date()) {
+  const ticketingStartAt = event?.ticketingStartAt
+    ? new Date(event.ticketingStartAt)
+    : null;
+  if (ticketingStartAt && Number.isFinite(ticketingStartAt.getTime())) {
+    if (now < ticketingStartAt) {
+      throw new BadRequestError(
+        `Cannot start ticketing before ticketingStartAt (${ticketingStartAt.toISOString()})`,
+      );
+    }
+  }
+
+  const ticketingEndAt = event?.ticketingEndAt
+    ? new Date(event.ticketingEndAt)
+    : null;
+  if (ticketingEndAt && Number.isFinite(ticketingEndAt.getTime())) {
+    if (now > ticketingEndAt) {
+      throw new BadRequestError(
+        `Cannot start ticketing after ticketingEndAt (${ticketingEndAt.toISOString()})`,
+      );
+    }
+  }
+
+  return true;
 }
 
 function mapFundCustomErrorToMessage(errorName) {
@@ -442,6 +507,31 @@ async function tryReleaseRevenueAfterCompleted(
       contractName: "Fund",
       contractAddress: fundAddress,
     });
+
+    try {
+      const stakeTx = await fundWithSigner.withdrawStake(chainEventId);
+      const stakeReceipt = await stakeTx.wait();
+
+      if (stakeReceipt && Number(stakeReceipt.status) === 1) {
+        await persistLogsFromReceipt({
+          receipt: stakeReceipt,
+          contract: fund,
+          contractName: "Fund",
+          contractAddress: fundAddress,
+        });
+      }
+    } catch (stakeError) {
+      const message = getOnChainErrorMessage(stakeError).toLowerCase();
+      const revertName = stakeError?.revert?.name;
+      if (
+        !["Unsafe", "NothingToClaim"].includes(revertName) &&
+        !message.includes("nothingtoclaim") &&
+        !message.includes("missing revert data") &&
+        !message.includes("estimate gas")
+      ) {
+        throw stakeError;
+      }
+    }
   } catch (error) {
     if (isIgnorableReleaseRevenueError(error)) {
       return;
@@ -836,6 +926,17 @@ export async function updateEvent(eventId, updates, repos = {}) {
     }
   });
 
+  if (
+    sanitizedUpdates.ticketTiers !== undefined ||
+    sanitizedUpdates.totalTickets !== undefined
+  ) {
+    sanitizedUpdates.totalTickets = resolveTotalTicketsFromUpdate(
+      event,
+      sanitizedUpdates,
+    );
+    sanitizedUpdates.maxTickets = sanitizedUpdates.totalTickets;
+  }
+
   if (Object.keys(sanitizedUpdates).length === 0) {
     throw new BadRequestError("No valid event fields were provided");
   }
@@ -1021,11 +1122,13 @@ export async function updateEventStatus(
       }
     }
 
-    return await eventRepository.updateById(eventId, {
-      ...cancellationPatch,
-      status: resolvedStatus === "failed" ? "failed" : cancellationPatch.status,
-    });
-  }
+      const updatedEvent = await eventRepository.updateById(eventId, {
+        ...cancellationPatch,
+        status: resolvedStatus === "failed" ? "failed" : cancellationPatch.status,
+      });
+      scheduleAutoRefundsForTerminalEvent(updatedEvent);
+      return updatedEvent;
+    }
 
   if (newStatus === "failed") {
     const reasonMeta = normalizeFailureReason(options.reason, event);
@@ -1071,11 +1174,13 @@ export async function updateEventStatus(
     const chainReasonCode = getCancellationReasonLabel(cancelled.args?.reason);
     resolvedStatus = mapCancellationReasonToTerminalStatus(chainReasonCode);
 
-    return await eventRepository.updateById(eventId, {
+    const updatedEvent = await eventRepository.updateById(eventId, {
       ...failurePatch,
       status: resolvedStatus,
       cancellationReason: chainReasonCode,
     });
+    scheduleAutoRefundsForTerminalEvent(updatedEvent);
+    return updatedEvent;
   }
 
   if (newStatus === "ongoing") {
@@ -1089,7 +1194,31 @@ export async function updateEventStatus(
   }
 
   if (newStatus === "ticketing") {
-    if (event.status === "draft" || event.status === "funding") {
+    isWithinTicketingWindow(event);
+
+    // Ticketing is a one-way transition. If the event is already ticketing,
+    // do not mint again or we will duplicate inventory records.
+    if (event.status === "ticketing") {
+      return event;
+    }
+
+    const onChainStatus = mapFundStatusToAppStatus(
+      await fund.getEventStatus(chainEventId),
+    );
+
+    if (onChainStatus === "ticketing") {
+      return await eventRepository.updateById(eventId, {
+        status: "ticketing",
+      });
+    }
+
+    if (onChainStatus === "funded" && event.status !== "funded") {
+      event = await eventRepository.updateById(eventId, {
+        status: "funded",
+      });
+    }
+
+    if (onChainStatus === "funding") {
       let finalizeTx;
       try {
         finalizeTx = await fundWithSigner.finalizeFunding(chainEventId);
@@ -1133,6 +1262,10 @@ export async function updateEventStatus(
           `Cannot start ticketing because event finalized with status ${finalizedStatus}`,
         );
       }
+    } else if (event.status !== "funded") {
+      event = await eventRepository.updateById(eventId, {
+        status: "funded",
+      });
     }
 
     const ticket = getTicket();

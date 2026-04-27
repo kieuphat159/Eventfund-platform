@@ -535,6 +535,15 @@ describe("Fund Smart Contract", () => {
         .to.emit(fund, "RevenueReleased")
         .withArgs(eventId, totalRevenue, platformFee, organizerShare, donatorPool, expectedAcc);
 
+      // Organizer stake is only a refundable deposit; platform fee is charged above.
+      await expect(fund.connect(organizer).withdrawStake(eventId))
+        .to.emit(fund, "StakeWithdrawn")
+        .withArgs(eventId, organizer.address, params.minStake);
+      await expect(fund.connect(organizer).withdrawStake(eventId)).to.be.revertedWithCustomError(
+        fund,
+        "NothingToClaim",
+      );
+
       // Pending reward math matches share ratio
       const expectedReward1 = (donatorPool * c1) / totalShares;
       const expectedReward2 = (donatorPool * c2) / totalShares;

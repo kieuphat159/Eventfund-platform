@@ -759,11 +759,24 @@ contract Fund is IFund, ReentrancyGuard {
     }
 
     // -----------------------
-    // organizer stake is treated as a non-refundable listing fee for now
+    // organizer stake is a refundable deposit after the event is settled.
+    // The actual platform fee is charged once in releaseRevenue().
     // -----------------------
     function withdrawStake(uint256 eventId) external nonReentrant onlyOrganizer(eventId) {
-        _mustGet(eventId);
-        revert Unsafe();
+        EventConfig storage e = _mustGet(eventId);
+
+        if (e.status != EventStatus.Completed) revert Unsafe();
+        if (!e.revenueReleased && !e.refundsEnabled) revert Unsafe();
+
+        uint256 amount = e.organizerStakeLocked;
+        if (amount == 0) revert NothingToClaim();
+
+        e.organizerStakeLocked = 0;
+
+        (bool ok, ) = e.organizer.call{value: amount}("");
+        if (!ok) revert TransferFailed();
+
+        emit StakeWithdrawn(eventId, e.organizer, amount);
     }
 
     // -----------------------

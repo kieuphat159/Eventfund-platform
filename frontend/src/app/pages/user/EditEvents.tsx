@@ -33,6 +33,7 @@ type TicketTierForm = {
 const OWNER_FORWARD_STATUS_OPTIONS: Partial<
   Record<EventStatus, EventStatus[]>
 > = {
+  funded: ["ticketing"],
   ticketing: ["ongoing"],
   ongoing: ["completed"],
 };
@@ -445,8 +446,9 @@ export const EditEvent: React.FC = () => {
                 </p>
                 <p className="text-xs text-slate-400">
                   You can cancel events in `draft`, `funding`, `funded`, or
-                  `ticketing`. Once ticketing starts, you can also advance to
-                  `ongoing`, then `completed`.
+                  `ticketing`. Once funding is settled, you can move a funded
+                  event to `ticketing`, then advance to `ongoing` and
+                  `completed`.
                 </p>
               </div>
               <StatusBadge status={currentStatus as any} />

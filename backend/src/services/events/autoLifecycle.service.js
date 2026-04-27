@@ -2,7 +2,8 @@ import logger from "../../config/logger.js";
 import * as eventRepo from "../../repositories/event.repo.js";
 import * as ticketRepo from "../../repositories/ticket.repo.js";
 import { updateEventStatus } from "../admin/admin.service.js";
-import { getFund } from "../blockchain/index.js";
+import { getFund, getTicket } from "../blockchain/index.js";
+import { scheduleAutoRefundsForTerminalEvent } from "./terminalRefunds.service.js";
 
 let lifecycleTimer = null;
 let tickInFlight = null;
@@ -67,6 +68,14 @@ function isAutoLifecycleEnabled() {
   return !["0", "false", "off", "no"].includes(raw);
 }
 
+function isAutoTicketingEnabled() {
+  const raw = String(
+    process.env.AUTO_EVENT_TICKETING_ENABLED ?? "true",
+  ).trim().toLowerCase();
+
+  return ["1", "true", "on", "yes"].includes(raw);
+}
+
 function getTickIntervalMs() {
   const raw = Number(process.env.AUTO_EVENT_LIFECYCLE_INTERVAL_MS ?? 30_000);
   if (!Number.isFinite(raw) || raw <= 0) return 30_000;
@@ -83,6 +92,10 @@ function getDefaultTicketType() {
   const raw = Number(process.env.AUTO_TICKETING_DEFAULT_TYPE ?? 0);
   if (!Number.isInteger(raw) || raw < 0 || raw > 255) return 0;
   return raw;
+}
+
+function getEventCompletionThresholdBps() {
+  return 3600;
 }
 
 function getTicketSalesThresholdPercent(eventDoc) {
@@ -166,6 +179,7 @@ export async function autoStartTicketing(eventDoc, options = {}) {
   const scopedLogger = options.logger || logger;
   const repositories = options.repositories || {};
   const ticketRepository = repositories.ticketRepo || ticketRepo;
+  const now = options.now instanceof Date ? options.now : new Date();
   const mismatch = await shouldSkipForFundDeploymentMismatch(
     eventDoc,
     scopedLogger,
@@ -177,6 +191,38 @@ export async function autoStartTicketing(eventDoc, options = {}) {
     return {
       skipped: true,
       reason: "missing_event_id",
+    };
+  }
+
+  const ticketingStartAt = eventDoc.ticketingStartAt
+    ? new Date(eventDoc.ticketingStartAt)
+    : null;
+  if (ticketingStartAt && Number.isFinite(ticketingStartAt.getTime()) && now < ticketingStartAt) {
+    return {
+      skipped: true,
+      reason: "ticketing_not_started_yet",
+      eventId: String(eventDoc._id),
+      ticketingStartAt: ticketingStartAt.toISOString(),
+    };
+  }
+
+  const ticketingEndAt = eventDoc.ticketingEndAt
+    ? new Date(eventDoc.ticketingEndAt)
+    : null;
+  if (ticketingEndAt && Number.isFinite(ticketingEndAt.getTime()) && now > ticketingEndAt) {
+    return {
+      skipped: true,
+      reason: "ticketing_window_closed",
+      eventId: String(eventDoc._id),
+      ticketingEndAt: ticketingEndAt.toISOString(),
+    };
+  }
+
+  if (!eventDoc.ticketingStartAt) {
+    return {
+      skipped: true,
+      reason: "missing_ticketing_start_at",
+      eventId: String(eventDoc._id),
     };
   }
 
@@ -301,11 +347,137 @@ export async function autoResolveTicketingOutcome(eventDoc, options = {}) {
     `[auto-lifecycle] failed event ${eventDoc._id} after ticketing window with ${soldCount}/${maxTickets} ticket(s) sold`,
   );
 
+  scheduleAutoRefundsForTerminalEvent(result || eventDoc, {
+    logger: scopedLogger,
+    repositories,
+    signer: options.signer,
+    ticketContract: options.ticketContract,
+    fundContract: options.fundContract,
+  });
+
   return {
     eventId: String(eventDoc._id),
     status: result?.status || null,
     soldCount,
     maxTickets,
+  };
+}
+
+export async function autoResolveEndedEvent(eventDoc, options = {}) {
+  const scopedLogger = options.logger || logger;
+  const repositories = options.repositories || {};
+  const mismatch = await shouldSkipForFundDeploymentMismatch(
+    eventDoc,
+    scopedLogger,
+    options,
+  );
+  if (mismatch) return mismatch;
+
+  if (!eventDoc?._id) {
+    return {
+      skipped: true,
+      reason: "missing_event_id",
+    };
+  }
+
+  if (!eventDoc.endDate) {
+    return {
+      skipped: true,
+      reason: "missing_end_date",
+      eventId: String(eventDoc._id),
+    };
+  }
+
+  if (!eventDoc.contractEventId) {
+    return {
+      skipped: true,
+      reason: "missing_contract_event_id",
+      eventId: String(eventDoc._id),
+    };
+  }
+
+  const now = options.now instanceof Date ? options.now : new Date();
+  const endDate = new Date(eventDoc.endDate);
+  if (!Number.isFinite(endDate.getTime())) {
+    return {
+      skipped: true,
+      reason: "invalid_end_date",
+      eventId: String(eventDoc._id),
+    };
+  }
+
+  if (now < endDate) {
+    return {
+      skipped: true,
+      reason: "event_not_ended",
+      eventId: String(eventDoc._id),
+      endDate: endDate.toISOString(),
+    };
+  }
+
+  const chainEventId = BigInt(eventDoc.contractEventId);
+  const ticketContract = options.ticketContract || getTicket();
+  const [totalMinted, totalSold, totalUsed] = await ticketContract.getUsageStats(
+    chainEventId,
+  );
+
+  const soldCount = Number(totalSold || 0n);
+  const usedCount = Number(totalUsed || 0n);
+  const thresholdBps = getEventCompletionThresholdBps();
+  const requiredUsed =
+    soldCount > 0
+      ? Math.ceil((soldCount * thresholdBps) / 10000)
+      : 0;
+
+  if (soldCount > 0 && usedCount >= requiredUsed) {
+    const result = await updateEventStatus(
+      String(eventDoc._id),
+      "completed",
+      {},
+      repositories,
+    );
+
+    scopedLogger.info(
+      `[auto-lifecycle] completed event ${eventDoc._id} after endDate with ${usedCount}/${soldCount} checked-in ticket(s)`,
+    );
+
+    return {
+      eventId: String(eventDoc._id),
+      status: result?.status || null,
+      totalMinted: Number(totalMinted || 0n),
+      soldCount,
+      usedCount,
+      requiredUsed,
+    };
+  }
+
+  const result = await updateEventStatus(
+    String(eventDoc._id),
+    "failed",
+    { reason: "ticket_sales_not_met" },
+    repositories,
+  );
+
+  const settledEvent = result || eventDoc;
+  scheduleAutoRefundsForTerminalEvent(settledEvent, {
+    logger: scopedLogger,
+    repositories,
+    signer: options.signer,
+    ticketContract: options.ticketContract,
+    fundContract: options.fundContract,
+  });
+
+  scopedLogger.info(
+    `[auto-lifecycle] failed event ${eventDoc._id} after endDate with ${usedCount}/${soldCount} checked-in ticket(s)`,
+  );
+
+  return {
+    eventId: String(eventDoc._id),
+    status: result?.status || null,
+    totalMinted: Number(totalMinted || 0n),
+    soldCount,
+    usedCount,
+    requiredUsed,
   };
 }
 
@@ -360,28 +532,32 @@ export async function runAutoEventLifecycleTick(options = {}) {
       }
     }
 
-    const ticketingCandidates =
-      await eventRepository.findDueTicketingStartEvents(now, scanLimit);
+  const ticketingCandidates =
+      isAutoTicketingEnabled()
+        ? await eventRepository.findDueTicketingStartEvents(now, scanLimit)
+        : [];
     const ticketingResults = [];
 
-    for (const eventDoc of ticketingCandidates) {
-      try {
-        ticketingResults.push(
-          await scheduleLifecycleTask(
-            eventDoc,
-            autoStartTicketing,
-            scopedOptions,
-          ),
-        );
-      } catch (error) {
-        ticketingResults.push({
-          eventId: String(eventDoc?._id || ""),
-          failed: true,
-          error: error?.message || String(error),
-        });
-        scopedLogger.error(
-          `[auto-lifecycle] ticketing start failed for event ${eventDoc?._id}: ${error?.message || error}`,
-        );
+    if (isAutoTicketingEnabled()) {
+      for (const eventDoc of ticketingCandidates) {
+        try {
+          ticketingResults.push(
+            await scheduleLifecycleTask(
+              eventDoc,
+              autoStartTicketing,
+              scopedOptions,
+            ),
+          );
+        } catch (error) {
+          ticketingResults.push({
+            eventId: String(eventDoc?._id || ""),
+            failed: true,
+            error: error?.message || String(error),
+          });
+          scopedLogger.error(
+            `[auto-lifecycle] ticketing start failed for event ${eventDoc?._id}: ${error?.message || error}`,
+          );
+        }
       }
     }
 
@@ -410,13 +586,42 @@ export async function runAutoEventLifecycleTick(options = {}) {
       }
     }
 
+    const settlementCandidates = await eventRepository.findDueEventSettlementEvents(
+      now,
+      scanLimit,
+    );
+    const settlementResults = [];
+
+    for (const eventDoc of settlementCandidates) {
+      try {
+        settlementResults.push(
+          await scheduleLifecycleTask(
+            eventDoc,
+            autoResolveEndedEvent,
+            scopedOptions,
+          ),
+        );
+      } catch (error) {
+        settlementResults.push({
+          eventId: String(eventDoc?._id || ""),
+          failed: true,
+          error: error?.message || String(error),
+        });
+        scopedLogger.error(
+          `[auto-lifecycle] settlement failed for event ${eventDoc?._id}: ${error?.message || error}`,
+        );
+      }
+    }
+
     return {
       fundingChecked: fundingCandidates.length,
       ticketingChecked: ticketingCandidates.length,
       ticketingResolutionChecked: ticketingResolutionCandidates.length,
+      settlementChecked: settlementCandidates.length,
       fundingResults,
       ticketingResults,
       ticketingResolutionResults,
+      settlementResults,
     };
   })().finally(() => {
     tickInFlight = null;

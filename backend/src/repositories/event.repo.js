@@ -198,6 +198,7 @@ export async function upsertByContractEventId(contractEventId, data, models = {}
     organizerShareBps: data.organizerShareBps,
     ticketPrice: data.ticketPrice,
     maxTickets: data.maxTickets,
+    totalTickets: data.totalTickets ?? data.maxTickets,
     usedThreshold: data.usedThreshold,
     organizerStake: data.organizerStake, // was organizerStakeLocked — corrected
     status: data.status,
@@ -317,8 +318,11 @@ export async function findDueTicketingStartEvents(
   const Event = models.Event || DefaultEvent;
   return await Event.find({
     contractEventId: { $exists: true, $ne: null },
-    status: "funded",
-    ticketingStartAt: { $lte: now },
+    status: { $in: ["funding", "funded"] },
+    ticketingStartAt: {
+      $exists: true,
+      $ne: null,
+    },
   })
     .sort({ ticketingStartAt: 1, createdAt: 1 })
     .limit(limit)
@@ -344,6 +348,29 @@ export async function findDueTicketingResolutionEvents(
     ticketingEndAt: { $lte: now },
   })
     .sort({ ticketingEndAt: 1, createdAt: 1 })
+    .limit(limit)
+    .lean();
+}
+
+/**
+ * Find ongoing events whose event end date has passed and need final settlement.
+ * @param {Date} now
+ * @param {number} limit
+ * @param {Object} models - Injected models (optional)
+ * @returns {Promise<Array<Object>>}
+ */
+export async function findDueEventSettlementEvents(
+  now = new Date(),
+  limit = 50,
+  models = {},
+) {
+  const Event = models.Event || DefaultEvent;
+  return await Event.find({
+    contractEventId: { $exists: true, $ne: null },
+    status: "ongoing",
+    endDate: { $lte: now },
+  })
+    .sort({ endDate: 1, createdAt: 1 })
     .limit(limit)
     .lean();
 }
@@ -454,6 +481,7 @@ export default {
   findDueFundingFinalizationEvents,
   findDueTicketingStartEvents,
   findDueTicketingResolutionEvents,
+  findDueEventSettlementEvents,
   findMatchingDraftForOnChainEvent,
   isTxHashProcessed,
   markTxHashProcessed,
