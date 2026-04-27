@@ -223,7 +223,9 @@ export const MyInvestments: React.FC = () => {
                 );
                 const isProfit = compareIntegerValues(profitLoss, "0") >= 0;
                 const canClaimRefund =
-                  investment.eventId?.status === "cancelled" &&
+                  ["cancelled", "failed"].includes(
+                    investment.eventId?.status || "",
+                  ) &&
                   compareIntegerValues(investment.contributionAmount, "0") > 0;
                 const refundEventId = investment.eventId?._id || null;
 

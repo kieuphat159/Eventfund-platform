@@ -11,6 +11,7 @@ import { NotFoundError, BadRequestError } from "../../utils/customErrors.js";
 import { getFund, getTicket, provider } from "../blockchain/index.js";
 import { persistLogsFromReceipt } from "../blockchain/core/receiptChainLog.js";
 import { addBigInt, compareBigInt } from "../../utils/bigint.js";
+import { scheduleAutoRefundsForTerminalEvent } from "../events/terminalRefunds.service.js";
 
 // Default upload service instance (lazy initialization for future use)
 let defaultUploadService = null;
@@ -24,6 +25,17 @@ function getDefaultUploadService() {
 const createEventWithInvestmentInterface = new ethers.Interface([
   "function createEventWithInvestment(uint256 fundingGoal,uint256 fundingDeadline,uint256 minStakeRequired,uint256 organizerShareBps,uint256 ticketPrice,uint256 maxTickets,uint256 usedThreshold,bool investmentEnabled) payable returns (uint256 eventId)",
 ]);
+const startTicketingWithPriceInterface = new ethers.Interface([
+  "function startTicketingWithPrice(uint256 eventId,uint8 ticketType,uint256 quantity,uint256 batchPrice) returns (uint256[] memory tokenIds)",
+]);
+const COMPLETION_THRESHOLD_BPS = 3600n;
+const BPS_DENOMINATOR = 10000n;
+
+function getHardcodedUsedThreshold(maxTickets) {
+  // Hardcoded temporary policy: completed when >= 36% tickets are used.
+  // Round up to avoid allowing less than 36% because of integer truncation.
+  return (maxTickets * COMPLETION_THRESHOLD_BPS + (BPS_DENOMINATOR - 1n)) / BPS_DENOMINATOR;
+}
 
 function getBackendSigner() {
   const privateKey = process.env.BACKEND_SIGNER_PRIVATE_KEY;
@@ -64,6 +76,33 @@ async function sendCreateEventWithInvestmentTx(
   });
 }
 
+async function sendStartTicketingWithPriceTx(
+  fundContract,
+  fundWithSigner,
+  args,
+) {
+  if (typeof fundWithSigner.startTicketingWithPrice === "function") {
+    return fundWithSigner.startTicketingWithPrice(...args);
+  }
+
+  const runner = fundWithSigner.runner;
+  if (!runner?.sendTransaction) {
+    throw new BadRequestError(
+      "Signer runner is unavailable for startTicketingWithPrice",
+    );
+  }
+
+  const to = await fundContract.getAddress();
+  return runner.sendTransaction({
+    to,
+    data: startTicketingWithPriceInterface.encodeFunctionData(
+      "startTicketingWithPrice",
+      args,
+    ),
+    value: 0n,
+  });
+}
+
 function mapFundStatusToAppStatus(statusCode) {
   const map = {
     0: "draft",
@@ -83,6 +122,112 @@ function mapChainTicketTypeToDb(ticketTypeValue) {
   if (value === 2) return "early_bird";
   if (value === 3) return "etc";
   return "standard";
+}
+
+function mapTierNameToChainTicketType(name = "") {
+  const normalized = String(name).trim().toLowerCase();
+  if (normalized.includes("vip")) return 1;
+  if (normalized.includes("early")) return 2;
+  if (normalized.includes("group")) return 3;
+  return 0;
+}
+
+function buildTicketMintPlan(event, options = {}) {
+  const normalizedTiers = Array.isArray(event?.ticketTiers)
+    ? event.ticketTiers
+        .map((tier) => ({
+          name: String(tier?.name || "").trim(),
+          totalSupply: Number(tier?.totalSupply ?? 0),
+          price: tier?.price,
+        }))
+        .filter(
+          (tier) =>
+            tier.name &&
+            Number.isInteger(tier.totalSupply) &&
+            tier.totalSupply > 0 &&
+            tier.price !== undefined &&
+            tier.price !== null &&
+            tier.price !== "",
+        )
+    : [];
+
+  if (normalizedTiers.length > 0) {
+    return normalizedTiers.map((tier) => ({
+      quantity: tier.totalSupply,
+      ticketType: mapTierNameToChainTicketType(tier.name),
+      price: BigInt(tier.price),
+    }));
+  }
+
+  const quantity = Number(options.quantity ?? event?.maxTickets ?? event?.totalTickets ?? 0);
+  if (!Number.isInteger(quantity) || quantity <= 0) {
+    throw new BadRequestError(
+      "quantity is required and must be a positive integer for ticketing transition",
+    );
+  }
+
+  const price = toBigIntValue(
+    event?.ticketPrice,
+    BigInt(event?.ticketTiers?.[0]?.price ?? 0),
+  );
+  if (price <= 0n) {
+    throw new BadRequestError("ticketPrice is required to mint tickets");
+  }
+
+  return [
+    {
+      quantity,
+      ticketType: Number(options.ticketType ?? 0),
+      price,
+    },
+  ];
+}
+
+function resolveTotalTicketsFromUpdate(currentEvent, updates) {
+  const nextTicketTiers =
+    updates.ticketTiers !== undefined
+      ? updates.ticketTiers
+      : currentEvent.ticketTiers;
+  const tierTotal = Array.isArray(nextTicketTiers)
+    ? nextTicketTiers.reduce((sum, tier) => {
+        const supply = Number(tier?.totalSupply ?? 0);
+        return Number.isInteger(supply) && supply > 0 ? sum + supply : sum;
+      }, 0)
+    : 0;
+
+  const requestedTotal =
+    updates.totalTickets !== undefined
+      ? Number(updates.totalTickets)
+      : Number(currentEvent.totalTickets);
+
+  if (tierTotal > 0) {
+    if (
+      Number.isInteger(requestedTotal) &&
+      requestedTotal > 0 &&
+      requestedTotal !== tierTotal
+    ) {
+      throw new BadRequestError(
+        "totalTickets must equal the sum of ticketTiers totalSupply",
+      );
+    }
+
+    return tierTotal;
+  }
+
+  if (!Number.isInteger(requestedTotal) || requestedTotal <= 0) {
+    throw new BadRequestError("totalTickets must be greater than 0");
+  }
+
+  return requestedTotal;
+}
+
+function requiresPerTierPricing(mintPlan, event) {
+  const basePrice = toBigIntValue(
+    event?.ticketPrice,
+    BigInt(event?.ticketTiers?.[0]?.price ?? 0),
+  );
+
+  return mintPlan.some((batch) => batch.price !== basePrice);
 }
 
 function toBigIntValue(value, fallback = 0n) {
@@ -105,48 +250,72 @@ const CHAIN_CANCELLATION_REASON = {
   ticket_sales_not_met: 2,
 };
 
+const CHAIN_CANCELLATION_REASON_LABEL = {
+  0: "funding_goal_not_met",
+  1: "organizer_cancelled",
+  2: "ticket_sales_not_met",
+};
+
+function getCancellationReasonLabel(reasonValue) {
+  return (
+    CHAIN_CANCELLATION_REASON_LABEL[Number(reasonValue)] ||
+    "organizer_cancelled"
+  );
+}
+
+function mapCancellationReasonToTerminalStatus(reasonCode) {
+  return reasonCode === "organizer_cancelled" ? "cancelled" : "failed";
+}
+
 function normalizeCancellationReason(inputReason, event = null) {
-  const rawReason =
-    typeof inputReason === "string" ? inputReason.trim() : "";
+  const rawReason = typeof inputReason === "string" ? inputReason.trim() : "";
   const normalizedReason = rawReason.toLowerCase();
 
-  if (CHAIN_CANCELLATION_REASON[normalizedReason] !== undefined) {
+  if (normalizedReason === "organizer_cancelled") {
     return {
       reasonCode: normalizedReason,
       cancellationNote: null,
     };
   }
 
-  let reasonCode = "organizer_cancelled";
-  if (event?.status === "ticketing") {
-    reasonCode = "ticket_sales_not_met";
-  } else if (event?.status === "funding") {
-    const fundingGoal = toBigIntValue(event.fundingGoal, 0n);
-    const currentFunding = toBigIntValue(event.currentFunding, 0n);
-    const fundingDeadline = event?.fundingDeadline
-      ? new Date(event.fundingDeadline)
-      : null;
-    const afterDeadline =
-      fundingDeadline && Number.isFinite(fundingDeadline.getTime())
-        ? fundingDeadline.getTime() <= Date.now()
-        : false;
-
-    if (fundingGoal > 0n && currentFunding < fundingGoal && afterDeadline) {
-      reasonCode = "funding_goal_not_met";
-    }
-  }
-
   return {
-    reasonCode,
+    reasonCode: "organizer_cancelled",
     cancellationNote: rawReason || null,
   };
 }
 
-function buildCancellationPatch(reasonMeta, actor = null) {
+function normalizeFailureReason(inputReason, event = null) {
+  const rawReason = typeof inputReason === "string" ? inputReason.trim() : "";
+  const normalizedReason = rawReason.toLowerCase();
+
+  if (
+    normalizedReason === "funding_goal_not_met" ||
+    normalizedReason === "ticket_sales_not_met"
+  ) {
+    return {
+      reasonCode: normalizedReason,
+      cancellationNote: null,
+    };
+  }
+
+  if (event?.status === "ticketing") {
+    return {
+      reasonCode: "ticket_sales_not_met",
+      cancellationNote: rawReason || null,
+    };
+  }
+
+  return {
+    reasonCode: "funding_goal_not_met",
+    cancellationNote: rawReason || null,
+  };
+}
+
+function buildTerminalStatusPatch(status, reasonMeta, actor = null) {
   const actorAddress = actor?.walletAddress || actor?.smartAccountAddress;
 
   return {
-    status: "cancelled",
+    status,
     cancellationReason: reasonMeta.reasonCode,
     cancellationNote: reasonMeta.cancellationNote,
     cancelledAt: new Date(),
@@ -163,6 +332,89 @@ function resolveImmediateFundingDeadline(event) {
   return BigInt(Math.floor(Date.now() / 1000));
 }
 
+function isWithinTicketingWindow(event, now = new Date()) {
+  const ticketingStartAt = event?.ticketingStartAt
+    ? new Date(event.ticketingStartAt)
+    : null;
+  if (ticketingStartAt && Number.isFinite(ticketingStartAt.getTime())) {
+    if (now < ticketingStartAt) {
+      throw new BadRequestError(
+        `Cannot start ticketing before ticketingStartAt (${ticketingStartAt.toISOString()})`,
+      );
+    }
+  }
+
+  const ticketingEndAt = event?.ticketingEndAt
+    ? new Date(event.ticketingEndAt)
+    : null;
+  if (ticketingEndAt && Number.isFinite(ticketingEndAt.getTime())) {
+    if (now > ticketingEndAt) {
+      throw new BadRequestError(
+        `Cannot start ticketing after ticketingEndAt (${ticketingEndAt.toISOString()})`,
+      );
+    }
+  }
+
+  return true;
+}
+
+function mapFundCustomErrorToMessage(errorName) {
+  const messages = {
+    NotAuthorized:
+      "Backend signer is not authorized for this action on-chain. Use organizer wallet signature.",
+    NotOrganizer:
+      "Only the organizer wallet can mark event as completed on-chain. Use organizer flow or configure BACKEND_SIGNER_PRIVATE_KEY to organizer wallet.",
+    EventNotFound: "Event was not found on-chain.",
+    AlreadyFinalized: "Event is already finalized on-chain.",
+    Unsafe:
+      "Event cannot transition in its current on-chain state. Ensure lifecycle status conditions are satisfied.",
+    BadParam:
+      "On-chain parameters are invalid for current event state (e.g. no escrowed revenue for release).",
+    NotFunding: "Event is not in funding state on-chain.",
+    NotFunded: "Event is not in funded state on-chain.",
+    NotTicketing:
+      "Event is not in ticketing state on-chain. Completed transition requires ticketing status.",
+    NotCompleted: "Event is not completed on-chain.",
+    FundingClosed: "Funding is already closed on-chain.",
+    ShareLocked: "Event shares are already finalized on-chain.",
+    TicketContractNotSet: "Ticket contract is not configured on-chain.",
+  };
+
+  return messages[errorName] || null;
+}
+
+function extractBlockchainErrorData(error) {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  const queue = [error];
+  const visited = new Set();
+
+  while (queue.length) {
+    const current = queue.shift();
+    if (!current || typeof current !== "object" || visited.has(current)) {
+      continue;
+    }
+
+    visited.add(current);
+
+    if (
+      typeof current.data === "string" &&
+      current.data.startsWith("0x") &&
+      current.data.length >= 10
+    ) {
+      return current.data;
+    }
+
+    if (current.error) queue.push(current.error);
+    if (current.info?.error) queue.push(current.info.error);
+    if (current.cause) queue.push(current.cause);
+  }
+
+  return null;
+}
+
 function getOnChainErrorMessage(error) {
   if (!error || typeof error !== "object") {
     return String(error || "Unknown blockchain error");
@@ -177,21 +429,123 @@ function getOnChainErrorMessage(error) {
     err.message ||
     "Unknown blockchain error";
 
+  if (typeof err.revert?.name === "string") {
+    const mapped = mapFundCustomErrorToMessage(err.revert.name);
+    if (mapped) {
+      return mapped;
+    }
+  }
+
+  const errorData = extractBlockchainErrorData(err);
+  if (errorData) {
+    try {
+      const fund = getFund();
+      if (typeof fund?.interface?.parseError === "function") {
+        const parsedError = fund.interface.parseError(errorData);
+        const errorName = parsedError?.name;
+        const mapped = errorName
+          ? mapFundCustomErrorToMessage(errorName)
+          : null;
+        if (mapped) {
+          return mapped;
+        }
+      }
+    } catch {
+      // Ignore parse failures and fall back to raw message.
+    }
+  }
+
   const normalized = String(message).toLowerCase();
-  if (
-    normalized.includes("execution reverted") ||
-    normalized.includes("missing revert data") ||
-    normalized.includes("estimate gas")
-  ) {
-    return "Transaction reverted on-chain. Try reducing mint quantity per batch and ensure the event can transition to the requested status.";
+  if (normalized.includes("missing revert data")) {
+    return "Transaction reverted on-chain without revert data. Verify FUND_ADDRESS points to the expected deployed Fund contract and ABI is in sync.";
+  }
+
+  if (normalized.includes("execution reverted")) {
+    return "Transaction reverted on-chain. Check event lifecycle conditions (funding/ticketing/completed) and caller authorization.";
+  }
+
+  if (normalized.includes("estimate gas")) {
+    return "On-chain precheck failed (estimate gas reverted). The transition is invalid in current state or signer is not authorized.";
   }
 
   return String(message);
 }
 
+function isIgnorableReleaseRevenueError(error) {
+  if (error && typeof error === "object") {
+    const revertName = error.revert?.name;
+    if (revertName === "BadParam" || revertName === "AlreadyFinalized") {
+      return true;
+    }
+  }
+
+  const message = getOnChainErrorMessage(error).toLowerCase();
+  return (
+    message.includes("already finalized") ||
+    message.includes("missing revert data") ||
+    message.includes("estimate gas")
+  );
+}
+
+async function tryReleaseRevenueAfterCompleted(
+  fundWithSigner,
+  chainEventId,
+  fund,
+  fundAddress,
+) {
+  try {
+    const releaseTx = await fundWithSigner.releaseRevenue(chainEventId);
+    const releaseReceipt = await releaseTx.wait();
+
+    if (!releaseReceipt || Number(releaseReceipt.status) !== 1) {
+      throw new BadRequestError("On-chain release revenue transaction failed");
+    }
+
+    await persistLogsFromReceipt({
+      receipt: releaseReceipt,
+      contract: fund,
+      contractName: "Fund",
+      contractAddress: fundAddress,
+    });
+
+    try {
+      const stakeTx = await fundWithSigner.withdrawStake(chainEventId);
+      const stakeReceipt = await stakeTx.wait();
+
+      if (stakeReceipt && Number(stakeReceipt.status) === 1) {
+        await persistLogsFromReceipt({
+          receipt: stakeReceipt,
+          contract: fund,
+          contractName: "Fund",
+          contractAddress: fundAddress,
+        });
+      }
+    } catch (stakeError) {
+      const message = getOnChainErrorMessage(stakeError).toLowerCase();
+      const revertName = stakeError?.revert?.name;
+      if (
+        !["Unsafe", "NothingToClaim"].includes(revertName) &&
+        !message.includes("nothingtoclaim") &&
+        !message.includes("missing revert data") &&
+        !message.includes("estimate gas")
+      ) {
+        throw stakeError;
+      }
+    }
+  } catch (error) {
+    if (isIgnorableReleaseRevenueError(error)) {
+      return;
+    }
+
+    throw new BadRequestError(
+      `Event completed on-chain but release revenue failed: ${getOnChainErrorMessage(error)}`,
+    );
+  }
+}
+
 function getTicketingMintBatchSize() {
-  const raw = Number(process.env.TICKETING_MINT_BATCH_SIZE ?? 100);
-  if (!Number.isFinite(raw) || raw <= 0) return 100;
+  const raw = Number(process.env.TICKETING_MINT_BATCH_SIZE ?? 1000);
+  if (!Number.isFinite(raw) || raw <= 0) return 1000;
   return Math.floor(raw);
 }
 
@@ -256,9 +610,7 @@ async function publishDraftEventOnChain(event, eventRepository) {
     BigInt(event.ticketTiers?.[0]?.price ?? 0),
   );
   const maxTickets = BigInt(event.maxTickets ?? event.totalTickets ?? 0);
-  const usedThreshold = BigInt(
-    event.usedThreshold ?? event.totalTickets ?? maxTickets,
-  );
+  const usedThreshold = getHardcodedUsedThreshold(maxTickets);
   const fundingDeadline = investmentEnabled
     ? BigInt(Math.floor(new Date(event.fundingDeadline).getTime() / 1000))
     : 0n;
@@ -574,6 +926,17 @@ export async function updateEvent(eventId, updates, repos = {}) {
     }
   });
 
+  if (
+    sanitizedUpdates.ticketTiers !== undefined ||
+    sanitizedUpdates.totalTickets !== undefined
+  ) {
+    sanitizedUpdates.totalTickets = resolveTotalTicketsFromUpdate(
+      event,
+      sanitizedUpdates,
+    );
+    sanitizedUpdates.maxTickets = sanitizedUpdates.totalTickets;
+  }
+
   if (Object.keys(sanitizedUpdates).length === 0) {
     throw new BadRequestError("No valid event fields were provided");
   }
@@ -631,11 +994,25 @@ export async function updateEventStatus(
         const reasonMeta = normalizeCancellationReason(options.reason, event);
         return await eventRepository.updateById(
           eventId,
-          buildCancellationPatch(reasonMeta, actor),
+          buildTerminalStatusPatch("cancelled", reasonMeta, actor),
         );
       }
 
-      return await eventRepository.updateById(eventId, { status: newStatus });
+      const reasonMeta = normalizeFailureReason(options.reason, event);
+      return await eventRepository.updateById(
+        eventId,
+        buildTerminalStatusPatch("failed", reasonMeta, actor),
+      );
+    }
+
+    if (newStatus === "ongoing") {
+      if (event.status !== "ticketing") {
+        throw new BadRequestError(
+          `Cannot move event to ongoing from status ${event.status}`,
+        );
+      }
+
+      return await eventRepository.updateById(eventId, { status: "ongoing" });
     }
 
     if (toBigIntValue(event.fundingGoal, 0n) > 0n) {
@@ -663,13 +1040,30 @@ export async function updateEventStatus(
   const chainEventId = BigInt(event.contractEventId);
   const fundAddress = await fund.getAddress();
 
+  if (newStatus === "completed") {
+    const signerAddress = String(signer.address || "").toLowerCase();
+    const organizerAddress = String(
+      event.onChainOrganizer || event.organizer || "",
+    ).toLowerCase();
+
+    if (organizerAddress && signerAddress !== organizerAddress) {
+      throw new BadRequestError(
+        "Cannot mark completed with current backend signer. Fund.setCompletedIfThresholdMet requires organizer wallet.",
+      );
+    }
+  }
+
   let tx;
   let receipt;
   let resolvedStatus = newStatus;
 
   if (newStatus === "cancelled") {
     const reasonMeta = normalizeCancellationReason(options.reason, event);
-    const cancellationPatch = buildCancellationPatch(reasonMeta, actor);
+    const cancellationPatch = buildTerminalStatusPatch(
+      "cancelled",
+      reasonMeta,
+      actor,
+    );
 
     try {
       if (reasonMeta.reasonCode === "funding_goal_not_met") {
@@ -718,7 +1112,9 @@ export async function updateEventStatus(
         );
       }
     } else {
-      const cancelled = parsedEvents.find((evt) => evt?.name === "EventCancelled");
+      const cancelled = parsedEvents.find(
+        (evt) => evt?.name === "EventCancelled",
+      );
       if (!cancelled) {
         throw new BadRequestError(
           "EventCancelled event not found in transaction receipt",
@@ -726,23 +1122,103 @@ export async function updateEventStatus(
       }
     }
 
-    return await eventRepository.updateById(eventId, {
-      ...cancellationPatch,
-      status: resolvedStatus,
-    });
-  }
+      const updatedEvent = await eventRepository.updateById(eventId, {
+        ...cancellationPatch,
+        status: resolvedStatus === "failed" ? "failed" : cancellationPatch.status,
+      });
+      scheduleAutoRefundsForTerminalEvent(updatedEvent);
+      return updatedEvent;
+    }
 
-  if (newStatus === "ticketing") {
-    const ticketType = Number(options.ticketType ?? 0);
-    const quantity = Number(options.quantity ?? 0);
+  if (newStatus === "failed") {
+    const reasonMeta = normalizeFailureReason(options.reason, event);
+    const failurePatch = buildTerminalStatusPatch("failed", reasonMeta, actor);
 
-    if (!Number.isInteger(quantity) || quantity <= 0) {
+    try {
+      if (reasonMeta.reasonCode === "funding_goal_not_met") {
+        tx = await fundWithSigner.finalizeFunding(chainEventId);
+      } else {
+        tx = await fundWithSigner.cancelEvent(
+          chainEventId,
+          CHAIN_CANCELLATION_REASON[reasonMeta.reasonCode],
+        );
+      }
+    } catch (error) {
       throw new BadRequestError(
-        "quantity is required and must be a positive integer for ticketing transition",
+        `Failed to mark event as failed on-chain: ${getOnChainErrorMessage(error)}`,
       );
     }
 
-    if (event.status === "draft" || event.status === "funding") {
+    receipt = await tx.wait();
+    if (!receipt || Number(receipt.status) !== 1) {
+      throw new BadRequestError("On-chain failure transition failed");
+    }
+
+    await persistLogsFromReceipt({
+      receipt,
+      contract: fund,
+      contractName: "Fund",
+      contractAddress: fundAddress,
+    });
+
+    const parsedEvents = await parseFundEventsFromReceipt(receipt);
+    const cancelled = parsedEvents.find(
+      (evt) => evt?.name === "EventCancelled",
+    );
+    if (!cancelled) {
+      throw new BadRequestError(
+        "EventCancelled event not found in transaction receipt",
+      );
+    }
+
+    const chainReasonCode = getCancellationReasonLabel(cancelled.args?.reason);
+    resolvedStatus = mapCancellationReasonToTerminalStatus(chainReasonCode);
+
+    const updatedEvent = await eventRepository.updateById(eventId, {
+      ...failurePatch,
+      status: resolvedStatus,
+      cancellationReason: chainReasonCode,
+    });
+    scheduleAutoRefundsForTerminalEvent(updatedEvent);
+    return updatedEvent;
+  }
+
+  if (newStatus === "ongoing") {
+    if (event.status !== "ticketing") {
+      throw new BadRequestError(
+        `Cannot move event to ongoing from status ${event.status}`,
+      );
+    }
+
+    return await eventRepository.updateById(eventId, { status: "ongoing" });
+  }
+
+  if (newStatus === "ticketing") {
+    isWithinTicketingWindow(event);
+
+    // Ticketing is a one-way transition. If the event is already ticketing,
+    // do not mint again or we will duplicate inventory records.
+    if (event.status === "ticketing") {
+      return event;
+    }
+
+    const onChainStatus = mapFundStatusToAppStatus(
+      await fund.getEventStatus(chainEventId),
+    );
+
+    if (onChainStatus === "ticketing") {
+      return await eventRepository.updateById(eventId, {
+        status: "ticketing",
+      });
+    }
+
+    if (onChainStatus === "funded" && event.status !== "funded") {
+      event = await eventRepository.updateById(eventId, {
+        status: "funded",
+      });
+    }
+
+    if (onChainStatus === "funding") {
       let finalizeTx;
       try {
         finalizeTx = await fundWithSigner.finalizeFunding(chainEventId);
@@ -786,6 +1262,10 @@ export async function updateEventStatus(
           `Cannot start ticketing because event finalized with status ${finalizedStatus}`,
         );
       }
+    } else if (event.status !== "funded") {
+      event = await eventRepository.updateById(eventId, {
+        status: "funded",
+      });
     }
 
     const ticket = getTicket();
@@ -793,75 +1273,118 @@ export async function updateEventStatus(
     const chainEventIdString = String(event.contractEventId);
     const mintBatchSize = getTicketingMintBatchSize();
 
-    let remaining = quantity;
-    while (remaining > 0) {
-      const mintQty = Math.min(remaining, mintBatchSize);
+    const mintPlan = buildTicketMintPlan(event, options);
+    const supportsStartTicketingWithPrice =
+      typeof fundWithSigner.startTicketingWithPrice === "function" ||
+      !!fundWithSigner.runner?.sendTransaction;
 
-      try {
-        tx = await fundWithSigner.startTicketing(
-          chainEventId,
-          ticketType,
-          BigInt(mintQty),
-        );
-      } catch (error) {
-        throw new BadRequestError(
-          `Failed to start ticketing for batch size ${mintQty}: ${getOnChainErrorMessage(error)}`,
-        );
-      }
-
-      const mintReceipt = await tx.wait();
-      if (!mintReceipt || Number(mintReceipt.status) !== 1) {
-        throw new BadRequestError("On-chain ticket mint transaction failed");
-      }
-
-      await persistLogsFromReceipt({
-        receipt: mintReceipt,
-        contract: fund,
-        contractName: "Fund",
-        contractAddress: fundAddress,
-      });
-
-      await persistLogsFromReceipt({
-        receipt: mintReceipt,
-        contract: ticket,
-        contractName: "Ticket",
-        contractAddress: ticketAddress,
-      });
-
-      const ticketEvents = await parseTicketEventsFromReceipt(mintReceipt);
-      const mintedBatchEvents = ticketEvents.filter(
-        (evt) => evt?.name === "TicketMintedBatch",
+    if (
+      !supportsStartTicketingWithPrice &&
+      requiresPerTierPricing(mintPlan, event)
+    ) {
+      throw new BadRequestError(
+        "Current Fund deployment does not support per-tier ticket pricing yet. Redeploy/update Fund before starting ticketing for events with mixed ticket prices.",
       );
+    }
 
-      for (const mintedBatchEvent of mintedBatchEvents) {
-        const mintedEventId = String(mintedBatchEvent.args?.eventId ?? "");
-        if (mintedEventId && mintedEventId !== chainEventIdString) {
-          continue;
+    for (const plannedBatch of mintPlan) {
+      let remaining = plannedBatch.quantity;
+
+      while (remaining > 0) {
+        const mintQty = Math.min(remaining, mintBatchSize);
+
+        try {
+          if (typeof fundWithSigner.startTicketingWithPrice === "function") {
+            tx = await sendStartTicketingWithPriceTx(
+              fund,
+              fundWithSigner,
+              [
+                chainEventId,
+                plannedBatch.ticketType,
+                BigInt(mintQty),
+                plannedBatch.price,
+              ],
+            );
+          } else if (
+            plannedBatch.price ===
+            toBigIntValue(
+              event?.ticketPrice,
+              BigInt(event?.ticketTiers?.[0]?.price ?? 0),
+            )
+          ) {
+            tx = await fundWithSigner.startTicketing(
+              chainEventId,
+              plannedBatch.ticketType,
+              BigInt(mintQty),
+            );
+          } else {
+            throw new BadRequestError(
+              "Current Fund deployment does not support per-tier ticket pricing yet. Redeploy/update Fund before starting ticketing for events with mixed ticket prices.",
+            );
+          }
+        } catch (error) {
+          if (error instanceof BadRequestError) {
+            throw error;
+          }
+          throw new BadRequestError(
+            `Failed to start ticketing for batch size ${mintQty}: ${getOnChainErrorMessage(error)}`,
+          );
         }
 
-        const owner = String(
-          mintedBatchEvent.args?.to || event.organizer || "",
-        ).toLowerCase();
-        const originalPrice = String(
-          mintedBatchEvent.args?.price ?? event.ticketPrice ?? 0,
-        );
-        const mappedTicketType = mapChainTicketTypeToDb(
-          mintedBatchEvent.args?.ticketType,
+        const mintReceipt = await tx.wait();
+        if (!mintReceipt || Number(mintReceipt.status) !== 1) {
+          throw new BadRequestError("On-chain ticket mint transaction failed");
+        }
+
+        await persistLogsFromReceipt({
+          receipt: mintReceipt,
+          contract: fund,
+          contractName: "Fund",
+          contractAddress: fundAddress,
+        });
+
+        await persistLogsFromReceipt({
+          receipt: mintReceipt,
+          contract: ticket,
+          contractName: "Ticket",
+          contractAddress: ticketAddress,
+        });
+
+        const ticketEvents = await parseTicketEventsFromReceipt(mintReceipt);
+        const mintedBatchEvents = ticketEvents.filter(
+          (evt) => evt?.name === "TicketMintedBatch",
         );
 
-        for (const tokenIdValue of mintedBatchEvent.args?.ticketIds || []) {
-          await ticketRepo.upsertMintedFromChain({
-            tokenId: String(tokenIdValue),
-            eventId: event._id,
-            currentOwner: owner,
-            originalPrice,
-            ticketType: mappedTicketType,
-            mintTxHash: tx.hash,
-          });
+        for (const mintedBatchEvent of mintedBatchEvents) {
+          const mintedEventId = String(mintedBatchEvent.args?.eventId ?? "");
+          if (mintedEventId && mintedEventId !== chainEventIdString) {
+            continue;
+          }
+
+          const owner = String(
+            mintedBatchEvent.args?.to || event.organizer || "",
+          ).toLowerCase();
+          const originalPrice = String(
+            mintedBatchEvent.args?.price ?? plannedBatch.price,
+          );
+          const mappedTicketType = mapChainTicketTypeToDb(
+            mintedBatchEvent.args?.ticketType,
+          );
+
+          for (const tokenIdValue of mintedBatchEvent.args?.ticketIds || []) {
+            await ticketRepo.upsertMintedFromChain({
+              tokenId: String(tokenIdValue),
+              eventId: event._id,
+              currentOwner: owner,
+              originalPrice,
+              ticketType: mappedTicketType,
+              mintTxHash: tx.hash,
+            });
+          }
         }
+
+        remaining -= mintQty;
       }
-
-      remaining -= mintQty;
     }
 
     return await eventRepository.updateById(eventId, { status: "ticketing" });
@@ -908,6 +1431,27 @@ export async function updateEventStatus(
     }
     resolvedStatus = mapFundStatusToAppStatus(
       finalized.args?.statusAfterFinalize,
+    );
+
+    if (resolvedStatus === "cancelled") {
+      const cancelled = parsedEvents.find(
+        (evt) => evt?.name === "EventCancelled",
+      );
+      if (cancelled) {
+        const chainReasonCode = getCancellationReasonLabel(
+          cancelled.args?.reason,
+        );
+        resolvedStatus = mapCancellationReasonToTerminalStatus(chainReasonCode);
+      }
+    }
+  }
+
+  if (newStatus === "completed") {
+    await tryReleaseRevenueAfterCompleted(
+      fundWithSigner,
+      chainEventId,
+      fund,
+      fundAddress,
     );
   }
 

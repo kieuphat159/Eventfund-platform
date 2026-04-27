@@ -415,6 +415,7 @@ const updateEventSchema = Joi.object({
     }),
   reason: Joi.string().trim().min(1).optional(),
   txHash: txHashSchema.optional(),
+  releaseTxHash: txHashSchema.optional(),
 })
   .min(1)
   .messages({
@@ -482,6 +483,7 @@ const confirmContributionRefundSchema = Joi.object({
 
 const markEventCompletedSchema = Joi.object({
   txHash: txHashSchema.optional(),
+  releaseTxHash: txHashSchema.optional(),
 });
 
 export const eventSchemas = {

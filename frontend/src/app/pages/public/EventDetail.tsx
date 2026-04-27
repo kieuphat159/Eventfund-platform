@@ -105,8 +105,11 @@ export const EventDetail: React.FC = () => {
         showLoading("Loading event...");
         const data = await getEventById(id);
         setEvent(data);
-        if (data?._id) {
+        if (data?._id && (data.status === "ticketing" || data.status === "ongoing")) {
           await loadTicketData(data._id);
+        } else {
+          setTicketStats(null);
+          setEventTickets([]);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load event");
@@ -130,6 +133,7 @@ export const EventDetail: React.FC = () => {
   const eventId = event?._id || event?.id || "";
   const availableTickets = ticketStats?.availableTickets ?? null;
   const trackedTickets = ticketStats?.totalTickets ?? totalTickets;
+  const ticketingOpen = event?.status === "ticketing" || event?.status === "ongoing";
   const fundingProgress = Math.min(
     calculatePercentage(event?.currentFunding, event?.fundingGoal, 1),
     100,
@@ -138,6 +142,8 @@ export const EventDetail: React.FC = () => {
     event?.investmentEnabled === false ? "Self-funded" : "Investment-enabled";
   const isInvestable =
     event?.status === "funding" && String(event?.fundingGoal || "0") !== "0";
+  const isTicketPurchasable =
+    event?.status === "ticketing" || event?.status === "ongoing";
   const minInvestmentAmount = String(event?.minInvestmentAmount || "0");
 
   const coverImage = event?.imageUrls?.[0] || "";
@@ -167,6 +173,14 @@ export const EventDetail: React.FC = () => {
       hour: "2-digit",
       minute: "2-digit",
     });
+  };
+
+  const getTicketHolderLabel = (ticket: ApiTicket) => {
+    if (ticket.status === "minted") {
+      return "Organizer inventory";
+    }
+
+    return ticket.currentOwner || "-";
   };
 
   const handleInvest = async () => {
@@ -283,6 +297,14 @@ export const EventDetail: React.FC = () => {
   };
 
   const handlePurchaseClick = async (tierName?: string) => {
+    if (!isTicketPurchasable) {
+      showBuyPopup(
+        "error",
+        "Ticket sales are not open for this event yet.",
+      );
+      return;
+    }
+
     if (!user?.walletAddress) {
       try {
         await connectWallet();
@@ -483,9 +505,13 @@ export const EventDetail: React.FC = () => {
                     <Button
                       onClick={() => handlePurchaseClick(tier.name)}
                       className="w-full bg-cyan-600 hover:bg-cyan-500 text-white"
-                      disabled={buying || availableTickets === 0}
+                      disabled={
+                        buying || availableTickets === 0 || !isTicketPurchasable
+                      }
                     >
-                      {availableTickets === 0
+                      {!isTicketPurchasable
+                        ? "Sales Not Open"
+                        : availableTickets === 0
                         ? "Sold Out"
                         : buying
                           ? "Processing..."
@@ -498,6 +524,84 @@ export const EventDetail: React.FC = () => {
               </div>
             ) : (
               <div className="text-slate-400">No ticket tiers configured.</div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="bg-slate-900/80 border-slate-800 backdrop-blur-sm mt-8">
+          <CardContent className="p-6">
+            <h2 className="text-2xl font-semibold text-white mb-3">
+              Ticket Inventory
+            </h2>
+            <p className="text-sm text-slate-400 mb-4">
+              Synced from ticket records for this event.
+            </p>
+
+              <div className="grid sm:grid-cols-4 gap-3 mb-5">
+                <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3">
+                  <div className="text-xs text-slate-500 mb-1">Available</div>
+                  <div className="text-lg font-semibold text-emerald-300">
+                  {ticketingOpen ? ticketStats?.availableTickets ?? "-" : 0}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3">
+                  <div className="text-xs text-slate-500 mb-1">Total Tracked</div>
+                  <div className="text-lg font-semibold text-cyan-300">
+                  {ticketingOpen ? ticketStats?.totalTickets ?? "-" : 0}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3">
+                  <div className="text-xs text-slate-500 mb-1">Sold</div>
+                  <div className="text-lg font-semibold text-amber-300">
+                  {ticketingOpen ? ticketStats?.soldTickets ?? "-" : 0}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3">
+                  <div className="text-xs text-slate-500 mb-1">Used</div>
+                  <div className="text-lg font-semibold text-purple-300">
+                  {ticketingOpen ? ticketStats?.usedTickets ?? "-" : 0}
+                  </div>
+                </div>
+              </div>
+
+            {!ticketingOpen ? (
+              <div className="text-slate-400 text-sm">
+                Ticketing has not started yet for this event.
+              </div>
+            ) : loadingTickets ? (
+              <div className="text-slate-400 text-sm">Loading tickets...</div>
+            ) : eventTickets.length === 0 ? (
+              <div className="text-slate-400 text-sm">
+                No ticket records found for this event yet.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-slate-400 border-b border-slate-700">
+                      <th className="py-2 pr-3">Token</th>
+                      <th className="py-2 pr-3">Status</th>
+                      <th className="py-2 pr-3">Holder</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {eventTickets.map((ticket) => (
+                      <tr
+                        key={ticket.tokenId}
+                        className="border-b border-slate-800 text-slate-200"
+                      >
+                        <td className="py-2 pr-3 font-mono">
+                          #{ticket.tokenId}
+                        </td>
+                        <td className="py-2 pr-3">{ticket.status || "-"}</td>
+                        <td className="py-2 pr-3 font-mono text-xs">
+                          {getTicketHolderLabel(ticket)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </CardContent>
         </Card>

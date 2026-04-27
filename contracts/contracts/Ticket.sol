@@ -35,6 +35,7 @@ contract Ticket is ERC721, ERC721Enumerable, AccessControl, ReentrancyGuard, ITi
     error FundNotSet();
 
     error RefundsNotEnabled();
+    error EventNotTicketing();
 
     // ------ Mappings -------
     mapping(uint256 => TicketInfo) public _tickets; // ticketId => TicketInfo
@@ -221,6 +222,10 @@ contract Ticket is ERC721, ERC721Enumerable, AccessControl, ReentrancyGuard, ITi
 
         // FIX (critical): avoid locking funds in Ticket if Fund escrow isn't configured.
         if (fundContract == address(0)) revert FundNotSet();
+
+        if (IFund(fundContract).getEventStatus(ticket.eventId) != IFund.EventStatus.Ticketing) {
+            revert EventNotTicketing();
+        }
 
         // validations
         if (ticket.status != TicketStatus.Minted) {

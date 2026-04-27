@@ -26,6 +26,7 @@ type TicketTierForm = {
 const OWNER_FORWARD_STATUS_OPTIONS: Partial<
   Record<EventStatus, EventStatus[]>
 > = {
+  funded: ["ticketing"],
   ticketing: ["ongoing"],
   ongoing: ["completed"],
 };
@@ -225,6 +226,16 @@ export const EditEvent: React.FC = () => {
         return;
       }
 
+      if (
+        status === "completed" &&
+        currentStatus !== "completed" &&
+        !window.confirm(
+          'Bạn có chắc muốn hoàn tất sự kiện này không?\n\nHệ thống sẽ cần ký ví organizer để gọi on-chain completion và release revenue.',
+        )
+      ) {
+        return;
+      }
+
       setSubmitting(true);
       showLoading("Saving changes...");
       const updatePayload = {
@@ -307,8 +318,9 @@ export const EditEvent: React.FC = () => {
                 </p>
                 <p className="text-xs text-slate-400">
                   You can cancel events in `draft`, `funding`, `funded`, or
-                  `ticketing`. Once ticketing starts, you can also advance to
-                  `ongoing`, then `completed`.
+                  `ticketing`. Once funding is settled, you can move a funded
+                  event to `ticketing`, then advance to `ongoing` and
+                  `completed`.
                 </p>
               </div>
               <StatusBadge status={currentStatus as any} />
@@ -510,6 +522,12 @@ export const EditEvent: React.FC = () => {
                 Event sẽ được gửi theo flow hủy hiện có của backend. Nếu event
                 đang ở `ticketing`, hệ thống sẽ xử lý theo nhánh hủy ticketing
                 tương ứng.
+              </div>
+            )}
+            {status === "completed" && currentStatus !== "completed" && (
+              <div className="mt-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+                Khi hoàn tất event, organizer wallet sẽ ký 2 giao dịch on-chain:
+                đánh dấu `completed` và `release revenue` để hệ thống chia tiền.
               </div>
             )}
           </div>
