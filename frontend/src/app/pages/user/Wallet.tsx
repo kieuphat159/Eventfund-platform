@@ -5,6 +5,7 @@ import {
   Download,
   ArrowUpRight,
   ArrowDownLeft,
+  Check,
 } from "lucide-react";
 import { DepositModal } from "../../components/shared/DepositModal";
 import { formatEther } from "ethers";
@@ -95,6 +96,7 @@ export const Wallet: React.FC = () => {
   const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [isDepositModalOpen, setIsDepositModalOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     const loadWalletData = async () => {
@@ -303,15 +305,28 @@ export const Wallet: React.FC = () => {
                 <Button
                   variant="outline"
                   size="sm"
-                  className="border-purple-500/30 hover:bg-purple-500/10"
-                  onClick={() => {
-                    if (walletAddress) {
-                      navigator.clipboard.writeText(walletAddress);
+                  className={`border-purple-500/30 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-transform ${
+                    copied ? "bg-emerald-600 text-white scale-105" : "hover:bg-purple-500/10"
+                  }`}
+                  onClick={async () => {
+                    if (!walletAddress) return;
+                    try {
+                      await navigator.clipboard.writeText(walletAddress);
+                      setCopied(true);
+                      window.setTimeout(() => setCopied(false), 1800);
+                    } catch {
+                      // ignore clipboard errors silently
                     }
                   }}
                   disabled={!walletAddress}
                 >
-                  Copy
+                  {copied ? (
+                    <>
+                      <Check className="w-4 h-4 mr-2 text-emerald-200" /> Copied
+                    </>
+                  ) : (
+                    "Copy"
+                  )}
                 </Button>
               </div>
             </div>
