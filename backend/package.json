@@ -5,13 +5,16 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "dev": "concurrently \"nodemon src/server.js\" \"npm run indexer:fund\" \"npm run processor:fund\" \"npm run indexer:ticket\" \"npm run processor:ticket\"",
+    "dev": "concurrently \"nodemon src/server.js\" \"npm run indexer:fund\" \"npm run processor:fund\" \"npm run indexer:ticket\" \"npm run processor:ticket\" \"npm run worker:deposits\"",
     "start": "node src/server.js",
     "test": "cross-env NODE_ENV=test NODE_OPTIONS=--experimental-vm-modules jest --runInBand",
     "indexer:ticket": "node src/services/blockchain/indexers/ticket/run.js",
     "indexer:fund": "node src/services/blockchain/indexers/fund/run.js",
     "indexer:marketplace": "node src/services/blockchain/indexers/marketplace/run.js",
     "processor:ticket": "node src/services/blockchain/processors/ticket.run.js",
+    "processor:fund": "node src/services/blockchain/processors/fund.run.js",
+    "processor:marketplace": "node src/services/blockchain/processors/marketplace.run.js",
+    "worker:deposits": "node src/workers/depositWorker.js",
     "test:blockchain:connections": "node src/services/blockchain/test/connections/all.js",
     "test:mongo": "node src/config/testMongoDB.js",
     "test:cloudinary": "node src/config/testCloudinary.js",
@@ -27,6 +30,8 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "axios": "^1.15.2",
+    "bull": "^4.16.5",
     "cloudinary": "^1.41.3",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
@@ -40,6 +45,7 @@
     "joi": "^18.0.2",
     "jose": "^6.2.2",
     "jsonwebtoken": "^9.0.3",
+    "moment": "^2.30.1",
     "mongodb": "^7.1.0",
     "mongoose": "^9.1.5",
     "mongoose-paginate-v2": "^1.9.1",
@@ -50,6 +56,7 @@
     "siwe": "^3.0.0",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
+    "vnpay": "^1.6.1",
     "winston": "^3.19.0"
   },
   "devDependencies": {

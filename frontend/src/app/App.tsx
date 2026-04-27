@@ -25,6 +25,8 @@ import { InvestmentDetail } from "./pages/user/InvestmentDetail";
 import { Wallet } from "./pages/user/Wallet";
 import { Profile } from "./pages/user/Profile";
 import { Settings } from "./pages/user/Settings";
+import { DepositSuccess } from "./pages/user/DepositSuccess";
+import { DepositFailed } from "./pages/user/DepositFailed";
 
 // Verifier Pages
 import { VerifierDashboard } from "./pages/verifier/VerifierDashboard";
@@ -197,6 +199,8 @@ const AppRoutes: React.FC = () => {
         <Route path="investments" element={<MyInvestments />} />
         <Route path="investments/:id" element={<InvestmentDetail />} />
         <Route path="wallet" element={<Wallet />} />
+        <Route path="deposit/success" element={<DepositSuccess />} />
+        <Route path="deposit/failed" element={<DepositFailed />} />
         <Route path="account/profile" element={<Profile />} />
         <Route path="account/settings" element={<Settings />} />
       </Route>

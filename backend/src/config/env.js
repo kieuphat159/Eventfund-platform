@@ -113,6 +113,36 @@ export const config = {
 
   // CORS
   allowedOrigins: process.env.ALLOWED_ORIGINS || 'http://localhost:5173',
+
+  // Blockchain
+  blockchain: {
+    rpcUrl: process.env.RPC_URL || 'http://127.0.0.1:8545',
+    relayerPrivateKey: process.env.RELAYER_PRIVATE_KEY,
+  },
+
+  // VNPay
+  vnpay: {
+    url: process.env.VNPAY_URL || 'https://sandbox.vnpayment.vn',
+    tmnCode: process.env.VNPAY_TMN_CODE,
+    hashSecret: process.env.VNPAY_HASH_SECRET,
+    returnUrl: process.env.VNPAY_RETURN_URL || 'http://localhost:4000/api/deposits/vnpay-return',
+    ipnUrl: process.env.VNPAY_IPN_URL,
+  },
+
+  // Frontend
+  frontend: {
+    url: process.env.FRONTEND_URL || 'http://localhost:3000',
+  },
+
+  // Deposits
+  deposits: {
+    minVND: parseInt(process.env.MIN_DEPOSIT_VND) || 100000,
+    maxVND: parseInt(process.env.MAX_DEPOSIT_VND) || 50000000,
+    expiryMinutes: parseInt(process.env.DEPOSIT_ORDER_EXPIRY_MINUTES) || 15,
+  },
+
+  // Environment alias
+  env: process.env.NODE_ENV?.toUpperCase() || 'DEV',
 };
 
 // Validate environment on module load
