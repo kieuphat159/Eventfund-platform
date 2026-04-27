@@ -98,6 +98,19 @@ function getEventCompletionThresholdBps() {
   return 3600;
 }
 
+function shouldFallbackToLocalCompletion(error) {
+  const message = String(
+    error?.message || error?.reason || error?.shortMessage || "",
+  ).toLowerCase();
+
+  return (
+    message.includes("organizer wallet signature required") ||
+    message.includes("only the organizer can perform this on-chain action") ||
+    message.includes("only the organizer wallet can mark event as completed on-chain") ||
+    message.includes("requires organizer wallet")
+  );
+}
+
 function getTicketSalesThresholdPercent(eventDoc) {
   const raw = Number(eventDoc?.ticketUsageThreshold ?? 0);
   if (!Number.isFinite(raw) || raw <= 0) return 0;
@@ -371,7 +384,6 @@ export async function autoResolveEndedEvent(eventDoc, options = {}) {
     scopedLogger,
     options,
   );
-  if (mismatch) return mismatch;
 
   if (!eventDoc?._id) {
     return {
@@ -430,25 +442,79 @@ export async function autoResolveEndedEvent(eventDoc, options = {}) {
       : 0;
 
   if (soldCount > 0 && usedCount >= requiredUsed) {
-    const result = await updateEventStatus(
-      String(eventDoc._id),
-      "completed",
-      {},
-      repositories,
-    );
+    if (mismatch) {
+      const eventRepository = repositories.eventRepo || eventRepo;
+      const fallbackEvent = await eventRepository.updateById(
+        String(eventDoc._id),
+        {
+          status: "completed",
+          completedAt: new Date(),
+        },
+      );
 
-    scopedLogger.info(
-      `[auto-lifecycle] completed event ${eventDoc._id} after endDate with ${usedCount}/${soldCount} checked-in ticket(s)`,
-    );
+      scopedLogger.warn(
+        `[auto-lifecycle] completed historical event ${eventDoc._id} locally after endDate because its original Fund deployment is no longer active: ${mismatch.eventFundAddress} != ${mismatch.activeFundAddress}`,
+      );
 
-    return {
-      eventId: String(eventDoc._id),
-      status: result?.status || null,
-      totalMinted: Number(totalMinted || 0n),
-      soldCount,
-      usedCount,
-      requiredUsed,
-    };
+      return {
+        eventId: String(eventDoc._id),
+        status: fallbackEvent?.status || "completed",
+        totalMinted: Number(totalMinted || 0n),
+        soldCount,
+        usedCount,
+        requiredUsed,
+        onChainCompletionPending: true,
+      };
+    }
+
+    try {
+      const result = await updateEventStatus(
+        String(eventDoc._id),
+        "completed",
+        {},
+        repositories,
+      );
+
+      scopedLogger.info(
+        `[auto-lifecycle] completed event ${eventDoc._id} after endDate with ${usedCount}/${soldCount} checked-in ticket(s)`,
+      );
+
+      return {
+        eventId: String(eventDoc._id),
+        status: result?.status || null,
+        totalMinted: Number(totalMinted || 0n),
+        soldCount,
+        usedCount,
+        requiredUsed,
+      };
+    } catch (error) {
+      if (!shouldFallbackToLocalCompletion(error)) {
+        throw error;
+      }
+
+      const eventRepository = repositories.eventRepo || eventRepo;
+      const fallbackEvent = await eventRepository.updateById(
+        String(eventDoc._id),
+        {
+          status: "completed",
+          completedAt: new Date(),
+        },
+      );
+
+      scopedLogger.warn(
+        `[auto-lifecycle] completed event ${eventDoc._id} locally after endDate because on-chain completion requires organizer/admin authorization: ${error?.message || error}`,
+      );
+
+      return {
+        eventId: String(eventDoc._id),
+        status: fallbackEvent?.status || "completed",
+        totalMinted: Number(totalMinted || 0n),
+        soldCount,
+        usedCount,
+        requiredUsed,
+        onChainCompletionPending: true,
+      };
+    }
   }
 
   const result = await updateEventStatus(

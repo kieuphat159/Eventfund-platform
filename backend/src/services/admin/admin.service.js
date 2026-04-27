@@ -1040,19 +1040,6 @@ export async function updateEventStatus(
   const chainEventId = BigInt(event.contractEventId);
   const fundAddress = await fund.getAddress();
 
-  if (newStatus === "completed") {
-    const signerAddress = String(signer.address || "").toLowerCase();
-    const organizerAddress = String(
-      event.onChainOrganizer || event.organizer || "",
-    ).toLowerCase();
-
-    if (organizerAddress && signerAddress !== organizerAddress) {
-      throw new BadRequestError(
-        "Cannot mark completed with current backend signer. Fund.setCompletedIfThresholdMet requires organizer wallet.",
-      );
-    }
-  }
-
   let tx;
   let receipt;
   let resolvedStatus = newStatus;

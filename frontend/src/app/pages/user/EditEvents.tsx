@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Calendar, MapPin, Upload, Plus } from "lucide-react";
+import { useWeb3Auth } from "@web3auth/modal/react";
 import {
   Card,
   CardContent,
@@ -13,7 +14,16 @@ import { Input } from "../../components/ui/input";
 import { Textarea } from "../../components/ui/textarea";
 import { Label } from "../../components/ui/label";
 import { StatusBadge } from "../../components/StatusBadge";
-import { getEventById, updateEvent, type EventItem, type EventStatus } from "../../services/events.service";
+import {
+  getEventById,
+  updateEvent,
+  type EventItem,
+  type EventStatus,
+} from "../../services/events.service";
+import {
+  completeEventOnChainWithWallet,
+  type Eip1193Provider,
+} from "../../services/events.service";
 import { useAuth } from "../../contexts/AuthContext";
 import { useLoading } from "../../components/ui/loadingContext";
 
@@ -65,7 +75,8 @@ const isPositiveWeiInteger = (value: string) => {
 export const EditEvent: React.FC = () => {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
-  const { user } = useAuth();
+  const { user, connectWallet } = useAuth();
+  const { web3Auth } = useWeb3Auth();
   const { show: showLoading, hide: hideLoading } = useLoading();
 
   const [loading, setLoading] = useState(true);
@@ -82,6 +93,7 @@ export const EditEvent: React.FC = () => {
   const [fundingGoal, setFundingGoal] = useState("");
   const [minStakeRequired, setMinStakeRequired] = useState("");
   const [status, setStatus] = useState<EventStatus>("draft");
+  const [completing, setCompleting] = useState(false);
 
   const [ticketTiers, setTicketTiers] = useState<TicketTierForm[]>([
     { name: "General", price: "", supply: "" },
@@ -92,7 +104,10 @@ export const EditEvent: React.FC = () => {
   const topAnchorRef = useRef<HTMLDivElement | null>(null);
 
   const scrollToTop = () => {
-    topAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    topAnchorRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -230,7 +245,7 @@ export const EditEvent: React.FC = () => {
         status === "completed" &&
         currentStatus !== "completed" &&
         !window.confirm(
-          'Bạn có chắc muốn hoàn tất sự kiện này không?\n\nHệ thống sẽ cần ký ví organizer để gọi on-chain completion và release revenue.',
+          "Bạn có chắc muốn hoàn tất sự kiện này không?\n\nHệ thống sẽ cần ký ví organizer để gọi on-chain completion và release revenue.",
         )
       ) {
         return;
@@ -269,6 +284,70 @@ export const EditEvent: React.FC = () => {
     }
   };
 
+  const handleCompleteOnChain = async () => {
+    if (!id || !eventData?._id) {
+      setError("Missing event id");
+      return;
+    }
+
+    if (
+      currentStatus !== "ongoing" &&
+      currentStatus !== "ticketing" &&
+      currentStatus !== "completed"
+    ) {
+      setError(
+        "Event must be ticketing, ongoing, or already completed locally before syncing on-chain",
+      );
+      return;
+    }
+
+    try {
+      setCompleting(true);
+      setError("");
+      setSuccess("");
+      showLoading("Completing event on-chain...");
+
+      const provider = web3Auth?.provider as Eip1193Provider | undefined;
+      if (!provider?.request) {
+        await connectWallet();
+        setSuccess(
+          "Wallet connected. Please press the button again to sign with the organizer wallet.",
+        );
+        return;
+      }
+
+      const updated = await completeEventOnChainWithWallet(
+        provider,
+        id,
+        user?.walletAddress,
+        user?.smartAccountAddress,
+      );
+
+      if (!updated) {
+        throw new Error("Unable to complete event on-chain");
+      }
+
+      setEventData(updated);
+      setStatus((updated.status as EventStatus) || "completed");
+      setSuccess(
+        "Event completed on-chain successfully. Revenue release has been submitted as well.",
+      );
+    } catch (err: any) {
+      setError(
+        err?.response?.data?.message ||
+          err?.message ||
+          "Failed to complete event on-chain",
+      );
+    } finally {
+      setCompleting(false);
+      hideLoading();
+    }
+  };
+
+  const canSyncCompletionOnChain =
+    currentStatus === "ongoing" ||
+    currentStatus === "ticketing" ||
+    currentStatus === "completed";
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -516,7 +595,9 @@ export const EditEvent: React.FC = () => {
                 <option value="cancelled">cancelled</option>
               )}
             </select>
-            <p className="mt-1 text-xs text-slate-500">Trạng thái chỉ hiển thị, không thể chỉnh sửa từ đây.</p>
+            <p className="mt-1 text-xs text-slate-500">
+              Trạng thái chỉ hiển thị, không thể chỉnh sửa từ đây.
+            </p>
             {status === "cancelled" && currentStatus !== "cancelled" && (
               <div className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
                 Event sẽ được gửi theo flow hủy hiện có của backend. Nếu event
@@ -528,6 +609,22 @@ export const EditEvent: React.FC = () => {
               <div className="mt-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
                 Khi hoàn tất event, organizer wallet sẽ ký 2 giao dịch on-chain:
                 đánh dấu `completed` và `release revenue` để hệ thống chia tiền.
+              </div>
+            )}
+            {canSyncCompletionOnChain && (
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <Button
+                  type="button"
+                  onClick={() => void handleCompleteOnChain()}
+                  disabled={completing}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50"
+                >
+                  {completing
+                    ? "Completing..."
+                    : currentStatus === "completed"
+                      ? "Sync on-chain completion"
+                      : "Complete on"}
+                </Button>
               </div>
             )}
           </div>

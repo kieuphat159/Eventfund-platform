@@ -479,6 +479,97 @@ describe("autoLifecycle.service", () => {
     });
   });
 
+  test("falls back to local completion when on-chain completion requires organizer authorization", async () => {
+    mockTicketContract.getUsageStats.mockResolvedValue([100n, 50n, 18n, 3600n]);
+    mockUpdateEventStatus.mockRejectedValue(
+      new Error(
+        "Organizer wallet signature required: Only the organizer can perform this on-chain action from the connected wallet.",
+      ),
+    );
+
+    const eventRepo = {
+      updateById: jest.fn().mockResolvedValue({
+        _id: "evt-ended-fallback",
+        status: "completed",
+        completedAt: new Date("2026-04-26T10:05:00.000Z"),
+      }),
+    };
+
+    const result = await autoResolveEndedEvent(
+      {
+        _id: "evt-ended-fallback",
+        contractEventId: "778",
+        status: "ongoing",
+        endDate: new Date("2026-04-26T09:00:00.000Z"),
+      },
+      {
+        logger,
+        now: new Date("2026-04-26T10:00:00.000Z"),
+        repositories: { eventRepo },
+      },
+    );
+
+    expect(eventRepo.updateById).toHaveBeenCalledWith(
+      "evt-ended-fallback",
+      expect.objectContaining({
+        status: "completed",
+      }),
+    );
+    expect(mockScheduleAutoRefundsForTerminalEvent).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      eventId: "evt-ended-fallback",
+      status: "completed",
+      soldCount: 50,
+      usedCount: 18,
+      requiredUsed: 18,
+      onChainCompletionPending: true,
+    });
+  });
+
+  test("locally completes historical fund events instead of skipping them", async () => {
+    mockTicketContract.getUsageStats.mockResolvedValue([100n, 50n, 18n, 3600n]);
+
+    const eventRepo = {
+      updateById: jest.fn().mockResolvedValue({
+        _id: "evt-historical",
+        status: "completed",
+        completedAt: new Date("2026-04-26T10:05:00.000Z"),
+      }),
+    };
+
+    const result = await autoResolveEndedEvent(
+      {
+        _id: "evt-historical",
+        contractEventId: "778",
+        status: "ongoing",
+        endDate: new Date("2026-04-26T09:00:00.000Z"),
+        fundContractAddress: "0xc0f3fba8360f34316c8f194d32f80e243508af60",
+      },
+      {
+        logger,
+        now: new Date("2026-04-26T10:00:00.000Z"),
+        activeFundAddress: "0xf29c5f1b3b66a5cdecace4615a6fb3ff6f502d1b",
+        repositories: { eventRepo },
+      },
+    );
+
+    expect(eventRepo.updateById).toHaveBeenCalledWith(
+      "evt-historical",
+      expect.objectContaining({
+        status: "completed",
+      }),
+    );
+    expect(mockScheduleAutoRefundsForTerminalEvent).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      eventId: "evt-historical",
+      status: "completed",
+      soldCount: 50,
+      usedCount: 18,
+      requiredUsed: 18,
+      onChainCompletionPending: true,
+    });
+  });
+
   test("auto-fails ended ongoing events below the 36 percent threshold and schedules refunds", async () => {
     mockTicketContract.getUsageStats.mockResolvedValue([100n, 50n, 17n, 3400n]);
     mockUpdateEventStatus.mockResolvedValue({

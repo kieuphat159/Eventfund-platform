@@ -1684,6 +1684,206 @@ export async function completeEventWithWalletFallback(
   }
 }
 
+export async function completeEventOnChainWithWallet(
+  provider: Eip1193Provider | undefined,
+  eventId: string,
+  organizerWallet?: string,
+  smartAccountAddress?: string,
+): Promise<EventItem | null> {
+  const currentEvent = await getEventById(eventId);
+  if (!currentEvent) {
+    throw new Error("Event not found.");
+  }
+
+  if (!provider?.request) {
+    throw new Error(
+      "Wallet provider is unavailable for organizer-signed completion.",
+    );
+  }
+
+  if (!currentEvent.contractEventId) {
+    throw new Error("Event has not been synced on-chain yet.");
+  }
+
+  const config = await getEventBlockchainConfig();
+  const completionTransaction = buildCompletionTransaction(currentEvent);
+  const releaseTransaction = buildReleaseRevenueTransaction(currentEvent);
+  const withdrawStakeTransaction = buildWithdrawStakeTransaction(currentEvent);
+  completionTransaction.to = config.fundAddress;
+  releaseTransaction.to = config.fundAddress;
+  withdrawStakeTransaction.to = config.fundAddress;
+
+  await ensureProviderChain(provider, config.chainId);
+
+  const fromAddress = await resolveSignerAddress(
+    provider,
+    organizerWallet,
+    smartAccountAddress,
+  );
+
+  await validateCompletionReadiness(
+    currentEvent,
+    config.fundAddress,
+    fromAddress,
+  );
+
+  const completionGas = await estimateTransactionGas(
+    provider,
+    fromAddress,
+    completionTransaction,
+    350_000n,
+  );
+  const txParamsBase = {
+    from: fromAddress,
+    to: completionTransaction.to,
+    value: toHexValue(completionTransaction.value),
+  };
+
+  let completionTxHash = "";
+  try {
+    completionTxHash = (await provider.request({
+      method: "eth_sendTransaction",
+      params: [
+        {
+          ...txParamsBase,
+          data: completionTransaction.data,
+          gas: completionGas,
+        },
+      ],
+    })) as string;
+  } catch (sendError) {
+    const firstErrorMessage = getRpcErrorMessage(sendError);
+    if (completionGas && isGasLimitTooHighError(firstErrorMessage)) {
+      const fallbackGas = toHexValue("350000");
+      completionTxHash = (await provider.request({
+        method: "eth_sendTransaction",
+        params: [
+          {
+            ...txParamsBase,
+            data: completionTransaction.data,
+            gas: fallbackGas,
+          },
+        ],
+      })) as string;
+    } else {
+      throw new Error(
+        `Complete event transaction failed with signer ${fromAddress}: ${mapBundlerAuthError(firstErrorMessage)}`,
+      );
+    }
+  }
+
+  if (!completionTxHash) {
+    throw new Error("Failed to send complete event transaction.");
+  }
+
+  const completionReceipt =
+    await waitForPublicTransactionReceipt(completionTxHash);
+  if (completionReceipt.status !== "success") {
+    throw new Error("Complete event transaction failed on-chain.");
+  }
+
+  await validateRevenueReleaseReadiness(
+    currentEvent,
+    config.fundAddress,
+    fromAddress,
+  );
+
+  const releaseGas = await estimateTransactionGas(
+    provider,
+    fromAddress,
+    releaseTransaction,
+    500_000n,
+  );
+
+  let releaseTxHash = "";
+  try {
+    releaseTxHash = (await provider.request({
+      method: "eth_sendTransaction",
+      params: [
+        {
+          ...txParamsBase,
+          data: releaseTransaction.data,
+          gas: releaseGas,
+        },
+      ],
+    })) as string;
+  } catch (sendError) {
+    const firstErrorMessage = getRpcErrorMessage(sendError);
+    if (releaseGas && isGasLimitTooHighError(firstErrorMessage)) {
+      const fallbackGas = toHexValue("500000");
+      releaseTxHash = (await provider.request({
+        method: "eth_sendTransaction",
+        params: [
+          {
+            ...txParamsBase,
+            data: releaseTransaction.data,
+            gas: fallbackGas,
+          },
+        ],
+      })) as string;
+    } else {
+      throw new Error(
+        `Release revenue transaction failed with signer ${fromAddress}: ${mapBundlerAuthError(firstErrorMessage)}`,
+      );
+    }
+  }
+
+  if (!releaseTxHash) {
+    throw new Error("Failed to send release revenue transaction.");
+  }
+
+  const releaseReceipt = await waitForPublicTransactionReceipt(releaseTxHash);
+  if (releaseReceipt.status !== "success") {
+    throw new Error("Release revenue transaction failed on-chain.");
+  }
+
+  try {
+    const withdrawGas = await estimateTransactionGas(
+      provider,
+      fromAddress,
+      withdrawStakeTransaction,
+      250_000n,
+    );
+
+    await provider.request({
+      method: "eth_sendTransaction",
+      params: [
+        {
+          ...txParamsBase,
+          data: withdrawStakeTransaction.data,
+          gas: withdrawGas,
+        },
+      ],
+    });
+  } catch (withdrawError) {
+    const message = getRpcErrorMessage(withdrawError).toLowerCase();
+    if (
+      !message.includes("nothingtoclaim") &&
+      !message.includes("missing revert data") &&
+      !message.includes("estimate gas")
+    ) {
+      throw new Error(
+        `Withdraw organizer stake transaction failed with signer ${fromAddress}: ${mapBundlerAuthError(getRpcErrorMessage(withdrawError))}`,
+      );
+    }
+  }
+
+  try {
+    return await updateEvent(eventId, {
+      status: "completed",
+      txHash: completionTxHash,
+      releaseTxHash,
+    });
+  } catch {
+    return {
+      ...currentEvent,
+      status: "completed",
+      txHash: completionTxHash,
+      releaseTxHash,
+    };
+  }
+}
+
 export async function updateAdminEvent(
   eventId: string,
   payload: UpdateEventPayload,
