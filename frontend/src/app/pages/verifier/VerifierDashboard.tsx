@@ -707,7 +707,7 @@ export const VerifierDashboard: React.FC = () => {
               <CardHeader>
                 <CardTitle className="text-white">Ticket Scanner</CardTitle>
                 <CardDescription className="text-slate-400">
-                  Scan QR codes or enter ticket IDs manually
+                  Scan QR codes
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -729,27 +729,6 @@ export const VerifierDashboard: React.FC = () => {
                       Or enter manually
                     </span>
                   </div>
-                </div>
-
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="Enter ticket ID"
-                    value={manualTicketId}
-                    onChange={(event) => setManualTicketId(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        void handleManualCheckIn();
-                      }
-                    }}
-                    className="border-slate-700 bg-slate-800 text-white"
-                  />
-                  <Button
-                    onClick={handleManualCheckIn}
-                    variant="outline"
-                    disabled={!selectedEvent || isSubmitting || !eventCheckInState.ready}
-                  >
-                    Check In
-                  </Button>
                 </div>
 
                 {!eventCheckInState.ready && (
