@@ -243,15 +243,9 @@ export const EventDetail: React.FC = () => {
     if (!user?.walletAddress) {
       try {
         await connectWallet();
-        showBuyPopup(
-          "success",
-          "Wallet connected. Please click Purchase Ticket again to continue.",
-        );
+        showBuyPopup("success", "Wallet connected");
       } catch (err) {
-        showBuyPopup(
-          "error",
-          err instanceof Error ? err.message : "Failed to connect wallet",
-        );
+        showBuyPopup("error", "Failed to connect wallet");
       }
       return;
     }
@@ -266,13 +260,12 @@ export const EventDetail: React.FC = () => {
       | undefined;
 
     if (!provider?.request) {
-      showBuyPopup(
-        "error",
-        "Wallet provider is not ready. Please reconnect wallet and try again.",
-      );
+      showBuyPopup("error", "Wallet provider not ready");
       return;
     }
 
+    // show global loading overlay while the purchase is in progress
+    showLoading("Purchasing ticket...");
     setBuying(true);
     try {
       const result = await purchaseTicket(
@@ -280,17 +273,16 @@ export const EventDetail: React.FC = () => {
         { eventId: event._id },
         user.walletAddress,
       );
-      showBuyPopup("success", `Purchase successful. Tx: ${result.txHash}`);
+      showBuyPopup("success", "Purchase successful");
 
       const refreshedEvent = await getEventById(event._id);
       setEvent(refreshedEvent);
       await loadTicketData(event._id);
     } catch (err) {
-      showBuyPopup(
-        "error",
-        err instanceof Error ? err.message : "Ticket purchase failed",
-      );
+      showBuyPopup("error", "Purchase failed");
     } finally {
+      // hide global loading overlay when finished
+      hideLoading();
       setBuying(false);
       setPurchaseConfirmTier(null);
     }
@@ -698,9 +690,9 @@ export const EventDetail: React.FC = () => {
           <div className="bg-slate-900 p-6 rounded-xl border border-slate-700 w-[340px]">
             <h3 className="text-white mb-2 font-semibold">Confirm Purchase</h3>
             <p className="text-slate-300 text-sm mb-4">
-              Bạn có muốn mua vé{" "}
+              Are you sure you want to purchase the{" "}
               <span className="font-semibold">{purchaseConfirmTier}</span>{" "}
-              không?
+              ticket?
             </p>
 
             <div className="flex gap-2">
