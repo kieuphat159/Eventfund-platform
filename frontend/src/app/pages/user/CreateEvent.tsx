@@ -1210,10 +1210,10 @@ export const CreateEvent: React.FC = () => {
                     return next;
                   });
                 }}
-                className={getInputClass(
+                className={cn(getInputClass(
                   !!fieldErrors.fundingDeadlineAt ||
                     !!fieldErrors.ticketingStartAt,
-                )}
+                ), "[color-scheme:dark]")}
               />
               {fieldErrors.fundingDeadlineAt && (
                 <p className="mt-1 text-sm text-red-400">
