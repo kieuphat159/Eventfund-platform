@@ -77,6 +77,13 @@ interface IFund {
         uint256 quantity
     ) external returns (uint256[] memory tokenIds);
 
+    function startTicketingWithPrice(
+        uint256 eventId,
+        uint8 ticketType,
+        uint256 quantity,
+        uint256 batchPrice
+    ) external returns (uint256[] memory tokenIds);
+
     function setCompletedIfThresholdMet(uint256 eventId) external;
 
    
@@ -93,5 +100,7 @@ interface IFund {
 
     
     function pendingReward(uint256 eventId, address user) external view returns (uint256);
+
+    function getEventStatus(uint256 eventId) external view returns (EventStatus);
 
 }
