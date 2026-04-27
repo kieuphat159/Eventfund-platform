@@ -17,7 +17,7 @@ const ticketStatusEnum = ['minted', 'sold', 'used', 'expired', 'refunded'];
 const verifyTicketSchema = Joi.object({
   tokenId: Joi.string().min(1).required(),
   eventId: objectId.required(),
-  walletAddress: ethereumAddress.required()
+  walletAddress: ethereumAddress.optional()
 });
 
 // Schema for POST /tickets/:tokenId/use
