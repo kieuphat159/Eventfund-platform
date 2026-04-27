@@ -107,26 +107,24 @@ export const MyEvents: React.FC = () => {
   const { user, connectWallet } = useAuth() as any;
   const { web3Auth } = useWeb3Auth();
   const { show: showLoading, hide: hideLoading } = useLoading();
+  const isVerifierView = Boolean(
+    user?.role === "verifier" || user?.role === "admin",
+  );
 
   const [events, setEvents] = useState<EventItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [deletingId, setDeletingId] = useState("");
   const [cancellingId, setCancellingId] = useState("");
-
-    try {
-      setLoading(true);
-      setError("");
-      showLoading('Loading events...');
-      const data = await getMyEvents(user.walletAddress);
-      setEvents(data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load events");
-    } finally {
-      setLoading(false);
-      hideLoading();
-    }
-  };
+  const [ticketDialogEvent, setTicketDialogEvent] = useState<EventItem | null>(
+    null,
+  );
+  const [selectedQrTicket, setSelectedQrTicket] = useState<ApiTicket | null>(
+    null,
+  );
+  const [eventTickets, setEventTickets] = useState<ApiTicket[]>([]);
+  const [ticketsLoading, setTicketsLoading] = useState(false);
+  const [ticketsError, setTicketsError] = useState("");
 
   useEffect(() => {
     const fetchEvents = async () => {
