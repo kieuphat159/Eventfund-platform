@@ -2,7 +2,7 @@ name: Deploy App (EC2)
 
 on:
   push:
-    branches: [dev, vnpay]
+    branches: [dev]
   workflow_dispatch:
 
 permissions:
