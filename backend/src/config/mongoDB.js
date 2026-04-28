@@ -34,7 +34,7 @@ export const connectDB = async () => {
   try {
     const uri = process.env.NODE_ENV === 'PROD'
       ? process.env.MONGO_PROD_URI
-      : process.env.MONGO_DEV_URI;
+      : process.env.MONGO_PROD_URI;
 
     if (!uri) throw new Error('Cấu hình MONGO_URI thiếu trong .env');
 

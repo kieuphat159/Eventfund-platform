@@ -16,13 +16,13 @@ function validateEnv() {
   const required = [
     'PORT',
     'NODE_ENV',
-    'MONGO_DEV_URI'
+    'MONGO_PROD_URI'
   ];
 
   // Check for Cloudinary variables (either generic or environment-specific)
   const hasCloudinary =
     (process.env.CLOUDINARY_NAME && process.env.CLOUDINARY_KEY && process.env.CLOUDINARY_SECRET) ||
-    (process.env.CLOUDINARY_DEV_NAME && process.env.CLOUDINARY_DEV_KEY && process.env.CLOUDINARY_DEV_SECRET) ||
+    (process.env.CLOUDINARY_PROD_NAM && process.env.CLOUDINARY_PROD_KEY && process.env.CLOUDINARY_PROD_SECRET) ||
     (process.env.CLOUDINARY_PROD_NAME && process.env.CLOUDINARY_PROD_KEY && process.env.CLOUDINARY_PROD_SECRET);
 
   if (!hasCloudinary) {
@@ -65,7 +65,7 @@ export const config = {
   // Database
   mongoUri: process.env.NODE_ENV?.toUpperCase() === 'PROD'
     ? process.env.MONGO_PROD_URI
-    : process.env.MONGO_DEV_URI,
+    : process.env.MONGO_PROD_URI,
 
   // JWT (will be added later)
   jwt: {
@@ -100,15 +100,15 @@ export const config = {
     name: process.env.CLOUDINARY_NAME ||
           (process.env.NODE_ENV?.toUpperCase() === 'PROD'
             ? process.env.CLOUDINARY_PROD_NAME
-            : process.env.CLOUDINARY_DEV_NAME),
+            : process.env.CLOUDINARY_PROD_NAM),
     key: process.env.CLOUDINARY_KEY ||
          (process.env.NODE_ENV?.toUpperCase() === 'PROD'
            ? process.env.CLOUDINARY_PROD_KEY
-           : process.env.CLOUDINARY_DEV_KEY),
+           : process.env.CLOUDINARY_PROD_KEY),
     secret: process.env.CLOUDINARY_SECRET ||
             (process.env.NODE_ENV?.toUpperCase() === 'PROD'
               ? process.env.CLOUDINARY_PROD_SECRET
-              : process.env.CLOUDINARY_DEV_SECRET)
+              : process.env.CLOUDINARY_PROD_SECRET)
   },
 
   // CORS
