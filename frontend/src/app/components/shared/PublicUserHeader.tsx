@@ -126,6 +126,9 @@ export const PublicUserHeader: React.FC = () => {
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               className="md:hidden text-slate-300 hover:text-white"
+              aria-label={mobileMenuOpen ? "Close menu" : "Open menu"}
+              aria-expanded={mobileMenuOpen}
+              aria-controls="mobile-menu"
             >
               {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
             </button>
@@ -135,7 +138,7 @@ export const PublicUserHeader: React.FC = () => {
 
       {/* Mobile Menu - Always available */}
       {mobileMenuOpen && (
-        <div className="md:hidden bg-slate-900 border-t border-slate-800">
+        <div id="mobile-menu" className="md:hidden bg-slate-900 border-t border-slate-800">
           <nav className="px-4 py-4 space-y-2">
             {navLinks.map((link) => {
               const isActive = isActiveLink(link.path);

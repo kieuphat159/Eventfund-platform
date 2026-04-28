@@ -35,7 +35,7 @@ export const Footer: React.FC = () => {
             </ul>
           </div>
         </div>
-        <div className="pt-8 border-t border-slate-800 text-center text-sm text-slate-500">
+        <div className="pt-8 border-t border-slate-800 text-center text-sm text-slate-400">
           © 2026 EventChain. All rights reserved.
         </div>
       </div>

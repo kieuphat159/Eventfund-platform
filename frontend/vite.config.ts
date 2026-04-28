@@ -98,6 +98,10 @@ export default defineConfig({
     ],
   },
 
+  build: {
+    sourcemap: false,
+  },
+
   server: {
     headers: {
       'Cross-Origin-Opener-Policy': 'same-origin-allow-popups',
