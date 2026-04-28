@@ -14,6 +14,16 @@ import { Textarea } from "../../components/ui/textarea";
 import { Label } from "../../components/ui/label";
 import { StatusBadge } from "../../components/StatusBadge";
 import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogAction,
+  AlertDialogCancel,
+} from "../../components/ui/alert-dialog";
+import {
   completeEventWithWalletFallback,
   getEventById,
   updateEvent,
@@ -73,7 +83,7 @@ const isPositiveWeiInteger = (value: string) => {
 export const EditEvent: React.FC = () => {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
-  const { user } = useAuth();
+  const { user, connectWallet } = useAuth();
   const { web3Auth } = useWeb3Auth();
   const { show: showLoading, hide: hideLoading } = useLoading();
 
@@ -92,6 +102,7 @@ export const EditEvent: React.FC = () => {
   const [minStakeRequired, setMinStakeRequired] = useState("");
   const [status, setStatus] = useState<EventStatus>("draft");
   const [completing, setCompleting] = useState(false);
+  const [showConfirmOpen, setShowConfirmOpen] = useState(false);
 
   const [ticketTiers, setTicketTiers] = useState<TicketTierForm[]>([
     { name: "General", price: "", supply: "" },
@@ -250,18 +261,18 @@ export const EditEvent: React.FC = () => {
       const updated = await updateEvent(id, updatePayload);
 
       if (!updated) {
-        setError("Cập nhật sự kiện thất bại");
+        setError("Failed to update event");
         return;
       }
 
-      setSuccess("Cập nhật sự kiện thành công");
+      setSuccess("Event updated successfully");
       setEventData(updated);
       setStatus((updated.status as EventStatus) || status);
     } catch (err: any) {
       setError(
         err?.response?.data?.message ||
           err?.message ||
-          "Có lỗi xảy ra khi cập nhật sự kiện",
+          "Failed to update event",
       );
     } finally {
       setSubmitting(false);
@@ -276,13 +287,7 @@ export const EditEvent: React.FC = () => {
         return;
       }
 
-      if (
-        !window.confirm(
-          "Bạn có chắc muốn hoàn tất sự kiện này không?\n\nHệ thống sẽ gọi completion on-chain và release revenue.",
-        )
-      ) {
-        return;
-      }
+      // confirmation handled by modal trigger; proceed when called
 
       if (!user?.walletAddress && !user?.smartAccountAddress) {
         await connectWallet();
@@ -311,18 +316,18 @@ export const EditEvent: React.FC = () => {
       );
 
       if (!updated) {
-        setError("Không thể hoàn tất sự kiện");
+        setError("Failed to complete event");
         return;
       }
 
       setEventData(updated);
       setStatus((updated.status as EventStatus) || "completed");
-      setSuccess("Sự kiện đã được hoàn tất");
+      setSuccess("Event completed successfully");
     } catch (err: any) {
       setError(
         err?.response?.data?.message ||
           err?.message ||
-          "Có lỗi xảy ra khi hoàn tất sự kiện",
+          "Failed to complete event",
       );
     } finally {
       setCompleting(false);
@@ -578,29 +583,54 @@ export const EditEvent: React.FC = () => {
               )}
             </select>
             <p className="mt-1 text-xs text-slate-500">
-              Trạng thái hiển thị theo luồng hệ thống. Hoàn tất event bằng nút bên dưới khi đã đủ điều kiện.
+              Status options are determined by backend workflow. Use the button below to complete the event when it's eligible.
             </p>
             {status === "cancelled" && currentStatus !== "cancelled" && (
               <div className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-                Event sẽ được gửi theo flow hủy hiện có của backend. Nếu event
-                đang ở `ticketing`, hệ thống sẽ xử lý theo nhánh hủy ticketing
-                tương ứng.
+                Event will be submitted according to the existing cancellation flow of the backend. If the event
+                is in `ticketing` status, the system will process it according to the corresponding ticketing cancellation
+                branch.
               </div>
             )}
             {(currentStatus === "ticketing" || currentStatus === "ongoing") && (
               <div className="mt-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
                 <p>
-                  Khi đủ điều kiện, organizer wallet có thể hoàn tất event để gọi
-                  completion on-chain và release revenue.
+                  When eligible, the organizer's wallet can mark the event as completed to trigger
+                  on-chain completion and release revenue.
                 </p>
-                <Button
-                  type="button"
-                  onClick={handleCompleteEvent}
-                  disabled={submitting || completing}
-                  className="mt-3 bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50"
-                >
-                  {completing ? "Completing..." : "Mark as Completed"}
-                </Button>
+                <>
+                  <Button
+                    type="button"
+                    onClick={() => setShowConfirmOpen(true)}
+                    disabled={submitting || completing}
+                    className="mt-3 bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50"
+                  >
+                    {completing ? "Completing..." : "Mark as Completed"}
+                  </Button>
+
+                  {/* Confirmation modal */}
+                  <AlertDialog open={showConfirmOpen} onOpenChange={setShowConfirmOpen}>
+                    <AlertDialogContent className="max-w-md border-slate-700 bg-slate-900">
+                      <AlertDialogHeader>
+                        <AlertDialogTitle className="text-white">Confirm Completion</AlertDialogTitle>
+                        <AlertDialogDescription className="text-slate-400">
+                          Are you sure you want to complete this event? The system will trigger on-chain completion and release revenue.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                          onClick={async () => {
+                            setShowConfirmOpen(false);
+                            await handleCompleteEvent();
+                          }}
+                        >
+                          Confirm
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                </>
               </div>
             )}
           </div>
@@ -618,7 +648,7 @@ export const EditEvent: React.FC = () => {
           <div className="border-2 border-dashed border-slate-700 rounded-lg p-12 text-center opacity-70">
             <Upload className="w-12 h-12 text-slate-600 mx-auto mb-4" />
             <p className="text-white mb-2">
-              Image upload chưa nối vào API multipart
+              Image upload is not yet connected to the API multipart endpoint
             </p>
             <p className="text-sm text-slate-500">
               Có thể nối thêm FormData sau nếu backend đã hỗ trợ endpoint
