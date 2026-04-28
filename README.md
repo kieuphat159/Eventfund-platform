@@ -1,239 +1,367 @@
-# EventFund Ticket Platform
+# EventFund Platform
 
-Nền tảng tạo quỹ sự kiện, bán, trao đổi và chứng thực vé sự kiện trên blockchain.
+EventFund is a Web3 event funding and ticketing platform with three main parts:
 
-## Kiến trúc
+- `frontend/`: React + Vite client
+- `backend/`: Express API, MongoDB data layer, SIWE/Web3Auth auth flow, blockchain sync workers
+- `contracts/`: Solidity contracts and Hardhat deployment scripts
 
+The platform supports event creation, crowdfunding, NFT ticket issuance, secondary marketplace listings, verifier check-in flows, admin operations, and VNPay-based deposit flows.
+
+## Repository Layout
+
+```text
+Eventfund-platform/
+|-- frontend/       React app (Vite)
+|-- backend/        Express API + MongoDB + blockchain workers
+|-- contracts/      Solidity contracts + Hardhat scripts
+|-- infrastructure/ Terraform and EC2 Docker deployment assets
+|-- docker-compose.yml
+|-- Dockerfile
+`-- README.md
 ```
-eventfund-ticket-platform/
-├── frontend/          # React + Vite
-├── backend/           # Express.js API
-└── contracts/         # Solidity Smart Contracts (Hardhat)
-```
+
+## Core Features
+
+- SIWE authentication and Web3Auth-based login
+- Event creation, editing, funding lifecycle, and organizer flows
+- NFT ticket purchase, refund, verification, and check-in flows
+- Secondary marketplace listing and purchase flows
+- Admin dashboards for users, events, marketplace activity, and platform stats
+- Blockchain log indexing and processing into MongoDB query models
+- VNPay deposit flow with frontend redirect and backend callback handling
 
 ## Tech Stack
 
 ### Frontend
 
-- React 19
-- Vite 7
-- ESLint
+- React 18
+- React Router 7
+- Vite 6
+- Tailwind CSS 4
+- Web3Auth
+- MUI + Radix UI
 
 ### Backend
 
-- Express.js 5
-- MongoDB (Mongoose)
-- Redis (ioredis)
-- Helmet (Security)
+- Node.js + Express 5
+- MongoDB + Mongoose
+- JWT + SIWE
+- Swagger/OpenAPI
+- Ethers 6
+- Cloudinary
+- VNPay integration
+- Jest + Supertest
 
 ### Smart Contracts
 
-- Solidity
+- Solidity 0.8.20
 - Hardhat
-- Hardhat Toolbox
+- OpenZeppelin Contracts
 
-## Cài đặt
+## Prerequisites
 
-### Yêu cầu
-
-- Node.js >= 18
+- Node.js 18+ recommended
+- npm
 - MongoDB
-- Redis
+- A Sepolia RPC URL for full blockchain flows
+- A deployer private key for contract deployment
 
-### 1. Clone repository
+Optional, depending on what you want to run:
+
+- Cloudinary account for image upload
+- Web3Auth project credentials
+- VNPay sandbox credentials
+- Pinata JWT
+
+## Environment Files
+
+This repo now includes example env files for all three apps:
+
+- [backend/.env.example](/d:/KTLTWEB/Eventfund-platform/backend/.env.example)
+- [frontend/.env.example](/d:/KTLTWEB/Eventfund-platform/frontend/.env.example)
+- [contracts/.env.example](/d:/KTLTWEB/Eventfund-platform/contracts/.env.example)
+
+Create real env files by copying the examples:
 
 ```bash
-git clone https://github.com/kieuphat159/Eventfund-platform.git
-cd eventfund-ticket-platform
+copy backend\.env.example backend\.env
+copy frontend\.env.example frontend\.env
+copy contracts\.env.example contracts\.env
 ```
 
-### 2. Cài đặt dependencies
+If you are not on Windows, use `cp` instead of `copy`.
+
+## Install Dependencies
+
+This repo is not configured as an npm workspace, so install dependencies per package:
 
 ```bash
-# Cài đặt tất cả
 npm install
 npm install --prefix backend
 npm install --prefix frontend
 npm install --prefix contracts
 ```
 
-### 3. Cấu hình môi trường
+## Local Development
 
-Tạo file `.env` trong thư mục `backend/` (có thể copy từ `backend/.env.example`):
+### 1. Minimal app startup
 
-```env
-PORT=4000
-NODE_ENV=DEV
-
-MONGO_DEV_URI=mongodb+srv://...
-MONGO_PROD_URI=mongodb+srv://...
-
-CLOUDINARY_NAME=your_cloudinary_name
-CLOUDINARY_KEY=your_cloudinary_key
-CLOUDINARY_SECRET=your_cloudinary_secret
-
-RPC_URL=http://127.0.0.1:8545
-
-# get from hardhat deployment (deploy:all sẽ tự ghi 3 biến này)
-TICKET_ADDRESS=0x...
-FUND_ADDRESS=0x...
-MARKETPLACE_ADDRESS=0x...
-```
-
-Tạo file `.env` trong thư mục `contracts/`:
-
-```env
-PRIVATE_KEY=your_wallet_private_key
-SEPOLIA_RPC_URL=https://...
-```
-
-## Chạy ứng dụng
-
-### Development
-
-```bash
-# Chạy cả frontend và backend
-npm run dev
-
-# Hoặc chạy riêng từng phần
-npm run frontend dev      # Frontend tại http://localhost:5173
-npm run backend dev       # Backend tại http://localhost:3000
-```
-
-### Smart Contracts
-
-```bash
-# Chạy blockchain local (Hardhat node) - mở 1 terminal riêng
-npm run contracts chain
-
-# Deploy cả 3 contracts (Ticket/Fund/Marketplace) lên localhost
-# - Contract nào lỗi sẽ không chặn contract còn lại
-# - Tự ghi TICKET_ADDRESS/FUND_ADDRESS/MARKETPLACE_ADDRESS vào backend/.env
-npm run contracts deploy:all
-```
-
-### Deploy Sepolia testnet
-
-Từ thư mục gốc:
-
-```bash
-# đảm bảo contracts/.env có PRIVATE_KEY và SEPOLIA_RPC_URL
-npm run contracts deploy:sepolia
-```
-
-Chi tiết (các biến env optional, wiring tự động Ticket/Fund/Marketplace, upsert vào backend/.env): xem `contracts/README.md`.
-
-### Local blockchain + backend (flow khuyến nghị)
+If you only want to boot the web app and API without the full local blockchain loop:
 
 Terminal 1:
 
 ```bash
-cd contracts
-npm run chain
+npm run backend start
 ```
 
 Terminal 2:
 
 ```bash
-cd contracts
-npm run deploy:all
+npm run frontend dev
 ```
+
+URLs:
+
+- Frontend: `http://localhost:5173`
+- Backend API: `http://localhost:4000`
+- Swagger docs: `http://localhost:4000/api-docs`
+- Health check: `http://localhost:4000/health`
+
+Use this mode if you are still preparing contract addresses, RPC access, or blockchain workers.
+
+### 2. Full local Web3 flow
+
+For the full dev loop with local chain, deployed contracts, API, and blockchain workers:
+
+Terminal 1:
+
+```bash
+npm run contracts chain
+```
+
+Terminal 2:
+
+```bash
+npm run contracts deploy:all
+```
+
+This deploy script:
+
+- deploys `Ticket`, `Fund`, and `Marketplace`
+- wires the contracts together
+- upserts deployed addresses into:
+  - `contracts/.env`
+  - `backend/.env`
 
 Terminal 3:
 
 ```bash
-cd backend
-npm run dev
+npm run backend dev
 ```
 
-Ghi chú:
-
-- Backend đọc address từ `backend/.env` (các biến: `TICKET_ADDRESS`, `FUND_ADDRESS`, `MARKETPLACE_ADDRESS`).
-- Backend được cấu hình để luôn load đúng `backend/.env` dù bạn chạy lệnh từ thư mục nào.
-
-### Blockchain utilities (backend)
+Terminal 4:
 
 ```bash
-# Test connection tới RPC + cả 3 contracts (non-blocking)
-npm run backend test:blockchain:connections
+npm run frontend dev
+```
 
-# Chạy các indexer loop
+Notes:
+
+- `npm run dev` at repo root starts `backend` and `frontend` together, but does not start the Hardhat node.
+- `backend` dev mode also starts background loops:
+  - fund indexer
+  - fund processor
+  - ticket indexer
+  - ticket processor
+  - deposit worker
+- If blockchain env vars or contract addresses are missing, `npm run backend dev` can fail. In that case use the minimal startup path first.
+
+## Available Scripts
+
+### Root
+
+```bash
+npm run dev
+npm run backend <script>
+npm run frontend <script>
+npm run contracts <script>
+```
+
+### Backend
+
+```bash
+npm run backend start
+npm run backend dev
+npm run backend test
+npm run backend test:blockchain:connections
 npm run backend indexer:ticket
 npm run backend indexer:fund
 npm run backend indexer:marketplace
-
-# Chạy ticket processor loop (build TicketEvent/TicketStats từ ChainLog)
 npm run backend processor:ticket
+npm run backend processor:fund
+npm run backend processor:marketplace
+npm run backend worker:deposits
+npm run backend seed
+npm run backend add:event-verifier
+npm run backend verifier:test-qr
+npm run backend cleanup:historical-fund
+npm run backend migrate:event-fund-scope
 ```
 
-Tài liệu chi tiết (Indexer/Processor, reorg handling, env vars, data model):
-
-- `backend/docs/blockchain-indexing.md`
-
-## Cấu trúc chi tiết
-
-### Backend (`/backend`)
-
-```
-backend/
-└── src/
-    ├── app.js          # Express app config
-    ├── server.js       # Server entry point
-    ├── config/         # Database, Redis config
-    ├── modules/        # Feature modules
-    ├── routes/         # API routes
-    └── utils/          # Helper functions
-```
-
-### Frontend (`/frontend`)
-
-```
-frontend/
-└── src/
-    ├── main.jsx        # Entry point
-    ├── App.jsx         # Root component
-    ├── assets/         # Static assets
-    └── ...
-```
-
-### Contracts (`/contracts`)
-
-```
-contracts/
-├── contracts/
-│   ├── Fund.sol        # Crowdfunding contract
-│   ├── Ticket.sol      # NFT Ticket contract
-│   └── Marketplace.sol # Ticket marketplace
-├── test/               # Contract tests
-└── ignition/           # Deployment scripts
-```
-
-## Smart Contracts
-
-| Contract          | Mô tả                       |
-| ----------------- | --------------------------- |
-| `Fund.sol`        | Quản lý gây quỹ cho sự kiện |
-| `Ticket.sol`      | NFT ticket cho sự kiện      |
-| `Marketplace.sol` | Sàn giao dịch vé            |
-
-## Testing
+### Frontend
 
 ```bash
-# Backend - full test suite
-npm run backend test
+npm run frontend dev
+npm run frontend build
+npm run frontend lint
+```
 
-# Backend - JSON report for CI/debug
-npm run backend test -- --json --outputFile jest-backend.json
+### Contracts
 
-# Backend - blockchain connectivity smoke check
-npm run backend test:blockchain:connections
+```bash
+npm run contracts chain
+npm run contracts deploy:all
+npm run contracts deploy:sepolia
+npm run contracts deploy:fund
+npm run contracts deploy:fund:sepolia
+```
 
-# Contracts (Hardhat)
+For contract tests, use Hardhat directly:
+
+```bash
 cd contracts
 npx hardhat test
 ```
 
-Tai lieu chi tiet ve test backend:
+The current `contracts/package.json` test script is still a placeholder and does not run the suite.
 
-- `backend/docs/backend-testing.md`
+## Frontend App Structure
 
+The frontend is organized around three route groups:
+
+- Public routes: home, explore, marketplace, event detail, ticket detail, login
+- User routes: dashboard, my events, create/edit event, my tickets, investments, wallet, deposits, profile, settings
+- Admin routes: dashboard, users, events, marketplace, fraud, finance, analytics, settings
+
+There is also a verifier dashboard under:
+
+- `/app/verifier/dashboard`
+
+Authentication is handled through `AuthContext` and Web3Auth in:
+
+- `frontend/src/app/contexts/AuthContext.tsx`
+- `frontend/src/app/web3auth.config.ts`
+
+## Backend API Overview
+
+The backend exposes these main route groups:
+
+- `/api/auth`: login, nonce, SIWE message, verify, logout, refresh
+- `/api/events`: event listing, creation, edit, blockchain intent/confirm flows
+- `/api/tickets`: ticket list, purchase intent, refund intent, verification, use/check-in
+- `/api/marketplace`: listing CRUD and marketplace history/stats flows
+- `/api/users`: user profile and user-related data
+- `/api/admin`: platform stats, user role management, admin event operations
+- `/api/deposits`: VNPay deposit creation, return/IPN handling, history, balances
+- `/api/health`: API health endpoint
+
+Swagger is generated from route annotations and served at:
+
+- `http://localhost:4000/api-docs`
+- `http://localhost:4000/api-docs.json`
+
+## Blockchain Sync Pipeline
+
+The backend contains long-running blockchain jobs that sync on-chain data into MongoDB:
+
+- indexers read logs from RPC and store raw chain logs
+- processors materialize query-friendly models for tickets, events, and marketplace data
+
+Important docs:
+
+- [backend/docs/blockchain-indexing.md](/d:/KTLTWEB/Eventfund-platform/backend/docs/blockchain-indexing.md)
+- [backend/docs/giai_thich_reorg.md](/d:/KTLTWEB/Eventfund-platform/backend/docs/giai_thich_reorg.md)
+
+## Contracts
+
+Main contracts:
+
+- `Ticket.sol`
+- `Fund.sol`
+- `Marketplace.sol`
+
+Hardhat config loads env from `contracts/.env`. The deployer account is resolved from:
+
+- `PRIVATE_KEY`, or
+- `BACKEND_SIGNER_PRIVATE_KEY` as a fallback
+
+Local and Sepolia deployment details are documented in:
+
+- [contracts/README.md](/d:/KTLTWEB/Eventfund-platform/contracts/README.md)
+
+## Testing
+
+### Backend
+
+```bash
+npm run backend test
+```
+
+You can also generate a JSON report:
+
+```bash
+npm run backend test -- --json --outputFile jest-backend.json
+```
+
+### Contracts
+
+```bash
+cd contracts
+npx hardhat test
+```
+
+### Helpful checks
+
+```bash
+npm run backend test:blockchain:connections
+```
+
+Additional backend testing notes:
+
+- [backend/docs/backend-test-snapshot-2026-04-06.md](/d:/KTLTWEB/Eventfund-platform/backend/docs/backend-test-snapshot-2026-04-06.md)
+
+## Docker and Deployment
+
+This repo includes a backend-focused Docker setup:
+
+- [Dockerfile](/d:/KTLTWEB/Eventfund-platform/Dockerfile)
+- [docker-compose.yml](/d:/KTLTWEB/Eventfund-platform/docker-compose.yml)
+- [docker-entrypoint.sh](/d:/KTLTWEB/Eventfund-platform/docker-entrypoint.sh)
+
+Current container behavior:
+
+- builds the backend image
+- starts `backend/src/server.js`
+- supports loading environment variables from AWS Systems Manager Parameter Store
+- mounts backend logs to a Docker volume
+
+Terraform assets for EC2 Docker deployment live under:
+
+- [infrastructure/ec2-docker/terraform](/d:/KTLTWEB/Eventfund-platform/infrastructure/ec2-docker/terraform)
+
+## Recommended First Run Checklist
+
+1. Install dependencies in root, `backend`, `frontend`, and `contracts`.
+2. Copy the three `.env.example` files into real `.env` files.
+3. Fill in MongoDB and frontend/backend base URLs first.
+4. If you want full blockchain flow, fill `contracts/.env` and deploy contracts.
+5. Start backend and open `http://localhost:4000/api-docs`.
+6. Start frontend and verify it can reach the backend.
+
+## Known Notes
+
+- The root `npm run dev` command does not start a Hardhat node.
+- The backend dev script starts multiple long-running workers, not just the API server.
+- Contract tests exist, but the `npm test` script inside `contracts/` is not wired yet.
+- Some advanced flows require real third-party credentials: Cloudinary, Web3Auth, VNPay, Pinata, and RPC access.
