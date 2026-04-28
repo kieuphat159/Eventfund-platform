@@ -13,9 +13,17 @@ import { Input } from "../../components/ui/input";
 import { Textarea } from "../../components/ui/textarea";
 import { Label } from "../../components/ui/label";
 import { StatusBadge } from "../../components/StatusBadge";
-import { getEventById, updateEvent, type EventItem, type EventStatus } from "../../services/events.service";
+import {
+  completeEventWithWalletFallback,
+  getEventById,
+  updateEvent,
+  type EventItem,
+  type EventStatus,
+  type Eip1193Provider,
+} from "../../services/events.service";
 import { useAuth } from "../../contexts/AuthContext";
 import { useLoading } from "../../components/ui/loadingContext";
+import { useWeb3Auth } from "@web3auth/modal/react";
 
 type TicketTierForm = {
   name: string;
@@ -66,6 +74,7 @@ export const EditEvent: React.FC = () => {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
+  const { web3Auth } = useWeb3Auth();
   const { show: showLoading, hide: hideLoading } = useLoading();
 
   const [loading, setLoading] = useState(true);
@@ -82,6 +91,7 @@ export const EditEvent: React.FC = () => {
   const [fundingGoal, setFundingGoal] = useState("");
   const [minStakeRequired, setMinStakeRequired] = useState("");
   const [status, setStatus] = useState<EventStatus>("draft");
+  const [completing, setCompleting] = useState(false);
 
   const [ticketTiers, setTicketTiers] = useState<TicketTierForm[]>([
     { name: "General", price: "", supply: "" },
@@ -226,16 +236,6 @@ export const EditEvent: React.FC = () => {
         return;
       }
 
-      if (
-        status === "completed" &&
-        currentStatus !== "completed" &&
-        !window.confirm(
-          'Bạn có chắc muốn hoàn tất sự kiện này không?\n\nHệ thống sẽ cần ký ví organizer để gọi on-chain completion và release revenue.',
-        )
-      ) {
-        return;
-      }
-
       setSubmitting(true);
       showLoading("Saving changes...");
       const updatePayload = {
@@ -265,6 +265,67 @@ export const EditEvent: React.FC = () => {
       );
     } finally {
       setSubmitting(false);
+      hideLoading();
+    }
+  };
+
+  const handleCompleteEvent = async () => {
+    try {
+      if (!id || !eventData) {
+        setError("Missing event data");
+        return;
+      }
+
+      if (
+        !window.confirm(
+          "Bạn có chắc muốn hoàn tất sự kiện này không?\n\nHệ thống sẽ gọi completion on-chain và release revenue.",
+        )
+      ) {
+        return;
+      }
+
+      if (!user?.walletAddress && !user?.smartAccountAddress) {
+        await connectWallet();
+        return;
+      }
+
+      const provider = web3Auth?.provider as Eip1193Provider | undefined;
+      if (!provider?.request) {
+        setError(
+          "Wallet provider is not ready. Please reconnect wallet and try again.",
+        );
+        return;
+      }
+
+      setCompleting(true);
+      setError("");
+      setSuccess("");
+      showLoading("Completing event...");
+
+      const updated = await completeEventWithWalletFallback(
+        provider,
+        id,
+        { status: "completed" },
+        user.walletAddress,
+        user.smartAccountAddress,
+      );
+
+      if (!updated) {
+        setError("Không thể hoàn tất sự kiện");
+        return;
+      }
+
+      setEventData(updated);
+      setStatus((updated.status as EventStatus) || "completed");
+      setSuccess("Sự kiện đã được hoàn tất");
+    } catch (err: any) {
+      setError(
+        err?.response?.data?.message ||
+          err?.message ||
+          "Có lỗi xảy ra khi hoàn tất sự kiện",
+      );
+    } finally {
+      setCompleting(false);
       hideLoading();
     }
   };
@@ -516,7 +577,9 @@ export const EditEvent: React.FC = () => {
                 <option value="cancelled">cancelled</option>
               )}
             </select>
-            <p className="mt-1 text-xs text-slate-500">Trạng thái chỉ hiển thị, không thể chỉnh sửa từ đây.</p>
+            <p className="mt-1 text-xs text-slate-500">
+              Trạng thái hiển thị theo luồng hệ thống. Hoàn tất event bằng nút bên dưới khi đã đủ điều kiện.
+            </p>
             {status === "cancelled" && currentStatus !== "cancelled" && (
               <div className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
                 Event sẽ được gửi theo flow hủy hiện có của backend. Nếu event
@@ -524,10 +587,20 @@ export const EditEvent: React.FC = () => {
                 tương ứng.
               </div>
             )}
-            {status === "completed" && currentStatus !== "completed" && (
+            {(currentStatus === "ticketing" || currentStatus === "ongoing") && (
               <div className="mt-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
-                Khi hoàn tất event, organizer wallet sẽ ký 2 giao dịch on-chain:
-                đánh dấu `completed` và `release revenue` để hệ thống chia tiền.
+                <p>
+                  Khi đủ điều kiện, organizer wallet có thể hoàn tất event để gọi
+                  completion on-chain và release revenue.
+                </p>
+                <Button
+                  type="button"
+                  onClick={handleCompleteEvent}
+                  disabled={submitting || completing}
+                  className="mt-3 bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50"
+                >
+                  {completing ? "Completing..." : "Mark as Completed"}
+                </Button>
               </div>
             )}
           </div>

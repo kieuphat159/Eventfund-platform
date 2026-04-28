@@ -750,6 +750,16 @@ function shouldFallbackToWalletCancellation(message: string): boolean {
     .includes("organizer wallet signature required");
 }
 
+function shouldFallbackToWalletCompletion(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("organizer wallet signature required") ||
+    normalized.includes("requires organizer wallet") ||
+    normalized.includes("cannot mark completed with current backend signer") ||
+    normalized.includes("cannot change status from ticketing to completed")
+  );
+}
+
 function getPublicClient() {
   return createPublicClient({
     chain: sepolia,
@@ -1499,7 +1509,7 @@ export async function completeEventWithWalletFallback(
     return await updateEvent(eventId, completePayload);
   } catch (error) {
     const message = getErrorMessage(error);
-    if (!shouldFallbackToWalletCancellation(message)) {
+    if (!shouldFallbackToWalletCompletion(message)) {
       throw error;
     }
 

@@ -523,7 +523,7 @@ function resolveOwnerStatusTransition(currentStatus, requestedStatus) {
     draft: ["cancelled"],
     funding: ["cancelled"],
     funded: ["cancelled", "ticketing"],
-    ticketing: ["cancelled", "ongoing"],
+    ticketing: ["cancelled", "ongoing", "completed"],
     ongoing: ["completed"],
     completed: [],
     cancelled: [],
