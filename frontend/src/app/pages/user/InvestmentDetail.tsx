@@ -13,7 +13,7 @@ import {
   InvestmentDetail as InvestmentDetailType,
 } from "../../services/investment.service";
 import { Button } from "@/app/components/ui/button";
-import { useLoading } from "../../components/ui/LoadingContext";
+import { useLoading } from "../../components/ui/loadingContext";
 import {
   addIntegerValues,
   calculatePercentage,
