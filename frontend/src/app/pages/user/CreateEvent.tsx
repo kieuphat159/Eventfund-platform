@@ -537,8 +537,8 @@ export const CreateEvent: React.FC = () => {
 
       setSuccess(
         investmentEnabled
-          ? `Event created on-chain successfully. Tx: ${created.txHash}`
-          : `Self-funded event created on-chain successfully. Tx: ${created.txHash}`,
+          ? `Event created on-chain successfully. `
+          : `Self-funded event created on-chain successfully. `,
       );
       navigate("/app/events/my-events");
     } catch (err: any) {

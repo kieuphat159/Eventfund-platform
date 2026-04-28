@@ -5,6 +5,8 @@ import {
   Download,
   ArrowUpRight,
   ArrowDownLeft,
+  Copy,
+  CheckCircle2,
 } from "lucide-react";
 import { DepositModal } from "../../components/shared/DepositModal";
 import { formatEther } from "ethers";
@@ -87,6 +89,9 @@ export const Wallet: React.FC = () => {
   const { user } = useAuth();
   const walletAddress = user?.walletAddress;
   const { show: showLoading, hide: hideLoading } = useLoading();
+
+  const [addressCopied, setAddressCopied] = useState(false);
+  const [copiedTxIds, setCopiedTxIds] = useState<Record<string, boolean>>({});
 
   const [balance, setBalance] = useState<WalletBalance>({
     wei: "0",
@@ -304,14 +309,30 @@ export const Wallet: React.FC = () => {
                   variant="outline"
                   size="sm"
                   className="border-purple-500/30 hover:bg-purple-500/10"
-                  onClick={() => {
-                    if (walletAddress) {
-                      navigator.clipboard.writeText(walletAddress);
+                  onClick={async () => {
+                    if (!walletAddress) return;
+                    try {
+                      await navigator.clipboard.writeText(walletAddress);
+                      setAddressCopied(true);
+                      setTimeout(() => setAddressCopied(false), 2000);
+                    } catch (err) {
+                      console.error("Copy failed", err);
                     }
                   }}
                   disabled={!walletAddress}
+                  aria-live="polite"
                 >
-                  Copy
+                  {addressCopied ? (
+                    <>
+                      <CheckCircle2 className="w-4 h-4 text-green-400 mr-2" />
+                      Copied
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-4 h-4 mr-2" />
+                      Copy
+                    </>
+                  )}
                 </Button>
               </div>
             </div>
@@ -452,9 +473,40 @@ export const Wallet: React.FC = () => {
                               minute: "2-digit",
                             })}
                           </span>
-                          <code className="text-xs text-slate-500 bg-slate-900 px-2 py-1 rounded">
-                            {truncateHash(transaction.hash)}
-                          </code>
+                          <div className="flex items-center space-x-2">
+                            <code className="text-xs text-slate-500 bg-slate-900 px-2 py-1 rounded">
+                              {truncateHash(transaction.hash)}
+                            </code>
+                            {transaction.hash && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-slate-400 hover:text-white"
+                                onClick={async () => {
+                                  try {
+                                    await navigator.clipboard.writeText(transaction.hash || "");
+                                    setCopiedTxIds((prev) => ({ ...prev, [transaction.id]: true }));
+                                    setTimeout(() => {
+                                      setCopiedTxIds((prev) => {
+                                        const next = { ...prev };
+                                        delete next[transaction.id];
+                                        return next;
+                                      });
+                                    }, 2000);
+                                  } catch (err) {
+                                    console.error("Copy tx hash failed", err);
+                                  }
+                                }}
+                                title={transaction.hash}
+                              >
+                                {copiedTxIds[transaction.id] ? (
+                                  <CheckCircle2 className="w-4 h-4 text-green-400" />
+                                ) : (
+                                  <Copy className="w-4 h-4" />
+                                )}
+                              </Button>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>

@@ -399,7 +399,7 @@ export const MyTickets: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   <div className="hidden">
                     <QRCodeCanvas
                       id={getTicketQrCanvasId(ticket)}
@@ -434,13 +434,6 @@ export const MyTickets: React.FC = () => {
                     }}
                   >
                     <Download className="w-4 h-4" />
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="border-slate-700 hover:bg-slate-800"
-                  >
-                    <Share2 className="w-4 h-4" />
                   </Button>
                 </div>
 

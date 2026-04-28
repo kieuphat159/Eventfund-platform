@@ -841,16 +841,16 @@ async function validateCompletionReadiness(
   }
 
   const publicClient = getPublicClient();
-  const chainEventId = BigInt(event.contractEventId);
+  const chainEventId = BigInt(event.contractEventId as string);
   let totalUsed = BigInt(event.totalTicketsUsed ?? 0);
   let totalSold = BigInt(event.ticketsSold ?? 0);
 
   try {
-    const ticketAddress = await publicClient.readContract({
+    const ticketAddress = (await (publicClient as any).readContract({
       address: fundAddress as `0x${string}`,
       abi: FUND_READONLY_ABI,
       functionName: "ticket",
-    });
+    })) as `0x${string}`;
 
     if (!ticketAddress || /^0x0{40}$/i.test(ticketAddress)) {
       throw new Error(
@@ -858,12 +858,12 @@ async function validateCompletionReadiness(
       );
     }
 
-    const usageStats = await publicClient.readContract({
+    const usageStats = (await (publicClient as any).readContract({
       address: ticketAddress,
       abi: TICKET_USAGE_ABI,
       functionName: "getUsageStats",
       args: [chainEventId],
-    });
+    })) as [bigint, bigint, bigint, bigint];
 
     totalSold = usageStats[1];
     totalUsed = usageStats[2];
@@ -876,14 +876,14 @@ async function validateCompletionReadiness(
 
   if (totalSold <= 0n) {
     throw new Error(
-      "Event chưa có vé bán ra nên chưa thể completed theo tỷ lệ check-in.",
+      "Event have not sold any tickets yet.",
     );
   }
 
   const requiredUsed = (totalSold * COMPLETION_USAGE_PERCENT + 99n) / 100n;
   if (totalUsed < requiredUsed) {
     throw new Error(
-      `Event chưa đủ điều kiện completed on-chain: mới check-in ${totalUsed.toString()}/${requiredUsed.toString()} vé (36% theo ${totalSold.toString()} vé đã bán).`,
+      `Event have not reached completion threshold on-chain: only ${totalUsed.toString()}/${requiredUsed.toString()} tickets checked in (36% of ${totalSold.toString()} tickets sold).`,
     );
   }
 
@@ -913,13 +913,13 @@ async function validateCompletionReadiness(
     if (errorName === "Unsafe") {
       if (totalSold <= 0n) {
         throw new Error(
-          "Event chưa có vé bán ra nên chưa thể completed theo tỷ lệ check-in.",
+          "Event have not sold any tickets yet.",
         );
       }
 
       if (totalUsed < requiredUsed) {
         throw new Error(
-          `Event chưa đủ điều kiện completed on-chain: mới check-in ${totalUsed.toString()}/${requiredUsed.toString()} vé (36% theo ${totalSold.toString()} vé đã bán).`,
+          `Event have not reached completion threshold on-chain: only ${totalUsed.toString()}/${requiredUsed.toString()} tickets checked in (36% of ${totalSold.toString()} tickets sold).`,
         );
       }
 
@@ -1061,7 +1061,7 @@ function resolveCancellationReason(
     normalizedReason === "organizer_cancelled" ||
     normalizedReason === "ticket_sales_not_met"
   ) {
-    return normalizedReason;
+    return normalizedReason as CancellationReasonCode;
   }
 
   const fundingGoal = BigInt(String(event.fundingGoal ?? 0));

@@ -36,6 +36,7 @@ import {
 import { Input } from "../../components/ui/input";
 import { api } from "../../lib/api";
 import { useAuth } from "../../contexts/AuthContext";
+import { useLoading } from "../../components/ui/loadingContext";
 import {
   getTicketByTokenId,
   getTickets,
@@ -408,6 +409,8 @@ export const VerifierDashboard: React.FC = () => {
     },
   ];
 
+  const { show: showLoading, hide: hideLoading } = useLoading();
+
   const checkInByTokenId = useCallback(
     async (
       tokenId: string,
@@ -427,6 +430,7 @@ export const VerifierDashboard: React.FC = () => {
 
       setIsSubmitting(true);
       setActionError(null);
+      showLoading("Processing scan...");
 
       try {
         if (eventIdFromQr && eventIdFromQr !== selectedEvent) {
@@ -540,6 +544,7 @@ export const VerifierDashboard: React.FC = () => {
           ...prev,
         ]);
       } finally {
+        hideLoading();
         setIsSubmitting(false);
       }
     },
@@ -720,37 +725,6 @@ export const VerifierDashboard: React.FC = () => {
                   {isSubmitting ? "Processing..." : "Scan QR Code"}
                 </Button>
 
-                <div className="relative">
-                  <div className="absolute inset-0 flex items-center">
-                    <span className="w-full border-t border-slate-700" />
-                  </div>
-                  <div className="relative flex justify-center text-xs uppercase">
-                    <span className="bg-slate-900 px-2 text-slate-500">
-                      Or enter manually
-                    </span>
-                  </div>
-                </div>
-
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="Enter ticket ID"
-                    value={manualTicketId}
-                    onChange={(event) => setManualTicketId(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        void handleManualCheckIn();
-                      }
-                    }}
-                    className="border-slate-700 bg-slate-800 text-white"
-                  />
-                  <Button
-                    onClick={handleManualCheckIn}
-                    variant="outline"
-                    disabled={!selectedEvent || isSubmitting || !eventCheckInState.ready}
-                  >
-                    Check In
-                  </Button>
-                </div>
 
                 {!eventCheckInState.ready && (
                   <div className="rounded-lg border border-yellow-700 bg-yellow-500/10 p-3 text-sm text-yellow-300">
