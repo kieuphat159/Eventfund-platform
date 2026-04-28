@@ -3,9 +3,6 @@ name: Deploy App (EC2)
 on:
   push:
     branches: [dev]
-    paths:
-      - 'backend/**'
-      - 'frontend/**'
   workflow_dispatch:
 
 permissions:
