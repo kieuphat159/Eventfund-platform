@@ -121,11 +121,22 @@ export async function markDonatorContributionsAsRefunded(eventId, contributor, m
   return markContributionsAsRefunded(eventId, contributor, models);
 }
 
+export async function findRefundableContributors(eventId, models = {}) {
+  const Contribution = models.Contribution || DefaultContribution;
+
+  return await Contribution.distinct("contributor", {
+    eventId,
+    type: "donator_contribution",
+    status: "confirmed",
+  });
+}
+
 export default {
   upsertOrganizerStake,
   upsertDonatorContribution,
   rebuildFundState,
   markContributionsAsRefunded,
   markDonatorContributionsAsRefunded,
+  findRefundableContributors,
   deleteByTxHashes,
 };
