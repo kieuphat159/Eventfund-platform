@@ -141,6 +141,16 @@ export const config = {
     expiryMinutes: parseInt(process.env.DEPOSIT_ORDER_EXPIRY_MINUTES) || 15,
   },
 
+  // Exchange Rate APIs
+  exchangeRate: {
+    // CoinMarketCap API key (optional, for fallback)
+    coinmarketcapApiKey: process.env.COINMARKETCAP_API_KEY,
+    // Cache TTL in milliseconds
+    cacheTTL: parseInt(process.env.EXCHANGE_RATE_CACHE_TTL) || 5 * 60 * 1000, // 5 minutes
+    // Fallback max age in milliseconds
+    fallbackMaxAge: parseInt(process.env.EXCHANGE_RATE_FALLBACK_MAX_AGE) || 24 * 60 * 60 * 1000, // 24 hours
+  },
+
   // Environment alias
   env: process.env.NODE_ENV?.toUpperCase() || 'DEV',
 };
