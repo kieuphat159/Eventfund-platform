@@ -16,14 +16,14 @@ function validateEnv() {
   const required = [
     'PORT',
     'NODE_ENV',
-    'MONGO_DEV_URI'
+    'MONGO_STAG_URI'
   ];
 
   // Check for Cloudinary variables (either generic or environment-specific)
   const hasCloudinary =
     (process.env.CLOUDINARY_NAME && process.env.CLOUDINARY_KEY && process.env.CLOUDINARY_SECRET) ||
-    (process.env.CLOUDINARY_DEV_NAME && process.env.CLOUDINARY_DEV_KEY && process.env.CLOUDINARY_DEV_SECRET) ||
-    (process.env.CLOUDINARY_PROD_NAME && process.env.CLOUDINARY_PROD_KEY && process.env.CLOUDINARY_PROD_SECRET);
+    (process.env.CLOUDINARY_STAG_NAME && process.env.CLOUDINARY_STAG_KEY && process.env.CLOUDINARY_STAG_SECRET) ||
+    (process.env.CLOUDINARY_STAG_NAME && process.env.CLOUDINARY_STAG_KEY && process.env.CLOUDINARY_STAG_SECRET);
 
   if (!hasCloudinary) {
     required.push('CLOUDINARY_NAME', 'CLOUDINARY_KEY', 'CLOUDINARY_SECRET');
@@ -64,8 +64,8 @@ export const config = {
 
   // Database
   mongoUri: process.env.NODE_ENV?.toUpperCase() === 'PROD'
-    ? process.env.MONGO_PROD_URI
-    : process.env.MONGO_DEV_URI,
+    ? process.env.MONGO_STAG_URI
+    : process.env.MONGO_STAG_URI,
 
   // JWT (will be added later)
   jwt: {
@@ -99,16 +99,16 @@ export const config = {
   cloudinary: {
     name: process.env.CLOUDINARY_NAME ||
           (process.env.NODE_ENV?.toUpperCase() === 'PROD'
-            ? process.env.CLOUDINARY_PROD_NAME
-            : process.env.CLOUDINARY_DEV_NAME),
+            ? process.env.CLOUDINARY_STAG_NAME
+            : process.env.CLOUDINARY_STAG_NAME),
     key: process.env.CLOUDINARY_KEY ||
          (process.env.NODE_ENV?.toUpperCase() === 'PROD'
-           ? process.env.CLOUDINARY_PROD_KEY
-           : process.env.CLOUDINARY_DEV_KEY),
+           ? process.env.CLOUDINARY_STAG_KEY
+           : process.env.CLOUDINARY_STAG_KEY),
     secret: process.env.CLOUDINARY_SECRET ||
             (process.env.NODE_ENV?.toUpperCase() === 'PROD'
-              ? process.env.CLOUDINARY_PROD_SECRET
-              : process.env.CLOUDINARY_DEV_SECRET)
+              ? process.env.CLOUDINARY_STAG_SECRET
+              : process.env.CLOUDINARY_STAG_SECRET)
   },
 
   // CORS

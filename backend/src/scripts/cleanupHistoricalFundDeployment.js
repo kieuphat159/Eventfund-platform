@@ -46,9 +46,9 @@ function parseArgs(argv) {
 
 function buildMongoUri() {
   return (
-    process.env.MONGO_DEV_URI ||
+    process.env.MONGO_STAG_URI ||
     process.env.MONGO_URI ||
-    process.env.MONGO_PROD_URI
+    process.env.MONGO_STAG_URI
   );
 }
 
