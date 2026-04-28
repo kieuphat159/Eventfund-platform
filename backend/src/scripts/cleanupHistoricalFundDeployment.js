@@ -48,7 +48,7 @@ function buildMongoUri() {
   return (
     process.env.MONGO_PROD_URI ||
     process.env.MONGO_URI ||
-    process.env.MONGO_PROD_URI
+    process.env.MONGO_STAG_URI
   );
 }
 
