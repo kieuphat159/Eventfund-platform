@@ -2,6 +2,14 @@ import mongoose from "mongoose";
 import mongoosePaginate from "mongoose-paginate-v2";
 
 const listingSchema = new mongoose.Schema({
+  // On-chain listing ID (from smart contract)
+  contractListingId: {
+    type: String,
+    index: true,
+    unique: true,
+    sparse: true,
+  },
+
   ticketId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Ticket",

@@ -78,6 +78,46 @@ export async function findClaims(query, options, models = {}) {
 }
 
 /**
+ * Find rewards with query filters (non-paginated)
+ * @param {Object} query - Query filters
+ * @param {Object} options - Query options (populate, sort, limit, lean)
+ * @param {Object} models - Injected models (optional)
+ * @returns {Promise<Array>} Rewards list
+ */
+export async function findRewards(query = {}, options = {}, models = {}) {
+  const RewardClaim = models.RewardClaim || DefaultRewardClaim;
+
+  let dbQuery = RewardClaim.find(query);
+
+  if (options.sort) {
+    dbQuery = dbQuery.sort(options.sort);
+  }
+
+  if (options.limit) {
+    dbQuery = dbQuery.limit(options.limit);
+  }
+
+  if (options.populate) {
+    if (Array.isArray(options.populate)) {
+      options.populate.forEach((field) => {
+        dbQuery = dbQuery.populate(field);
+      });
+    } else {
+      dbQuery = dbQuery.populate(options.populate);
+    }
+  }
+
+  if (options.lean !== false) {
+    dbQuery = dbQuery.lean();
+  }
+
+  const rewards = await dbQuery;
+  return rewards.map((reward) =>
+    typeof reward.toObject === 'function' ? reward.toObject() : reward,
+  );
+}
+
+/**
  * Find reward claims by claimer address
  * @param {string} claimerAddress - Claimer wallet address
  * @param {Object} options - Query options (page, limit, sort, populate)
@@ -175,23 +215,20 @@ export async function findByDistribution(distributionId, options = {}, models = 
 export async function updateStatus(claimId, status, additionalData = {}, models = {}) {
   const RewardClaim = models.RewardClaim || DefaultRewardClaim;
 
-  const updates = {
-    status,
-    ...additionalData,
-  };
+  const setFields = { status, ...additionalData };
 
   // Set claimedAt if status is confirmed and not provided
   if (status === 'confirmed' && !additionalData.claimedAt) {
-    updates.claimedAt = new Date();
+    setFields.claimedAt = new Date();
   }
 
   const claim = await RewardClaim.findByIdAndUpdate(
     claimId,
-    updates,
-    { new: true, runValidators: true }
+    { $set: setFields },
+    { new: true, runValidators: true, lean: true }
   );
 
-  return claim ? claim.toObject() : null;
+  return claim ?? null;
 }
 
 /**
@@ -252,3 +289,41 @@ export async function deleteById(claimId, models = {}) {
   const result = await RewardClaim.findByIdAndDelete(claimId);
   return result !== null;
 }
+
+/**
+ * Upsert Reward Claim by txHash (idempotent)
+ */
+export async function upsertRewardClaim(data, models = {}) {
+  const RewardClaim = models.RewardClaim || DefaultRewardClaim;
+
+  return await RewardClaim.findOneAndUpdate(
+    { txHash: data.txHash?.toLowerCase() },
+    {
+      $set: {
+        eventId: data.eventId,
+        distributionId: data.distributionId,
+        claimer: data.claimer,
+        sharePercentage: data.sharePercentage,
+        rewardAmount: data.rewardAmount,
+        status: data.status || "confirmed",
+        claimedAt: data.claimedAt || new Date(),
+        txHash: data.txHash?.toLowerCase(),
+      },
+    },
+    {
+      upsert: true,
+      new: true,
+      runValidators: true,
+    }
+  ).lean();
+}
+
+/**
+ * Xoa RewardClaim theo txHashes (dung khi reorg)
+ */
+export async function deleteByTxHashes(txHashes, models = {}) {
+  const RewardClaim = models.RewardClaim || DefaultRewardClaim;
+  return await RewardClaim.deleteMany({ txHash: { $in: txHashes } });
+}
+
+export default { createClaim, findById, findClaims, findRewards, findByClaimer, findByEvent, findByDistribution, updateStatus, countClaims, getTotalRewardsByClaimer, deleteById, upsertRewardClaim, deleteByTxHashes };

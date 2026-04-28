@@ -255,6 +255,70 @@ router.get('/shares', authenticate, controller.getUserShares);
 
 /**
  * @swagger
+ * /users/shares/{id}:
+ *   get:
+ *     summary: Get details for a single user investment share
+ *     tags: [Users]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         schema:
+ *           type: string
+ *         required: true
+ *         description: Share document ID
+ *     responses:
+ *       200:
+ *         description: Share detail
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     _id:
+ *                       type: string
+ *                     eventId:
+ *                       type: object
+ *                       properties:
+ *                         _id:
+ *                           type: string
+ *                         title:
+ *                           type: string
+ *                         status:
+ *                           type: string
+ *                         startDate:
+ *                           type: string
+ *                         endDate:
+ *                           type: string
+ *                     contributionAmount:
+ *                       type: number
+ *                     sharePercentage:
+ *                       type: number
+ *                     claimedReward:
+ *                       type: number
+ *                     pendingReward:
+ *                       type: number
+ *                     shareTokenId:
+ *                       type: string
+ *                     createdAt:
+ *                       type: string
+ *       401:
+ *         description: Not authenticated
+ *       404:
+ *         description: Investment not found
+ *       500:
+ *         description: Server error
+ */
+router.get('/shares/:id', authenticate, controller.getUserShareById);
+
+/**
+ * @swagger
  * /users/rewards:
  *   get:
  *     summary: Get user rewards (claimed and pending)

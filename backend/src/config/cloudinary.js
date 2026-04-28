@@ -1,6 +1,8 @@
 import { v2 as cloudinary } from 'cloudinary';
 import { CloudinaryStorage } from 'multer-storage-cloudinary';
 import multer from 'multer';
+import dns from "node:dns/promises";   
+dns.setServers(["1.1.1.1", "1.0.0.1"]);
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_NAME,

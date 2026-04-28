@@ -44,6 +44,7 @@ async function resolveUserFromRequest(req) {
   return {
     _id: user._id,
     walletAddress: user.walletAddress,
+    smartAccountAddress: user.smartAccountAddress,
     username: user.username,
     email: user.email,
     avatarUrl: user.avatarUrl,

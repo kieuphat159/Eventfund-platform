@@ -11,3 +11,6 @@ export { BlockchainSyncState } from './BlockchainSyncState.model.js';
 export { TicketEvent } from './TicketEvent.model.js';
 export { TicketStats } from './TicketStats.model.js';
 export { ChainLog } from './ChainLog.js';
+export { default as DepositOrder } from './DepositOrder.model.js';
+export { default as UserBalance } from './UserBalance.model.js';
+export { default as ExchangeRateCache } from './ExchangeRateCache.model.js';

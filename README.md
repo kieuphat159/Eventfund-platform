@@ -219,11 +219,21 @@ contracts/
 ## Testing
 
 ```bash
-# Backend
+# Backend - full test suite
+npm run backend test
+
+# Backend - JSON report for CI/debug
+npm run backend test -- --json --outputFile jest-backend.json
+
+# Backend - blockchain connectivity smoke check
 npm run backend test:blockchain:connections
 
 # Contracts (Hardhat)
 cd contracts
 npx hardhat test
 ```
+
+Tai lieu chi tiet ve test backend:
+
+- `backend/docs/backend-testing.md`
 

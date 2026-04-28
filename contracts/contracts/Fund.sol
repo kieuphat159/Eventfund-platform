@@ -17,7 +17,7 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
  *      - trước deadline: chỉ cho finalize nếu đạt goal (status Funded)
  *      - sau deadline : nếu chưa đạt goal => Cancelled, nếu đạt => giữ Funded
  *  4) startTicketing(): chỉ organizer, chỉ sau Funded + sharesFinalized, gọi Ticket.sol mintBatch()
- *  5) setCompletedIfThresholdMet(): chỉ organizer, check totalUsed từ Ticket.sol >= usedThreshold
+ *  5) setCompletedIfThresholdMet(): chỉ organizer, check totalUsed >= 36% của totalSold
  *  6) releaseRevenue(): chỉ organizer, chỉ khi Completed, lấy revenue từ Ticket.sol và chia:
  *      platform fee -> admin, organizer share -> organizer, phần còn lại -> donatorPool
  *      donatorPool được ghi nhận qua accRewardPerShare
@@ -71,6 +71,7 @@ contract Fund is IFund, ReentrancyGuard {
     // -----------------------
     struct EventConfig {
         address organizer;
+        bool investmentEnabled;
 
         // Funding
         uint256 fundingGoal;
@@ -138,12 +139,19 @@ contract Fund is IFund, ReentrancyGuard {
         uint256 maxTickets,
         uint256 usedThreshold
     );
+    event InvestmentModeSet(uint256 indexed eventId, bool investmentEnabled);
 
     event ContributionMade(uint256 indexed eventId, address indexed donator, uint256 amount);
     event SharesIssued(uint256 indexed eventId, address indexed donator, uint256 sharesMinted);
 
     event FundingSuccessful(uint256 indexed eventId);
     event FundingFinalized(uint256 indexed eventId, uint256 totalShares, EventStatus statusAfterFinalize);
+    event EventCancelled(
+        uint256 indexed eventId,
+        CancellationReason reason,
+        bool ticketRefundsEnabled,
+        uint256 refundPoolAmount
+    );
 
     event TicketingStarted(uint256 indexed eventId, uint256 mintedQty, uint8 ticketType);
     event Completed(uint256 indexed eventId, uint256 usedTickets);
@@ -276,6 +284,11 @@ contract Fund is IFund, ReentrancyGuard {
         return p;
     }
 
+    function getEventStatus(uint256 eventId) external view returns (EventStatus) {
+        EventConfig storage e = _mustGet(eventId);
+        return e.status;
+    }
+
     // -----------------------
     // createEvent() with stake requirement
     // -----------------------
@@ -288,12 +301,66 @@ contract Fund is IFund, ReentrancyGuard {
         uint256 maxTickets,
         uint256 usedThreshold
     ) external payable returns (uint256 eventId) {
-        if (fundingGoal == 0) revert BadParam();
-        if (fundingDeadline == 0 || fundingDeadline <= block.timestamp) revert BadParam();
+        return _createEvent(
+            fundingGoal,
+            fundingDeadline,
+            minStakeRequired,
+            organizerShareBps,
+            ticketPrice,
+            maxTickets,
+            usedThreshold,
+            true
+        );
+    }
 
-        // stake requirement
-        if (minStakeRequired == 0) revert BadParam();
-        if (msg.value < minStakeRequired) revert BadParam();
+    /// @notice Create event with explicit investment mode.
+    /// @dev Backward-compatible extension for non-invest events.
+    function createEventWithInvestment(
+        uint256 fundingGoal,
+        uint256 fundingDeadline,
+        uint256 minStakeRequired,
+        uint256 organizerShareBps,
+        uint256 ticketPrice,
+        uint256 maxTickets,
+        uint256 usedThreshold,
+        bool investmentEnabled
+    ) external payable returns (uint256 eventId) {
+        return _createEvent(
+            fundingGoal,
+            fundingDeadline,
+            minStakeRequired,
+            organizerShareBps,
+            ticketPrice,
+            maxTickets,
+            usedThreshold,
+            investmentEnabled
+        );
+    }
+
+    function _createEvent(
+        uint256 fundingGoal,
+        uint256 fundingDeadline,
+        uint256 minStakeRequired,
+        uint256 organizerShareBps,
+        uint256 ticketPrice,
+        uint256 maxTickets,
+        uint256 usedThreshold,
+        bool investmentEnabled
+    ) internal returns (uint256 eventId) {
+        if (investmentEnabled) {
+            if (fundingGoal == 0) revert BadParam();
+            if (fundingDeadline == 0 || fundingDeadline <= block.timestamp) revert BadParam();
+
+            // stake requirement
+            if (minStakeRequired == 0) revert BadParam();
+            if (msg.value < minStakeRequired) revert BadParam();
+        } else {
+            // Self-funded / no-invest mode still requires organizer stake locking.
+            if (msg.value == 0) revert BadParam();
+            fundingGoal = 0;
+            fundingDeadline = 0;
+            minStakeRequired = msg.value;
+        }
 
         // revenue split
         if (organizerShareBps > BPS_DENOM) revert BadParam();
@@ -306,6 +373,7 @@ contract Fund is IFund, ReentrancyGuard {
         EventConfig storage e = events_[eventId];
 
         e.organizer = msg.sender;
+        e.investmentEnabled = investmentEnabled;
 
         e.fundingGoal = fundingGoal;
         e.fundingDeadline = fundingDeadline;
@@ -319,7 +387,13 @@ contract Fund is IFund, ReentrancyGuard {
         e.maxTickets = maxTickets;
         e.usedThreshold = usedThreshold;
 
-        e.status = EventStatus.Funding;
+        if (investmentEnabled) {
+            e.status = EventStatus.Funding;
+        } else {
+            // Non-invest mode: admin can transition to ticketing immediately.
+            e.status = EventStatus.Funded;
+            e.sharesFinalized = true;
+        }
 
         emit EventCreated(
             eventId,
@@ -333,6 +407,12 @@ contract Fund is IFund, ReentrancyGuard {
             maxTickets,
             usedThreshold
         );
+        emit InvestmentModeSet(eventId, investmentEnabled);
+
+        if (!investmentEnabled) {
+            emit FundingSuccessful(eventId);
+            emit FundingFinalized(eventId, e.totalShares, e.status);
+        }
     }
 
     // -----------------------
@@ -341,6 +421,7 @@ contract Fund is IFund, ReentrancyGuard {
     function contribute(uint256 eventId) external payable {
         EventConfig storage e = _mustGet(eventId);
 
+        if (!e.investmentEnabled) revert NotFunding();
         if (e.status != EventStatus.Funding) revert NotFunding();
         if (block.timestamp > e.fundingDeadline) revert FundingClosed();
         if (e.sharesFinalized) revert ShareLocked();
@@ -363,6 +444,12 @@ contract Fund is IFund, ReentrancyGuard {
         if (e.currentFunding >= e.fundingGoal) {
             e.status = EventStatus.Funded;
             emit FundingSuccessful(eventId);
+
+            // Auto-finalize when goal is reached so ticketing can be automated.
+            if (!e.sharesFinalized) {
+                e.sharesFinalized = true;
+                emit FundingFinalized(eventId, e.totalShares, e.status);
+            }
         }
     }
 
@@ -375,7 +462,16 @@ contract Fund is IFund, ReentrancyGuard {
     // -----------------------
     function finalizeFunding(uint256 eventId) external onlyOrganizerOrAdmin(eventId) {
         EventConfig storage e = _mustGet(eventId);
-        if (e.sharesFinalized) revert AlreadyFinalized();
+
+        // Idempotent for flows that auto-finalize on funding goal.
+        if (e.sharesFinalized) return;
+
+        if (!e.investmentEnabled) {
+            e.status = EventStatus.Funded;
+            e.sharesFinalized = true;
+            emit FundingFinalized(eventId, e.totalShares, e.status);
+            return;
+        }
 
         bool afterDeadline = block.timestamp > e.fundingDeadline;
 
@@ -385,12 +481,47 @@ contract Fund is IFund, ReentrancyGuard {
         } else {
             // sau deadline mà chưa đủ goal => Cancelled
             if (e.status != EventStatus.Funded) {
-                e.status = EventStatus.Cancelled;
+                _cancelEvent(eventId, e, CancellationReason.funding_goal_not_met);
             }
         }
 
         e.sharesFinalized = true;
         emit FundingFinalized(eventId, e.totalShares, e.status);
+    }
+
+    // -----------------------
+    // cancelEvent() explicit cancellation
+    // - organizer/admin can cancel before revenue release
+    // - organizer_cancelled: allow Funding/Funded/Ticketing
+    // - ticket_sales_not_met: allow Ticketing only
+    // - funding_goal_not_met is reserved for finalizeFunding() after deadline
+    // -----------------------
+    function cancelEvent(uint256 eventId, CancellationReason reason)
+        external
+        onlyOrganizerOrAdmin(eventId)
+    {
+        EventConfig storage e = _mustGet(eventId);
+
+        if (reason == CancellationReason.funding_goal_not_met) revert BadParam();
+        if (e.status == EventStatus.Cancelled) revert AlreadyFinalized();
+        if (e.status == EventStatus.Completed) revert Unsafe();
+        if (e.revenueReleased) revert Unsafe();
+
+        if (reason == CancellationReason.organizer_cancelled) {
+            if (
+                e.status != EventStatus.Funding &&
+                e.status != EventStatus.Funded &&
+                e.status != EventStatus.Ticketing
+            ) {
+                revert Unsafe();
+            }
+        } else if (reason == CancellationReason.ticket_sales_not_met) {
+            if (e.status != EventStatus.Ticketing) revert Unsafe();
+        } else {
+            revert BadParam();
+        }
+
+        _cancelEvent(eventId, e, reason);
     }
 
     // -----------------------
@@ -402,7 +533,25 @@ contract Fund is IFund, ReentrancyGuard {
         uint256 eventId,
         uint8 ticketType,
         uint256 quantity
-    ) external onlyOrganizer(eventId) returns (uint256[] memory tokenIds) {
+    ) external onlyOrganizerOrAdmin(eventId) returns (uint256[] memory tokenIds) {
+        return _startTicketing(eventId, ticketType, quantity, 0);
+    }
+
+    function startTicketingWithPrice(
+        uint256 eventId,
+        uint8 ticketType,
+        uint256 quantity,
+        uint256 batchPrice
+    ) external onlyOrganizerOrAdmin(eventId) returns (uint256[] memory tokenIds) {
+        return _startTicketing(eventId, ticketType, quantity, batchPrice);
+    }
+
+    function _startTicketing(
+        uint256 eventId,
+        uint8 ticketType,
+        uint256 quantity,
+        uint256 batchPrice
+    ) internal returns (uint256[] memory tokenIds) {
         EventConfig storage e = _mustGet(eventId);
         if (address(ticket) == address(0)) revert TicketContractNotSet();
 
@@ -416,11 +565,14 @@ contract Fund is IFund, ReentrancyGuard {
         // đảm bảo không mint vượt maxTickets
         if (e.totalMinted + quantity > e.maxTickets) revert ExceedsMaxTickets();
 
+        uint256 effectivePrice = batchPrice == 0 ? e.ticketPrice : batchPrice;
+        if (effectivePrice == 0) revert BadParam();
+
         // Ticket mintBatch(to, eventId, price, type, qty)
         tokenIds = ticket.mintBatch(
             e.organizer,
             eventId,
-            e.ticketPrice,
+            effectivePrice,
             ITicket.TicketType(ticketType),
             quantity
         );
@@ -436,7 +588,7 @@ contract Fund is IFund, ReentrancyGuard {
 
     // -----------------------
     // Completed logic (manual) - organizer gọi
-    // - kiểm tra usedThreshold từ Ticket.sol (getUsageStats)
+    // - điều kiện: totalUsed >= 36% của totalSold (dựa trên Ticket.sol usage stats)
     // -----------------------
     function setCompletedIfThresholdMet(uint256 eventId) external onlyOrganizer(eventId) {
         EventConfig storage e = _mustGet(eventId);
@@ -444,11 +596,15 @@ contract Fund is IFund, ReentrancyGuard {
 
         if (e.status != EventStatus.Ticketing) revert NotTicketing();
 
-        // Ticket.sol trả usage stats, lấy totalUsed
-        (, , uint256 totalUsed, ) = ticket.getUsageStats(eventId);
+        // Ticket.sol trả usage stats: totalSold/totalUsed.
+        (, uint256 totalSold, uint256 totalUsed, ) = ticket.getUsageStats(eventId);
 
-        // chưa đạt threshold => không cho Completed
-        if (totalUsed < e.usedThreshold) revert Unsafe();
+        // No sold tickets => cannot complete by usage ratio.
+        if (totalSold == 0) revert Unsafe();
+
+        // Hardcoded completion condition: used >= 36% of sold (rounded up).
+        uint256 requiredUsed = (totalSold * 3600 + (BPS_DENOM - 1)) / BPS_DENOM;
+        if (totalUsed < requiredUsed) revert Unsafe();
 
         e.status = EventStatus.Completed;
         emit Completed(eventId, totalUsed);
@@ -467,7 +623,6 @@ contract Fund is IFund, ReentrancyGuard {
         if (!e.sharesFinalized) revert Unsafe();
         if (e.revenueReleased) revert AlreadyFinalized();
         if (e.status != EventStatus.Completed) revert NotCompleted();
-        if (e.totalShares == 0) revert BadParam();
 
         // Nếu đã bật refunds thì không được release revenue (tránh double-mode)
         if (e.refundsEnabled) revert Unsafe();
@@ -487,8 +642,16 @@ contract Fund is IFund, ReentrancyGuard {
         uint256 afterFee = totalRevenue - platformFee;
 
         // 2) organizer share
-        uint256 organizerShare = (afterFee * e.organizerShareBps) / BPS_DENOM;
-        uint256 donatorPool = afterFee - organizerShare;
+        uint256 organizerShare;
+        uint256 donatorPool;
+        if (!e.investmentEnabled || e.totalShares == 0) {
+            // No-invest events have no donators to split revenue with.
+            organizerShare = afterFee;
+            donatorPool = 0;
+        } else {
+            organizerShare = (afterFee * e.organizerShareBps) / BPS_DENOM;
+            donatorPool = afterFee - organizerShare;
+        }
 
         // 3) payout fee + organizer
         if (platformFee > 0) {
@@ -501,7 +664,9 @@ contract Fund is IFund, ReentrancyGuard {
         }
 
         // 4) donator pool => accRewardPerShare
-        e.accRewardPerShare += (donatorPool * 1e18) / e.totalShares;
+        if (donatorPool > 0) {
+            e.accRewardPerShare += (donatorPool * 1e18) / e.totalShares;
+        }
 
         emit RevenueReleased(eventId, totalRevenue, platformFee, organizerShare, donatorPool, e.accRewardPerShare);
     }
@@ -555,18 +720,18 @@ contract Fund is IFund, ReentrancyGuard {
     // -----------------------
     // FIX (critical): contribution refunds when funding failed/cancelled
     // -----------------------
-    function claimContributionRefund(uint256 eventId) external nonReentrant {
+    function _claimContributionRefund(uint256 eventId, address donator) internal {
         EventConfig storage e = _mustGet(eventId);
 
         // Only allow refund if event is cancelled (funding failed / deadline passed without goal)
         if (e.status != EventStatus.Cancelled) revert Unsafe();
 
         // shares == contributed wei (1 wei = 1 share)
-        uint256 amount = e.shareOf[msg.sender];
+        uint256 amount = e.shareOf[donator];
         if (amount == 0) revert NothingToClaim();
 
         // FIX: burn user's shares for this event so they can't double-refund
-        e.shareOf[msg.sender] = 0;
+        e.shareOf[donator] = 0;
         if (e.totalShares >= amount) {
             e.totalShares -= amount;
         } else {
@@ -575,33 +740,36 @@ contract Fund is IFund, ReentrancyGuard {
         }
 
         // reset reward tracking (event cancelled => no rewards)
-        e.rewardDebt[msg.sender] = 0;
-        e.pending[msg.sender] = 0;
+        e.rewardDebt[donator] = 0;
+        e.pending[donator] = 0;
 
-        (bool ok, ) = msg.sender.call{value: amount}("");
+        (bool ok, ) = donator.call{value: amount}("");
         if (!ok) revert TransferFailed();
 
-        emit ContributionRefunded(eventId, msg.sender, amount);
+        emit ContributionRefunded(eventId, donator, amount);
+    }
+
+    function claimContributionRefund(uint256 eventId) external nonReentrant {
+        _claimContributionRefund(eventId, msg.sender);
+    }
+
+    // FIX: allow backend relayers / auto-refund jobs to trigger refund for a user
+    function claimContributionRefundFor(uint256 eventId, address donator) external nonReentrant {
+        _claimContributionRefund(eventId, donator);
     }
 
     // -----------------------
-    // FIX: organizer stake withdrawal so stake doesn't stay locked forever
+    // organizer stake is a refundable deposit after the event is settled.
+    // The actual platform fee is charged once in releaseRevenue().
     // -----------------------
     function withdrawStake(uint256 eventId) external nonReentrant onlyOrganizer(eventId) {
         EventConfig storage e = _mustGet(eventId);
 
-        // stake can be withdrawn when:
-        // - event cancelled (after finalize)
-        // - event completed and revenue released OR refunds enabled (settlement decision made)
-        bool canWithdraw =
-            (e.status == EventStatus.Cancelled && e.sharesFinalized) ||
-            (e.status == EventStatus.Completed && (e.revenueReleased || e.refundsEnabled)) ||
-            (e.refundsEnabled && e.sharesFinalized);
-
-        if (!canWithdraw) revert Unsafe();
+        if (e.status != EventStatus.Completed) revert Unsafe();
+        if (!e.revenueReleased && !e.refundsEnabled) revert Unsafe();
 
         uint256 amount = e.organizerStakeLocked;
-        if (amount == 0) revert NothingToWithdraw();
+        if (amount == 0) revert NothingToClaim();
 
         e.organizerStakeLocked = 0;
 
@@ -676,6 +844,31 @@ contract Fund is IFund, ReentrancyGuard {
 
         // set new debt
         e.rewardDebt[user] = accumulated;
+    }
+
+    function _cancelEvent(
+        uint256 eventId,
+        EventConfig storage e,
+        CancellationReason reason
+    ) internal {
+        e.status = EventStatus.Cancelled;
+        e.sharesFinalized = true;
+
+        bool ticketRefundsEnabled = false;
+        if (e.status == EventStatus.Cancelled) {
+            if (e.escrowedRevenue > 0) {
+                e.refundPool += e.escrowedRevenue;
+                e.escrowedRevenue = 0;
+            }
+
+            if (e.totalMinted > 0 || e.refundPool > 0 || e.refundsEnabled) {
+                e.refundsEnabled = true;
+                ticketRefundsEnabled = true;
+                emit RefundsEnabled(eventId, e.refundPool);
+            }
+        }
+
+        emit EventCancelled(eventId, reason, ticketRefundsEnabled, e.refundPool);
     }
 
     // -----------------------

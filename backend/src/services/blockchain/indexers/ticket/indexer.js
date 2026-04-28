@@ -43,7 +43,17 @@ function resultToArgsObject(result) {
     }
   }
 
-  return Object.keys(args).length > 0 ? args : undefined;
+  if (Object.keys(args).length > 0) {
+    return args;
+  }
+
+  // Fallback for ABIs/events where ethers only exposes positional keys.
+  const indexed = {};
+  for (let i = 0; i < result.length; i += 1) {
+    indexed[String(i)] = sanitizeForMongo(result[i]);
+  }
+
+  return Object.keys(indexed).length > 0 ? indexed : undefined;
 }
 async function deleteLogsInRange(contractAddress, fromBlock, toBlock) {
   await ChainLog.deleteMany({
@@ -81,7 +91,7 @@ async function storeLogs(contractAddress, logs) {
       data: log.data,
       eventName: parsed?.name,
       args: parsed?.args
-        ? resultToArgsObject(parsed.name, parsed.args)
+        ? resultToArgsObject(parsed.args)
         : undefined,
     };
   });

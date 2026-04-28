@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import mongoosePaginate from "mongoose-paginate-v2";
 
 const shareSchema = new mongoose.Schema(
   {
@@ -16,9 +17,9 @@ const shareSchema = new mongoose.Schema(
     },
 
     contributionAmount: {
-      type: Number, // Tổng số tiền đã góp
+      type: String, // Tổng số tiền đã góp
       required: true,
-      default: 0,
+      default: "0",
     },
 
     sharePercentage: {
@@ -32,13 +33,24 @@ const shareSchema = new mongoose.Schema(
     },
 
     claimedReward: {
-      type: Number, // Số tiền đã claim
-      default: 0,
+      type: String, // Số tiền đã claim
+      default: "0",
     },
 
     pendingReward: {
-      type: Number, // Số tiền chờ claim
-      default: 0,
+      type: String, // Số tiền chờ claim
+      default: "0",
+    },
+
+    mintedShares: {
+      type: String,
+      default: "0",
+    },
+
+    // Idempotency: track txHashes da xu ly cho claimedReward $inc
+    processedRewardTxHashes: {
+      type: [String],
+      default: [],
     },
   },
   {
@@ -51,6 +63,8 @@ shareSchema.index({ eventId: 1 });
 shareSchema.index({ holder: 1 });
 shareSchema.index({ eventId: 1, holder: 1 }, { unique: true });
 
-const Share = mongoose.model("Share", shareSchema);
+// Apply pagination plugin used by share repository methods
+shareSchema.plugin(mongoosePaginate);
 
+const Share = mongoose.model("Share", shareSchema);
 export default Share;

@@ -1,0 +1,91 @@
+name: Scan – SonarQube (Full Project)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  sonarqube-full:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: SonarQube Scan (full project)
+        uses: SonarSource/sonarqube-scan-action@v7.1.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        with:
+          args: >
+            -Dsonar.projectKey=truongtrongdat94_eventfund-platform
+            -Dsonar.organization=truongtrongdat94
+            -Dsonar.sources=backend/src,frontend/src
+            -Dsonar.exclusions=**/node_modules/**,**/dist/**,**/coverage/**
+
+      - name: Export SonarCloud report
+        if: always()
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          PROJECT_KEY="truongtrongdat94_eventfund-platform"
+          BASE_URL="https://sonarcloud.io"
+          OUT="sonar-report"
+          mkdir -p $OUT
+
+          # Issues (bugs, vulnerabilities, code smells)
+          curl -sf -u "$SONAR_TOKEN:" \
+            "$BASE_URL/api/issues/search?projectKeys=$PROJECT_KEY&ps=500&resolved=false" \
+            -o $OUT/issues.json
+
+          # Measures (overview metrics)
+          curl -sf -u "$SONAR_TOKEN:" \
+            "$BASE_URL/api/measures/component?component=$PROJECT_KEY&metricKeys=bugs,vulnerabilities,code_smells,coverage,duplicated_lines_density,ncloc,security_hotspots,reliability_rating,security_rating,sqale_rating" \
+            -o $OUT/measures.json
+
+          # Security hotspots
+          curl -sf -u "$SONAR_TOKEN:" \
+            "$BASE_URL/api/hotspots/search?projectKey=$PROJECT_KEY&ps=500" \
+            -o $OUT/hotspots.json
+
+          # Generate simple HTML report
+          cat <<EOF > $OUT/report.html
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <title>SonarCloud Report – eventfund-platform</title>
+            <style>
+              body { font-family: sans-serif; padding: 2rem; background: #f5f5f5; }
+              h1 { color: #1a1a1a; }
+              .meta { color: #666; margin-bottom: 2rem; }
+              .link { display: inline-block; margin-bottom: 2rem; padding: 0.6rem 1.2rem; background: #0066cc; color: white; text-decoration: none; border-radius: 4px; }
+              pre { background: #fff; padding: 1rem; border-radius: 6px; overflow: auto; border: 1px solid #ddd; font-size: 0.85rem; }
+            </style>
+          </head>
+          <body>
+            <h1>SonarCloud Report</h1>
+            <p class="meta">Project: <strong>$PROJECT_KEY</strong> &nbsp;|&nbsp; Run: <strong>${{ github.sha }}</strong> &nbsp;|&nbsp; Branch: <strong>${{ github.ref_name }}</strong> &nbsp;|&nbsp; Date: <strong>$(date -u '+%Y-%m-%d %H:%M UTC')</strong></p>
+            <a class="link" href="$BASE_URL/project/overview?id=$PROJECT_KEY" target="_blank">View full report on SonarCloud ↗</a>
+            <h2>Measures</h2>
+            <pre id="measures">$(cat $OUT/measures.json | python3 -m json.tool)</pre>
+            <h2>Issues (open)</h2>
+            <pre id="issues">$(cat $OUT/issues.json | python3 -m json.tool)</pre>
+            <h2>Security Hotspots</h2>
+            <pre id="hotspots">$(cat $OUT/hotspots.json | python3 -m json.tool)</pre>
+          </body>
+          </html>
+          EOF
+
+      - name: Sanitize branch name
+        id: sanitize
+        run: echo "branch=$(echo '${{ github.ref_name }}' | tr '/' '-')" >> $GITHUB_OUTPUT
+
+      - name: Upload SonarCloud report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonarcloud-report-${{ steps.sanitize.outputs.branch }}-${{ github.run_number }}
+          path: sonar-report/
+          retention-days: 30

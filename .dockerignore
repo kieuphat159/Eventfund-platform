@@ -1,0 +1,63 @@
+# Dependencies
+**/node_modules
+**/npm-debug.log*
+**/yarn-debug.log*
+**/yarn-error.log*
+**/package-lock.json.bak
+
+# Git
+**/.git
+**/.gitignore
+**/.gitattributes
+
+# Environment files
+**/.env
+**/.env.*
+!**/.env.example
+
+# Logs
+**/*.log
+**/logs/*.log
+
+# Testing
+**/coverage
+**/.nyc_output
+**/jest.config.js
+
+# Build outputs
+**/dist
+**/build
+**/.next
+**/.nuxt
+
+# IDE
+**/.vscode
+**/.idea
+**/.DS_Store
+**/*.swp
+**/*.swo
+*~
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.circleci/
+
+# Documentation
+**/README.md
+**/CHANGELOG.md
+**/docs/
+
+# Project specific
+.kiro/
+frontend/
+contracts/
+backend/keys/
+backend/docs/
+backend/backend-srctree.txt
+backend/package.json.patch
+
+# Docker
+**/Dockerfile*
+**/docker-compose*.yml
+**/.dockerignore

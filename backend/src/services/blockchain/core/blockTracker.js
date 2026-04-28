@@ -24,7 +24,24 @@ export async function getOrInitSyncState({
     const initialBlock = assertValidBlockNumber(startBlock);
 
     const existing = await BlockchainSyncState.findOne({ contractName });
-    if (existing) return existing;
+    if (existing) {
+        const existingAddress = normalizeContractAddress(existing.contractAddress);
+
+        // Important for local/dev redeploys: if the configured contract address changed,
+        // reset sync cursor so indexer can ingest logs for the new contract.
+        if (normalizedAddress && existingAddress !== normalizedAddress) {
+            existing.contractAddress = normalizedAddress;
+            existing.lastProcessedBlock = initialBlock;
+            existing.lastBlockHash = null;
+            existing.recentBlockHashes = [];
+            existing.status = "synced";
+            existing.errorMessage = null;
+            existing.lastSyncAt = new Date();
+            await existing.save();
+        }
+
+        return existing;
+    }
 
     return BlockchainSyncState.create({
         contractName,
@@ -47,6 +64,8 @@ export async function updateProgress({
     contractName,
     contractAddress,
     lastProcessedBlock,
+    lastBlockHash = null,
+    recentBlockHashes = null,
     status = "syncing",
 }) {
     const normalizedAddress = normalizeContractAddress(contractAddress);
@@ -58,6 +77,8 @@ export async function updateProgress({
             $set: {
                 ...(normalizedAddress ? { contractAddress: normalizedAddress } : {}),
                 lastProcessedBlock: next,
+                ...(lastBlockHash ? { lastBlockHash } : {}),
+                ...(recentBlockHashes ? { recentBlockHashes } : {}),
                 lastSyncAt: new Date(),
                 status,
             },

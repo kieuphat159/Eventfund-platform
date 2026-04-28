@@ -40,7 +40,21 @@ function upsertEnvFile(envPath, kv) {
   fs.writeFileSync(envPath, out.join("\n") + "\n", "utf8");
 }
 
+async function ensureDeployer() {
+  const signers = await hre.ethers.getSigners();
+  const deployer = signers[0];
+
+  if (!deployer) {
+    throw new Error(
+      "No deployer signer available. Set PRIVATE_KEY or BACKEND_SIGNER_PRIVATE_KEY in contracts/.env before deploying.",
+    );
+  }
+
+  return deployer;
+}
+
 async function deployTicket() {
+  await ensureDeployer();
   const Ticket = await hre.ethers.getContractFactory("Ticket");
   const ticket = await Ticket.deploy();
   await ticket.waitForDeployment();
@@ -48,6 +62,7 @@ async function deployTicket() {
 }
 
 async function deployFund() {
+  await ensureDeployer();
   const Fund = await hre.ethers.getContractFactory("Fund");
   const fund = await Fund.deploy();
   await fund.waitForDeployment();
@@ -55,6 +70,7 @@ async function deployFund() {
 }
 
 async function deployMarketplace(ticketAddress, fundAddress, royaltyBps) {
+  await ensureDeployer();
   const Marketplace = await hre.ethers.getContractFactory("Marketplace");
   const marketplace = await Marketplace.deploy(ticketAddress, fundAddress, royaltyBps);
   await marketplace.waitForDeployment();

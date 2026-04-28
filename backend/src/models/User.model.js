@@ -19,6 +19,8 @@ const userSchema = new mongoose.Schema(
       type: String,
       trim: true,
       lowercase: true,
+      unique: true,
+      sparse: true,
     },
 
     avatarUrl: {
@@ -27,13 +29,13 @@ const userSchema = new mongoose.Schema(
 
     role: {
       type: String,
-      enum: ["user", "organizer", "verifier", "admin"],
+      enum: ["user", "verifier", "admin"],
       default: "user",
     },
 
     nonce: {
       type: String,
-      required: true,
+      default: null,
     },
 
     nonceExpiresAt: {
@@ -44,6 +46,24 @@ const userSchema = new mongoose.Schema(
     isActive: {
       type: Boolean,
       default: true,
+    },
+
+    // Smart Account address (ERC-4337) — set by frontend, verified by backend
+    smartAccountAddress: {
+      type: String,
+      trim: true,
+      lowercase: true,
+      default: null,
+    },
+
+    chainId: {
+      type: String,
+      default: null,
+    },
+
+    walletCreatedAt: {
+      type: Date,
+      default: null,
     },
   },
   {

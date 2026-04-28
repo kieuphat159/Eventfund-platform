@@ -109,7 +109,50 @@ export const config = {
             (process.env.NODE_ENV?.toUpperCase() === 'PROD'
               ? process.env.CLOUDINARY_PROD_SECRET
               : process.env.CLOUDINARY_DEV_SECRET)
-  }
+  },
+
+  // CORS
+  allowedOrigins: process.env.ALLOWED_ORIGINS || 'http://localhost:5173',
+
+  // Blockchain
+  blockchain: {
+    rpcUrl: process.env.RPC_URL || 'http://127.0.0.1:8545',
+    relayerPrivateKey: process.env.RELAYER_PRIVATE_KEY,
+  },
+
+  // VNPay
+  vnpay: {
+    url: process.env.VNPAY_URL || 'https://sandbox.vnpayment.vn',
+    tmnCode: process.env.VNPAY_TMN_CODE,
+    hashSecret: process.env.VNPAY_HASH_SECRET,
+    returnUrl: process.env.VNPAY_RETURN_URL || 'http://localhost:4000/api/deposits/vnpay-return',
+    ipnUrl: process.env.VNPAY_IPN_URL,
+  },
+
+  // Frontend
+  frontend: {
+    url: process.env.FRONTEND_URL || 'http://localhost:3000',
+  },
+
+  // Deposits
+  deposits: {
+    minVND: parseInt(process.env.MIN_DEPOSIT_VND) || 100000,
+    maxVND: parseInt(process.env.MAX_DEPOSIT_VND) || 50000000,
+    expiryMinutes: parseInt(process.env.DEPOSIT_ORDER_EXPIRY_MINUTES) || 15,
+  },
+
+  // Exchange Rate APIs
+  exchangeRate: {
+    // CoinMarketCap API key (optional, for fallback)
+    coinmarketcapApiKey: process.env.COINMARKETCAP_API_KEY,
+    // Cache TTL in milliseconds
+    cacheTTL: parseInt(process.env.EXCHANGE_RATE_CACHE_TTL) || 5 * 60 * 1000, // 5 minutes
+    // Fallback max age in milliseconds
+    fallbackMaxAge: parseInt(process.env.EXCHANGE_RATE_FALLBACK_MAX_AGE) || 24 * 60 * 60 * 1000, // 24 hours
+  },
+
+  // Environment alias
+  env: process.env.NODE_ENV?.toUpperCase() || 'DEV',
 };
 
 // Validate environment on module load

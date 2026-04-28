@@ -175,6 +175,149 @@ export async function markAsUsed(tokenId, usageData, models = {}) {
 }
 
 /**
+ * Mark ticket as sold after on-chain confirmation
+ * @param {string} tokenId - Token ID
+ * @param {Object} saleData - Sale data (buyer, soldAt, soldTxHash, price)
+ * @param {Object} models - Injected models (optional)
+ * @returns {Promise<Object|null>} Updated ticket as plain object or null
+ */
+export async function markAsSold(tokenId, saleData, models = {}) {
+  const Ticket = models.Ticket || DefaultTicket;
+
+  const transferEntry = {
+    from: saleData.from?.toLowerCase(),
+    to: saleData.buyer?.toLowerCase(),
+    txHash: saleData.soldTxHash?.toLowerCase(),
+    timestamp: saleData.soldAt || new Date(),
+    price: saleData.price || "0",
+    type: 'purchase'
+  };
+
+  const updates = {
+    status: 'sold',
+    currentOwner: saleData.buyer?.toLowerCase(),
+    soldAt: saleData.soldAt || new Date(),
+    soldTxHash: saleData.soldTxHash?.toLowerCase(),
+    ...(saleData.price ? { originalPrice: saleData.price } : {})
+  };
+
+  const ticket = await Ticket.findOneAndUpdate(
+    { tokenId },
+    {
+      $set: updates,
+      $push: { transferHistory: transferEntry }
+    },
+    { new: true, runValidators: true }
+  );
+
+  return ticket ? ticket.toObject() : null;
+}
+
+/**
+ * Mark ticket as used after on-chain confirmation
+ * @param {string} tokenId - Token ID
+ * @param {Object} usageData - Usage data (usedAt, verifiedBy, usedTxHash)
+ * @param {Object} models - Injected models (optional)
+ * @returns {Promise<Object|null>} Updated ticket as plain object or null
+ */
+export async function markAsUsedFromChain(tokenId, usageData, models = {}) {
+  const Ticket = models.Ticket || DefaultTicket;
+
+  const updates = {
+    status: 'used',
+    usedAt: usageData.usedAt || new Date(),
+    verifiedBy: usageData.verifiedBy?.toLowerCase(),
+    usedTxHash: usageData.usedTxHash?.toLowerCase()
+  };
+
+  const ticket = await Ticket.findOneAndUpdate(
+    { tokenId },
+    { $set: updates },
+    { new: true, runValidators: true }
+  );
+
+  return ticket ? ticket.toObject() : null;
+}
+
+/**
+ * Mark ticket as refunded after on-chain confirmation
+ * @param {string} tokenId - Token ID
+ * @param {Object} refundData - Refund data (refundedAt, refundedTxHash)
+ * @param {Object} models - Injected models (optional)
+ * @returns {Promise<Object|null>} Updated ticket as plain object or null
+ */
+export async function markAsRefundedFromChain(tokenId, refundData, models = {}) {
+  const Ticket = models.Ticket || DefaultTicket;
+
+  const updates = {
+    status: 'refunded',
+    refundedAt: refundData.refundedAt || new Date(),
+    refundedTxHash: refundData.refundedTxHash?.toLowerCase(),
+  };
+
+  const ticket = await Ticket.findOneAndUpdate(
+    { tokenId },
+    { $set: updates },
+    { new: true, runValidators: true }
+  );
+
+  return ticket ? ticket.toObject() : null;
+}
+
+/**
+ * Upsert minted ticket from on-chain TicketMintedBatch event.
+ * This keeps Ticket read-model in sync so primary-sale APIs can find minted inventory.
+ * @param {Object} data - Minted ticket payload
+ * @param {Object} models - Injected models (optional)
+ * @returns {Promise<Object|null>} Upserted ticket as plain object or null
+ */
+export async function upsertMintedFromChain(data, models = {}) {
+  const Ticket = models.Ticket || DefaultTicket;
+
+  const tokenId = String(data.tokenId);
+  const owner = data.currentOwner ? String(data.currentOwner).toLowerCase() : undefined;
+  const price = data.originalPrice !== undefined && data.originalPrice !== null
+    ? String(data.originalPrice)
+    : '0';
+  const ticketType = data.ticketType;
+  const mintTxHash = data.mintTxHash ? String(data.mintTxHash).toLowerCase() : undefined;
+
+  const update = {
+    $setOnInsert: {
+      tokenId,
+      currentOwner: owner || '',
+      originalPrice: price,
+      status: 'minted',
+      isListed: false,
+      createdAt: data.mintedAt || new Date(),
+    },
+    $set: {
+      eventId: data.eventId,
+      ...(ticketType !== undefined && ticketType !== null ? { ticketType } : {}),
+    },
+  };
+
+  if (owner && mintTxHash) {
+    update.$addToSet = {
+      transferHistory: {
+        to: owner,
+        txHash: mintTxHash,
+        price,
+        type: 'mint',
+      },
+    };
+  }
+
+  const ticket = await Ticket.findOneAndUpdate(
+    { tokenId },
+    update,
+    { new: true, upsert: true, runValidators: true },
+  );
+
+  return ticket ? ticket.toObject() : null;
+}
+
+/**
  * Update ticket listing status
  * @param {string} ticketId - Ticket ID
  * @param {boolean} isListed - Listing status

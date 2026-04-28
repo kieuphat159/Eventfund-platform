@@ -72,6 +72,18 @@ class UsersController {
     });
   });
 
+  getUserShareById = asyncHandler(async (req, res) => {
+    const walletAddress = req.user.walletAddress;
+    const { id } = req.params;
+
+    const share = await this.usersService.getUserShareById(walletAddress, id);
+
+    res.status(200).json({
+      success: true,
+      data: share
+    });
+  });
+
   getUserRewards = asyncHandler(async (req, res) => {
     const walletAddress = req.user.walletAddress;
 

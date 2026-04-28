@@ -25,8 +25,10 @@ const jwtService = new JWTService();
 describe('Events Routes - E2E Integration Tests', () => {
   let organizerToken;
   let userToken;
+  let verifierToken;
   let organizerUser;
   let regularUser;
+  let verifierUser;
   let anotherOrganizerToken;
   let anotherOrganizerUser;
 
@@ -56,6 +58,13 @@ describe('Events Routes - E2E Integration Tests', () => {
       nonceExpiresAt: new Date(Date.now() + 15 * 60 * 1000)
     });
 
+    verifierUser = await User.create({
+      walletAddress: '0x555d35Cc6634C0532925a3b844Bc9e7595f0bEb5',
+      role: 'verifier',
+      nonce: 'test-nonce-verifier',
+      nonceExpiresAt: new Date(Date.now() + 15 * 60 * 1000)
+    });
+
     anotherOrganizerUser = await User.create({
       walletAddress: '0x999d35Cc6634C0532925a3b844Bc9e7595f0bEb9',
       role: 'organizer',
@@ -66,6 +75,7 @@ describe('Events Routes - E2E Integration Tests', () => {
     // Generate tokens
     organizerToken = jwtService.generateToken(organizerUser.walletAddress, organizerUser.role);
     userToken = jwtService.generateToken(regularUser.walletAddress, regularUser.role);
+    verifierToken = jwtService.generateToken(verifierUser.walletAddress, verifierUser.role);
     anotherOrganizerToken = jwtService.generateToken(anotherOrganizerUser.walletAddress, anotherOrganizerUser.role);
   });
 
@@ -109,6 +119,48 @@ describe('Events Routes - E2E Integration Tests', () => {
         ticketsSold: 0
       });
       expect(response.body.data._id).toBeDefined();
+    });
+
+    test('should create event with address-only venue and ticket tiers from frontend payload', async () => {
+      const frontendPayload = {
+        title: 'Frontend Created Event',
+        description: 'Created from the organizer dashboard form',
+        category: 'art',
+        fundingGoal: '0',
+        minStakeRequired: '0',
+        fundingDeadline: new Date(Date.now() + 4 * 24 * 60 * 60 * 1000).toISOString(),
+        startDate: new Date(Date.now() + 11 * 24 * 60 * 60 * 1000).toISOString(),
+        endDate: new Date(Date.now() + 11 * 24 * 60 * 60 * 1000 + 2 * 60 * 60 * 1000).toISOString(),
+        totalTickets: 999,
+        venue: {
+          address: '123 Demo Street'
+        },
+        ticketTiers: [
+          {
+            name: 'General',
+            price: 99,
+            totalSupply: 999
+          }
+        ]
+      };
+
+      const response = await request(app)
+        .post('/api/events')
+        .set('Authorization', `Bearer ${userToken}`)
+        .send(frontendPayload)
+        .expect(201);
+
+      expect(response.body.success).toBe(true);
+      expect(response.body.data.venue).toMatchObject({
+        address: '123 Demo Street'
+      });
+      expect(response.body.data.ticketTiers).toHaveLength(1);
+      expect(response.body.data.ticketTiers[0]).toMatchObject({
+        name: 'General',
+        price: 99,
+        totalSupply: 999
+      });
+      expect(response.body.data.organizer).toBe(regularUser.walletAddress.toLowerCase());
     });
 
     test('should list events with pagination', async () => {
@@ -168,6 +220,59 @@ describe('Events Routes - E2E Integration Tests', () => {
       expect(response.body.success).toBe(true);
       expect(response.body.data.title).toBe(updates.title);
       expect(response.body.data.description).toBe(updates.description);
+    });
+
+    test('should update draft event with frontend edit payload', async () => {
+      const event = await Event.create({
+        ...validEventData,
+        organizer: organizerUser.walletAddress.toLowerCase(),
+        status: 'draft',
+        ticketTiers: [
+          {
+            name: 'General',
+            price: 99,
+            totalSupply: 100
+          }
+        ]
+      });
+
+      const updates = {
+        title: 'Updated Draft Event',
+        description: 'Updated from edit screen',
+        category: 'sports',
+        startDate: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString(),
+        endDate: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000 + 2 * 60 * 60 * 1000).toISOString(),
+        fundingGoal: '0',
+        minStakeRequired: '0',
+        fundingDeadline: new Date(Date.now() + 45 * 24 * 60 * 60 * 1000).toISOString(),
+        totalTickets: 111,
+        venue: {
+          address: '456 Updated Street'
+        },
+        ticketTiers: [
+          {
+            name: 'General',
+            price: 1,
+            totalSupply: 111
+          }
+        ]
+      };
+
+      const response = await request(app)
+        .patch(`/api/events/${event._id}`)
+        .set('Authorization', `Bearer ${organizerToken}`)
+        .send(updates)
+        .expect(200);
+
+      expect(response.body.success).toBe(true);
+      expect(response.body.data.title).toBe(updates.title);
+      expect(response.body.data.fundingGoal).toBe(updates.fundingGoal);
+      expect(response.body.data.venue).toMatchObject({ address: updates.venue.address });
+      expect(response.body.data.ticketTiers[0]).toMatchObject({
+        name: 'General',
+        price: 1,
+        totalSupply: 111
+      });
     });
 
     test('should delete draft event successfully', async () => {
@@ -247,10 +352,10 @@ describe('Events Routes - E2E Integration Tests', () => {
       expect(response.body.error.message).toContain('Authentication required');
     });
 
-    test('should reject event creation for non-organizer role', async () => {
+    test('should reject event creation for verifier role', async () => {
       const response = await request(app)
         .post('/api/events')
-        .set('Authorization', `Bearer ${userToken}`)
+        .set('Authorization', `Bearer ${verifierToken}`)
         .send(validEventData)
         .expect(403);
 
@@ -372,6 +477,89 @@ describe('Events Routes - E2E Integration Tests', () => {
         errorMsg.includes('funding') ||
         errorMsg.includes('goal') ||
         errorMsg.includes('cannot')
+      ).toBe(true);
+    });
+
+    test('should reject changing event status without admin review', async () => {
+      const event = await Event.create({
+        ...validEventData,
+        organizer: organizerUser.walletAddress.toLowerCase(),
+        status: 'draft'
+      });
+
+      const response = await request(app)
+        .patch(`/api/events/${event._id}`)
+        .set('Authorization', `Bearer ${organizerToken}`)
+        .send({ status: 'funding' })
+        .expect(400);
+
+      expect(response.body.success).toBe(false);
+      const errorMsg = response.body.error.message.toLowerCase();
+      expect(
+        errorMsg.includes('admin') ||
+        errorMsg.includes('review') ||
+        errorMsg.includes('status')
+      ).toBe(true);
+    });
+
+    test('should allow owner to advance status from ticketing to ongoing', async () => {
+      const event = await Event.create({
+        ...validEventData,
+        organizer: organizerUser.walletAddress.toLowerCase(),
+        status: 'ticketing'
+      });
+
+      const response = await request(app)
+        .patch(`/api/events/${event._id}`)
+        .set('Authorization', `Bearer ${organizerToken}`)
+        .send({ status: 'ongoing' })
+        .expect(200);
+
+      expect(response.body.success).toBe(true);
+      expect(response.body.data.status).toBe('ongoing');
+    });
+
+    test('should reject owner moving status backward after ticketing', async () => {
+      const event = await Event.create({
+        ...validEventData,
+        organizer: organizerUser.walletAddress.toLowerCase(),
+        status: 'ongoing'
+      });
+
+      const response = await request(app)
+        .patch(`/api/events/${event._id}`)
+        .set('Authorization', `Bearer ${organizerToken}`)
+        .send({ status: 'ticketing' })
+        .expect(400);
+
+      expect(response.body.success).toBe(false);
+      const errorMsg = response.body.error.message.toLowerCase();
+      expect(
+        errorMsg.includes('advance') ||
+        errorMsg.includes('ticketing') ||
+        errorMsg.includes('ongoing')
+      ).toBe(true);
+    });
+
+    test('should reject owner opening ticketing from funded status', async () => {
+      const event = await Event.create({
+        ...validEventData,
+        organizer: organizerUser.walletAddress.toLowerCase(),
+        status: 'funded'
+      });
+
+      const response = await request(app)
+        .patch(`/api/events/${event._id}`)
+        .set('Authorization', `Bearer ${organizerToken}`)
+        .send({ status: 'ticketing' })
+        .expect(400);
+
+      expect(response.body.success).toBe(false);
+      const errorMsg = response.body.error.message.toLowerCase();
+      expect(
+        errorMsg.includes('advance') ||
+        errorMsg.includes('ticketing') ||
+        errorMsg.includes('ongoing')
       ).toBe(true);
     });
   });

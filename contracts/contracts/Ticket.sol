@@ -35,6 +35,7 @@ contract Ticket is ERC721, ERC721Enumerable, AccessControl, ReentrancyGuard, ITi
     error FundNotSet();
 
     error RefundsNotEnabled();
+    error EventNotTicketing();
 
     // ------ Mappings -------
     mapping(uint256 => TicketInfo) public _tickets; // ticketId => TicketInfo
@@ -222,6 +223,10 @@ contract Ticket is ERC721, ERC721Enumerable, AccessControl, ReentrancyGuard, ITi
         // FIX (critical): avoid locking funds in Ticket if Fund escrow isn't configured.
         if (fundContract == address(0)) revert FundNotSet();
 
+        if (IFund(fundContract).getEventStatus(ticket.eventId) != IFund.EventStatus.Ticketing) {
+            revert EventNotTicketing();
+        }
+
         // validations
         if (ticket.status != TicketStatus.Minted) {
             revert InvalidTicketStatus();
@@ -269,16 +274,11 @@ contract Ticket is ERC721, ERC721Enumerable, AccessControl, ReentrancyGuard, ITi
         emit TicketPurchased(tokenId, ticket.eventId, msg.sender, ticket.price);
     }
 
-    /// @notice Ticket owner claims a refund when Fund has refunds enabled for the event.
-    /// @dev Calls into Fund (onlyTicket on Fund side) then marks status as Refunded.
-    function claimRefund(uint256 tokenId) external nonReentrant {
+    function _claimRefund(uint256 tokenId, address owner) internal {
         if (fundContract == address(0)) revert FundNotSet();
 
         TicketInfo storage ticket = _tickets[tokenId];
         if (ticket.status != TicketStatus.Sold) revert InvalidTicketStatus();
-
-        address owner = ownerOf(tokenId);
-        if (owner != msg.sender) revert InvalidTicketStatus();
 
         // Fund enforces refundsEnabled + pool sufficiency.
         // If Fund reverts, this function will revert and ticket stays Sold.
@@ -289,6 +289,22 @@ contract Ticket is ERC721, ERC721Enumerable, AccessControl, ReentrancyGuard, ITi
         // FIX: emit interface event for off-chain indexing.
         emit TicketRefunded(tokenId, ticket.eventId, owner, ticket.price);
         emit TicketRefundClaimed(tokenId, ticket.eventId, owner, ticket.price);
+    }
+
+    /// @notice Ticket owner claims a refund when Fund has refunds enabled for the event.
+    /// @dev Calls into Fund (onlyTicket on Fund side) then marks status as Refunded.
+    function claimRefund(uint256 tokenId) external nonReentrant {
+        address owner = ownerOf(tokenId);
+        if (owner != msg.sender) revert InvalidTicketStatus();
+
+        _claimRefund(tokenId, owner);
+    }
+
+    /// @notice Anyone can relay a refund transaction; payout always goes to the current owner.
+    /// @dev Useful for backend relayers / auto-refund jobs after an event is cancelled.
+    function claimRefundFor(uint256 tokenId) external nonReentrant {
+        address owner = ownerOf(tokenId);
+        _claimRefund(tokenId, owner);
     }
 
     // ------ Usage functions ------

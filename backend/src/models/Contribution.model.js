@@ -21,8 +21,9 @@ const contributionSchema = new mongoose.Schema({
   },
 
   amount: {
-    type: Number,
+    type: String,
     required: true,
+    default: "0",
   },
 
   sharePercentage: {
@@ -55,12 +56,15 @@ const contributionSchema = new mongoose.Schema({
     enum: ["pending", "confirmed", "refunded"],
     default: "pending",
   },
+
+  refundedAt: {
+    type: Date,
+  },
 });
 
 // ===== Indexes =====
 contributionSchema.index({ eventId: 1 });
 contributionSchema.index({ contributor: 1 });
-contributionSchema.index({ txHash: 1 }, { unique: true });
 contributionSchema.index({ type: 1, eventId: 1 });
 
 const Contribution = mongoose.model("Contribution", contributionSchema);

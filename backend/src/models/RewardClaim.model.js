@@ -1,10 +1,10 @@
 import mongoose from "mongoose";
+import mongoosePaginate from "mongoose-paginate-v2";
 
 const rewardClaimSchema = new mongoose.Schema({
   distributionId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "RevenueDistribution",
-    required: true,
   },
 
   eventId: {
@@ -22,18 +22,21 @@ const rewardClaimSchema = new mongoose.Schema({
 
   sharePercentage: {
     type: Number,
-    required: true,
+    default: 0,
   },
 
   rewardAmount: {
-    type: Number,
+    type: String,
     required: true,
+    default: "0",
   },
 
   txHash: {
     type: String,
     trim: true,
     lowercase: true,
+    unique: true,
+    sparse: true,
   },
 
   claimedAt: {
@@ -51,6 +54,9 @@ const rewardClaimSchema = new mongoose.Schema({
 rewardClaimSchema.index({ eventId: 1 });
 rewardClaimSchema.index({ claimer: 1 });
 rewardClaimSchema.index({ distributionId: 1 });
+
+// Apply pagination plugin used by reward repository methods
+rewardClaimSchema.plugin(mongoosePaginate);
 
 const RewardClaim = mongoose.model("RewardClaim", rewardClaimSchema);
 

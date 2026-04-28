@@ -11,6 +11,14 @@ function assertNonNegativeInteger(name, value) {
 	return n;
 }
 
+function assertPositiveInteger(name, value) {
+	const n = toFiniteNumber(value);
+	if (n === undefined || !Number.isInteger(n) || n <= 0) {
+		throw new Error(`Invalid ${name}: ${value}`);
+	}
+	return n;
+}
+
 export function getNumberEnv(name, defaultValue) {
 	const raw = process.env[name];
 	if (raw === undefined || raw === "") return defaultValue;
@@ -30,7 +38,9 @@ export function readReorgPolicyFromEnv({
 	confirmationsEnv = "CHAIN_CONFIRMATIONS",
 	reorgBufferEnv = "REORG_BUFFER_BLOCKS",
 	chunkSizeEnv = "CHAIN_LOG_CHUNK_SIZE",
-	defaults = { confirmations: 12, reorgBuffer: 12, chunkSize: 2000 },
+	// Keep the default log window small enough for restrictive RPC plans
+	// such as QuickNode Discover, which limits eth_getLogs to 5 blocks.
+	defaults = { confirmations: 12, reorgBuffer: 12, chunkSize: 5 },
 } = {}) {
 	const confirmations = assertNonNegativeInteger(
 		"confirmations",
@@ -40,7 +50,7 @@ export function readReorgPolicyFromEnv({
 		"reorgBuffer",
 		getNumberEnv(reorgBufferEnv, defaults.reorgBuffer)
 	);
-	const chunkSize = assertNonNegativeInteger(
+	const chunkSize = assertPositiveInteger(
 		"chunkSize",
 		getNumberEnv(chunkSizeEnv, defaults.chunkSize)
 	);

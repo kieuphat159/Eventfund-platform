@@ -11,7 +11,25 @@ const app = express();
 
 // Security middleware
 app.use(helmet());
-app.use(cors());
+
+const allowedOrigins = (config.allowedOrigins ?? 'http://localhost:5173')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Allow requests with no origin (curl, Postman, server-to-server)
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+      callback(new Error(`CORS: origin ${origin} not allowed`));
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'ngrok-skip-browser-warning'],
+  }),
+);
 
 // Body parsing middleware
 app.use(express.json());
@@ -68,6 +86,7 @@ import marketplaceRoutes from './routes/marketplace.routes.js';
 import usersRoutes from './routes/users.routes.js';
 import adminRoutes from './routes/admin.routes.js';
 import healthRoutes from './routes/health.routes.js';
+import depositsRoutes from './routes/deposits.routes.js';
 
 // Import error handling middleware
 import { errorHandler, notFoundHandler } from './middlewares/error.middleware.js';
@@ -79,6 +98,7 @@ app.use('/api/marketplace', marketplaceRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/health', healthRoutes);
+app.use('/api/deposits', depositsRoutes);
 
 // 404 handler for unknown routes
 app.use(notFoundHandler);
