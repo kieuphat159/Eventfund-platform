@@ -22,7 +22,7 @@ WORKDIR /app
 FROM node:20.19.0-alpine AS production
 
 # Install AWS CLI for Parameter Store access
-RUN apk add --no-cache aws-cli curl
+RUN apk add --no-cache aws-cli curl jq
 
 # Security: non-root user
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
