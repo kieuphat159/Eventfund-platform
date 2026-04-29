@@ -13,11 +13,17 @@ dotenv.config({ path: path.resolve(__dirname, "../../.env") });
  * Throws error if any required variable is missing
  */
 function validateEnv() {
+  const nodeEnv = String(process.env.NODE_ENV || "DEV").toUpperCase();
   const required = [
     'PORT',
     'NODE_ENV',
-    'MONGO_PROD_URI'
   ];
+
+  if (nodeEnv === "PROD") {
+    required.push("MONGO_PROD_URI");
+  } else {
+    required.push("MONGO_DEV_URI");
+  }
 
   // Check for Cloudinary variables (either generic or environment-specific)
   const hasCloudinary =
@@ -40,7 +46,6 @@ function validateEnv() {
 
   // Validate NODE_ENV value
   const validEnvs = ['DEV', 'PROD', 'TEST', 'Dev', 'Prod', 'Test'];
-  const nodeEnv = process.env.NODE_ENV || 'DEV';
   if (!validEnvs.includes(nodeEnv) && !validEnvs.map(e => e.toLowerCase()).includes(nodeEnv.toLowerCase())) {
     throw new Error(
       `Invalid NODE_ENV value: ${nodeEnv}\n` +
@@ -65,7 +70,7 @@ export const config = {
   // Database
   mongoUri: process.env.NODE_ENV?.toUpperCase() === 'PROD'
     ? process.env.MONGO_PROD_URI
-    : process.env.MONGO_PROD_URI,
+    : process.env.MONGO_DEV_URI || process.env.MONGO_PROD_URI,
 
   // JWT (will be added later)
   jwt: {
