@@ -1,0 +1,232 @@
+name: Reusable – SonarQube
+
+on:
+  workflow_call:
+    inputs:
+      upload_to_s3:
+        description: 'Upload reports to S3'
+        type: boolean
+        default: true
+      scan_type:
+        description: 'Scan type: full or pr-diff'
+        type: string
+        default: 'full'
+    secrets:
+      SONAR_TOKEN:
+        required: true
+      SONAR_HOST_URL:
+        required: false
+      AWS_ACCOUNT_ID:
+        required: false
+
+jobs:
+  sonarqube-scan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for better analysis
+
+      # Load configuration
+      - name: Load config
+        id: config
+        uses: ./.github/actions/load-config
+
+      # Generate scan metadata
+      - name: Generate scan metadata
+        id: metadata
+        uses: ./.github/actions/generate-scan-metadata
+        with:
+          tool: sonarqube
+
+      # Determine SonarCloud URL
+      - name: Set SonarCloud URL
+        id: sonar_url
+        shell: bash
+        run: |
+          URL="${{ secrets.SONAR_HOST_URL }}"
+          if [ -z "$URL" ]; then
+            URL="${{ steps.config.outputs.sonarcloud_base_url }}"
+          fi
+          echo "url=${URL}" >> $GITHUB_OUTPUT
+          echo "SonarCloud URL: ${URL}"
+
+      # Run SonarQube Scan (Full)
+      - name: SonarQube Scan (Full Project)
+        if: inputs.scan_type == 'full'
+        uses: SonarSource/sonarqube-scan-action@v7.1.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ steps.sonar_url.outputs.url }}
+        with:
+          args: >
+            -Dsonar.projectKey=${{ steps.config.outputs.sonarcloud_project_key }}
+            -Dsonar.organization=${{ steps.config.outputs.sonarcloud_organization }}
+            -Dsonar.sources=backend/src,frontend/src
+            -Dsonar.exclusions=**/node_modules/**,**/dist/**,**/coverage/**
+
+      # Run SonarQube Scan (PR Diff)
+      - name: SonarQube Scan (PR Diff Only)
+        if: inputs.scan_type == 'pr-diff' && github.event_name == 'pull_request'
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.projectKey=${{ steps.config.outputs.sonarcloud_project_key }}
+            -Dsonar.organization=${{ steps.config.outputs.sonarcloud_organization }}
+            -Dsonar.sources=backend/src,frontend/src
+            -Dsonar.exclusions=**/node_modules/**,**/dist/**,**/coverage/**
+            -Dsonar.pullrequest.key=${{ github.event.pull_request.number }}
+            -Dsonar.pullrequest.branch=${{ github.head_ref }}
+            -Dsonar.pullrequest.base=${{ github.base_ref }}
+
+      # Export SonarCloud reports
+      - name: Export SonarCloud reports
+        if: always()
+        shell: bash
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          PROJECT_KEY="${{ steps.config.outputs.sonarcloud_project_key }}"
+          BASE_URL="${{ steps.sonar_url.outputs.url }}"
+          OUT="sonar-reports"
+          mkdir -p $OUT
+
+          echo "📥 Fetching SonarCloud data..."
+
+          # Issues (bugs, vulnerabilities, code smells)
+          curl -sf -u "$SONAR_TOKEN:" \
+            "$BASE_URL/api/issues/search?projectKeys=$PROJECT_KEY&ps=500&resolved=false" \
+            -o $OUT/issues.json || echo "⚠️ Failed to fetch issues"
+
+          # Measures (metrics)
+          curl -sf -u "$SONAR_TOKEN:" \
+            "$BASE_URL/api/measures/component?component=$PROJECT_KEY&metricKeys=bugs,vulnerabilities,code_smells,coverage,duplicated_lines_density,ncloc,security_hotspots,reliability_rating,security_rating,sqale_rating,sqale_index,alert_status" \
+            -o $OUT/measures.json || echo "⚠️ Failed to fetch measures"
+
+          # Security hotspots
+          curl -sf -u "$SONAR_TOKEN:" \
+            "$BASE_URL/api/hotspots/search?projectKey=$PROJECT_KEY&ps=500" \
+            -o $OUT/hotspots.json || echo "⚠️ Failed to fetch hotspots"
+
+          # Quality Gate status
+          curl -sf -u "$SONAR_TOKEN:" \
+            "$BASE_URL/api/qualitygates/project_status?projectKey=$PROJECT_KEY" \
+            -o $OUT/quality-gate.json || echo "⚠️ Failed to fetch quality gate"
+
+          echo "✅ Exported SonarCloud reports"
+
+      # Generate HTML report
+      - name: Generate HTML report
+        if: always()
+        shell: bash
+        run: |
+          cat > sonar-reports/report.html <<'EOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>SonarCloud Report – eventfund-platform</title>
+            <style>
+              * { margin: 0; padding: 0; box-sizing: border-box; }
+              body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 2rem; background: #f5f7fa; line-height: 1.6; }
+              .container { max-width: 1200px; margin: 0 auto; }
+              h1 { color: #1a1a1a; margin-bottom: 0.5rem; }
+              .meta { color: #666; margin-bottom: 2rem; font-size: 0.9rem; }
+              .meta strong { color: #333; }
+              .link { display: inline-block; margin-bottom: 2rem; padding: 0.7rem 1.5rem; background: #0066cc; color: white; text-decoration: none; border-radius: 6px; font-weight: 500; transition: background 0.2s; }
+              .link:hover { background: #0052a3; }
+              .section { background: white; padding: 1.5rem; border-radius: 8px; margin-bottom: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+              h2 { color: #1a1a1a; margin-bottom: 1rem; font-size: 1.3rem; border-bottom: 2px solid #0066cc; padding-bottom: 0.5rem; }
+              pre { background: #f8f9fa; padding: 1rem; border-radius: 6px; overflow: auto; border: 1px solid #e1e4e8; font-size: 0.85rem; font-family: 'Courier New', monospace; max-height: 400px; }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <h1>🔍 SonarCloud Security Report</h1>
+              <p class="meta">
+                <strong>Project:</strong> eventfund-platform &nbsp;|&nbsp;
+                <strong>Scan ID:</strong> ${{ steps.metadata.outputs.scan_id }} &nbsp;|&nbsp;
+                <strong>Branch:</strong> ${{ steps.metadata.outputs.branch_name }} &nbsp;|&nbsp;
+                <strong>Commit:</strong> ${{ steps.metadata.outputs.short_sha }} &nbsp;|&nbsp;
+                <strong>Date:</strong> ${{ steps.metadata.outputs.timestamp }}
+              </p>
+              <a class="link" href="${{ steps.sonar_url.outputs.url }}/project/overview?id=${{ steps.config.outputs.sonarcloud_project_key }}" target="_blank">View on SonarCloud ↗</a>
+
+              <div class="section">
+                <h2>✅ Quality Gate Status</h2>
+                <pre id="quality-gate">Loading...</pre>
+              </div>
+
+              <div class="section">
+                <h2>📊 Quality Metrics</h2>
+                <pre id="measures">Loading...</pre>
+              </div>
+
+              <div class="section">
+                <h2>🐛 Issues (Bugs, Vulnerabilities, Code Smells)</h2>
+                <pre id="issues">Loading...</pre>
+              </div>
+
+              <div class="section">
+                <h2>🔥 Security Hotspots</h2>
+                <pre id="hotspots">Loading...</pre>
+              </div>
+            </div>
+
+            <script>
+              fetch('quality-gate.json').then(r => r.json()).then(data => {
+                document.getElementById('quality-gate').textContent = JSON.stringify(data, null, 2);
+              }).catch(e => document.getElementById('quality-gate').textContent = 'Error loading quality gate');
+
+              fetch('measures.json').then(r => r.json()).then(data => {
+                document.getElementById('measures').textContent = JSON.stringify(data, null, 2);
+              }).catch(e => document.getElementById('measures').textContent = 'Error loading measures');
+
+              fetch('issues.json').then(r => r.json()).then(data => {
+                document.getElementById('issues').textContent = JSON.stringify(data, null, 2);
+              }).catch(e => document.getElementById('issues').textContent = 'Error loading issues');
+
+              fetch('hotspots.json').then(r => r.json()).then(data => {
+                document.getElementById('hotspots').textContent = JSON.stringify(data, null, 2);
+              }).catch(e => document.getElementById('hotspots').textContent = 'Error loading hotspots');
+            </script>
+          </body>
+          </html>
+          EOF
+
+          echo "✅ Generated HTML report"
+
+      # Copy metadata to reports folder
+      - name: Copy metadata to reports
+        if: always()
+        shell: bash
+        run: |
+          cp metadata.json sonar-reports/
+          echo "✅ Copied metadata.json to sonar-reports/"
+
+      # Configure AWS (if uploading to S3)
+      - name: Configure AWS
+        if: always() && inputs.upload_to_s3 && secrets.AWS_ACCOUNT_ID != ''
+        uses: ./.github/actions/setup-aws
+        with:
+          aws_account_id: ${{ secrets.AWS_ACCOUNT_ID }}
+
+      # Upload reports
+      - name: Upload reports
+        if: always()
+        uses: ./.github/actions/upload-security-reports
+        with:
+          scan_id: ${{ steps.metadata.outputs.scan_id }}
+          tool: sonarqube
+          reports_path: sonar-reports
+          s3_path: ${{ steps.metadata.outputs.s3_path }}
+          retention_days: 30
+          upload_to_s3: ${{ inputs.upload_to_s3 && secrets.AWS_ACCOUNT_ID != '' }}
