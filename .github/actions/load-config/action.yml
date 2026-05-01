@@ -1,0 +1,79 @@
+name: Load Configuration
+description: Load configuration from centralized env.yml file
+
+outputs:
+  aws_region:
+    description: 'AWS Region'
+    value: ${{ steps.load.outputs.aws_region }}
+  aws_oidc_role_name:
+    description: 'AWS OIDC Role Name'
+    value: ${{ steps.load.outputs.aws_oidc_role_name }}
+  ecr_backend_repository:
+    description: 'ECR Backend Repository'
+    value: ${{ steps.load.outputs.ecr_backend_repository }}
+  s3_security_reports_bucket:
+    description: 'S3 Security Reports Bucket'
+    value: ${{ steps.load.outputs.s3_security_reports_bucket }}
+  s3_deploy_tmp_bucket_prefix:
+    description: 'S3 Deploy Temp Bucket Prefix'
+    value: ${{ steps.load.outputs.s3_deploy_tmp_bucket_prefix }}
+  node_version:
+    description: 'Node.js version'
+    value: ${{ steps.load.outputs.node_version }}
+  sonarcloud_project_key:
+    description: 'SonarCloud project key'
+    value: ${{ steps.load.outputs.sonarcloud_project_key }}
+  sonarcloud_organization:
+    description: 'SonarCloud organization'
+    value: ${{ steps.load.outputs.sonarcloud_organization }}
+  sonarcloud_base_url:
+    description: 'SonarCloud base URL'
+    value: ${{ steps.load.outputs.sonarcloud_base_url }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install yq (if not exists)
+      shell: bash
+      run: |
+        if ! command -v yq &> /dev/null; then
+          echo "Installing yq..."
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+        else
+          echo "yq already installed"
+        fi
+
+    - name: Load configuration
+      id: load
+      shell: bash
+      run: |
+        CONFIG_FILE="${{ github.action_path }}/../../config/env.yml"
+
+        if [ ! -f "$CONFIG_FILE" ]; then
+          echo "❌ Config file not found: $CONFIG_FILE"
+          exit 1
+        fi
+
+        echo "📋 Loading configuration from: $CONFIG_FILE"
+
+        # AWS
+        echo "aws_region=$(yq '.aws.region' $CONFIG_FILE)" >> $GITHUB_OUTPUT
+        echo "aws_oidc_role_name=$(yq '.aws.oidc_role_name' $CONFIG_FILE)" >> $GITHUB_OUTPUT
+
+        # ECR
+        echo "ecr_backend_repository=$(yq '.ecr.backend_repository' $CONFIG_FILE)" >> $GITHUB_OUTPUT
+
+        # S3
+        echo "s3_security_reports_bucket=$(yq '.s3.security_reports_bucket' $CONFIG_FILE)" >> $GITHUB_OUTPUT
+        echo "s3_deploy_tmp_bucket_prefix=$(yq '.s3.deploy_tmp_bucket_prefix' $CONFIG_FILE)" >> $GITHUB_OUTPUT
+
+        # Node
+        echo "node_version=$(yq '.node.version' $CONFIG_FILE)" >> $GITHUB_OUTPUT
+
+        # SonarCloud
+        echo "sonarcloud_project_key=$(yq '.sonarcloud.project_key' $CONFIG_FILE)" >> $GITHUB_OUTPUT
+        echo "sonarcloud_organization=$(yq '.sonarcloud.organization' $CONFIG_FILE)" >> $GITHUB_OUTPUT
+        echo "sonarcloud_base_url=$(yq '.sonarcloud.base_url' $CONFIG_FILE)" >> $GITHUB_OUTPUT
+
+        echo "✅ Configuration loaded successfully"
