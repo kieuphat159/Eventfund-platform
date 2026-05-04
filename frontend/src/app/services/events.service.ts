@@ -63,6 +63,11 @@ export interface EventItem {
   escrowedRevenue?: string | number;
   ticketRevenueDeposited?: string | number;
   royaltyRevenueDeposited?: string | number;
+  totalRevenue?: string | number;
+  totalPenaltyAmount?: string | number;
+  organizerStakeWithdrawn?: string | number;
+  stakeWithdrawnAt?: string;
+  lastPenaltyAt?: string;
   sharesFinalized?: boolean;
   revenueReleased?: boolean;
 
@@ -108,6 +113,60 @@ interface AdminUsersResponse {
   data?: {
     docs?: AdminUserItem[];
   };
+  message?: string;
+}
+
+export interface AdminPlatformStats {
+  users?: {
+    total?: number;
+    organizers?: number;
+    verifiers?: number;
+    admins?: number;
+  };
+  events?: {
+    total?: number;
+    draft?: number;
+    funding?: number;
+    active?: number;
+    completed?: number;
+    cancelled?: number;
+  };
+  tickets?: {
+    total?: number;
+    sold?: number;
+    used?: number;
+  };
+  listings?: {
+    total?: number;
+    active?: number;
+    sold?: number;
+  };
+  revenue?: {
+    total?: string;
+    funding?: string;
+  };
+}
+
+interface AdminPlatformStatsResponse {
+  success: boolean;
+  data?: AdminPlatformStats;
+  message?: string;
+}
+
+export interface AdminSystemHealth {
+  database?: {
+    status?: string;
+    connected?: boolean;
+  };
+  services?: {
+    api?: string;
+  };
+  timestamp?: string;
+}
+
+interface AdminSystemHealthResponse {
+  success: boolean;
+  data?: AdminSystemHealth;
   message?: string;
 }
 
@@ -447,6 +506,7 @@ export async function getAdminEvents(params?: {
   page?: number;
   limit?: number;
   search?: string;
+  sort?: string;
 }): Promise<EventItem[]> {
   try {
     const query = new URLSearchParams();
@@ -457,6 +517,7 @@ export async function getAdminEvents(params?: {
     if (params?.page) query.set("page", String(params.page));
     if (params?.limit) query.set("limit", String(params.limit));
     if (params?.search) query.set("search", params.search);
+    if (params?.sort) query.set("sort", params.sort);
 
     const url = query.toString()
       ? `/admin/events?${query.toString()}`
@@ -1804,6 +1865,38 @@ export async function getVerifierUsers(): Promise<AdminUserItem[]> {
     const right = (b.username || b.email || b.walletAddress || "").toLowerCase();
     return left.localeCompare(right);
   });
+}
+
+export async function getAdminUsers(params?: {
+  role?: "user" | "organizer" | "verifier" | "admin";
+  isActive?: boolean;
+  page?: number;
+  limit?: number;
+  sort?: string;
+}): Promise<AdminUserItem[]> {
+  const query = new URLSearchParams();
+
+  if (params?.role) query.set("role", params.role);
+  if (typeof params?.isActive === "boolean") {
+    query.set("isActive", String(params.isActive));
+  }
+  if (params?.page) query.set("page", String(params.page));
+  if (params?.limit) query.set("limit", String(params.limit));
+  if (params?.sort) query.set("sort", params.sort);
+
+  const url = query.toString() ? `/admin/users?${query.toString()}` : "/admin/users";
+  const response = await api.get<AdminUsersResponse>(url);
+  return response.data?.docs || [];
+}
+
+export async function getAdminPlatformStats(): Promise<AdminPlatformStats | null> {
+  const response = await api.get<AdminPlatformStatsResponse>("/admin/stats");
+  return response.data || null;
+}
+
+export async function getAdminSystemHealth(): Promise<AdminSystemHealth | null> {
+  const response = await api.get<AdminSystemHealthResponse>("/admin/health");
+  return response.data || null;
 }
 
 export async function getEventStats(eventId: string) {
