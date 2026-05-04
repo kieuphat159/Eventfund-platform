@@ -35,6 +35,8 @@ async function request<T>(
 ): Promise<T> {
   const { body, headers, ...rest } = options;
   const resolvedPath = path.startsWith("/") ? path : `/${path}`;
+  const isFormData =
+    typeof FormData !== "undefined" && body instanceof FormData;
 
   const requestHeaders = new Headers(headers);
   const token = typeof window !== "undefined" ? localStorage.getItem("jwtToken") : null;
@@ -43,7 +45,7 @@ async function request<T>(
     requestHeaders.set("Authorization", `Bearer ${token}`);
   }
 
-  if (body !== undefined && !requestHeaders.has("Content-Type")) {
+  if (body !== undefined && !isFormData && !requestHeaders.has("Content-Type")) {
     requestHeaders.set("Content-Type", "application/json");
   }
 
@@ -51,7 +53,12 @@ async function request<T>(
     method,
     ...rest,
     headers: requestHeaders,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    body:
+      body !== undefined
+        ? isFormData
+          ? body
+          : JSON.stringify(body)
+        : undefined,
   });
 
   const contentType = response.headers.get("content-type") || "";

@@ -136,6 +136,7 @@ export interface CreateEventPayload {
   minInvestmentAmount?: string;
   ticketTiers?: EventTicketTier[];
   imageUrls?: string[];
+  imageFiles?: File[];
 }
 
 export interface UpdateEventPayload {
@@ -482,7 +483,10 @@ export async function createEvent(
   payload: CreateEventPayload,
 ): Promise<EventItem | null> {
   try {
-    const response = await api.post<CreateEventResponse>("/events", payload);
+    const response = await api.post<CreateEventResponse>(
+      "/events",
+      buildCreateEventRequestBody(payload),
+    );
     return response.data || null;
   } catch (error) {
     console.debug("createEvent failed:", error);
@@ -495,7 +499,7 @@ export async function createEventIntent(
 ): Promise<CreateEventIntentData | null> {
   const response = await api.post<CreateEventIntentResponse>(
     "/events/create-intent",
-    payload,
+    buildCreateEventRequestBody(payload),
   );
 
   return response.data || null;
@@ -531,6 +535,44 @@ export async function confirmCreateEventTransaction(
 function toHexValue(decimalString: string): string {
   const value = BigInt(decimalString);
   return `0x${value.toString(16)}`;
+}
+
+function buildCreateEventRequestBody(payload: CreateEventPayload) {
+  const { imageFiles, venue, ticketTiers, ...rest } = payload;
+
+  if (!imageFiles?.length) {
+    return {
+      ...rest,
+      venue,
+      ticketTiers,
+    };
+  }
+
+  const formData = new FormData();
+
+  Object.entries(rest).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") {
+      return;
+    }
+
+    formData.append(key, String(value));
+  });
+
+  formData.append("venue", JSON.stringify(venue));
+
+  if (ticketTiers !== undefined) {
+    formData.append("ticketTiers", JSON.stringify(ticketTiers));
+  }
+
+  if (payload.imageUrls?.length) {
+    formData.append("imageUrls", JSON.stringify(payload.imageUrls));
+  }
+
+  imageFiles.forEach((file) => {
+    formData.append("images", file);
+  });
+
+  return formData;
 }
 
 function parseHexToBigInt(value: unknown): bigint | null {
