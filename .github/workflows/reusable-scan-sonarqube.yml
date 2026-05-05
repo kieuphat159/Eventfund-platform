@@ -214,7 +214,7 @@ jobs:
 
       # Configure AWS (if uploading to S3)
       - name: Configure AWS
-        if: always() && inputs.upload_to_s3 && secrets.AWS_ACCOUNT_ID != ''
+        if: always() && inputs.upload_to_s3
         uses: ./.github/actions/setup-aws
         with:
           aws_account_id: ${{ secrets.AWS_ACCOUNT_ID }}
@@ -229,4 +229,4 @@ jobs:
           reports_path: sonar-reports
           s3_path: ${{ steps.metadata.outputs.s3_path }}
           retention_days: 30
-          upload_to_s3: ${{ inputs.upload_to_s3 && secrets.AWS_ACCOUNT_ID != '' }}
+          upload_to_s3: ${{ inputs.upload_to_s3 }}
