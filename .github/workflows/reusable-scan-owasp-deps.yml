@@ -43,9 +43,10 @@ jobs:
         with:
           project: 'eventfund-platform'
           path: ${{ inputs.path }}
-          format: 'HTML,JSON,XML'
+          format: 'HTML'
           out: 'reports'
           args: >
+            --format SARIF
             --exclude "**/node_modules/**"
             --exclude "**/dist/**"
             --exclude "**/build/**"

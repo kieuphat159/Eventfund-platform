@@ -127,7 +127,18 @@ jobs:
         if: always()
         shell: bash
         run: |
-          cat > sonar-reports/report.html <<'EOF'
+          set -euo pipefail
+
+          OUT="sonar-reports"
+
+          # Read JSON files and escape for embedding
+          QUALITY_GATE_DATA=$(cat $OUT/quality-gate.json 2>/dev/null || echo '{"error": "Failed to load quality gate data"}')
+          MEASURES_DATA=$(cat $OUT/measures.json 2>/dev/null || echo '{"error": "Failed to load measures data"}')
+          ISSUES_DATA=$(cat $OUT/issues.json 2>/dev/null || echo '{"error": "Failed to load issues data"}')
+          HOTSPOTS_DATA=$(cat $OUT/hotspots.json 2>/dev/null || echo '{"error": "Failed to load hotspots data"}')
+
+          # Generate HTML with embedded JSON data
+          cat > $OUT/report.html <<EOF
           <!DOCTYPE html>
           <html lang="en">
           <head>
@@ -146,6 +157,7 @@ jobs:
               .section { background: white; padding: 1.5rem; border-radius: 8px; margin-bottom: 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
               h2 { color: #1a1a1a; margin-bottom: 1rem; font-size: 1.3rem; border-bottom: 2px solid #0066cc; padding-bottom: 0.5rem; }
               pre { background: #f8f9fa; padding: 1rem; border-radius: 6px; overflow: auto; border: 1px solid #e1e4e8; font-size: 0.85rem; font-family: 'Courier New', monospace; max-height: 400px; }
+              .error { color: #dc3545; }
             </style>
           </head>
           <body>
@@ -162,47 +174,43 @@ jobs:
 
               <div class="section">
                 <h2>✅ Quality Gate Status</h2>
-                <pre id="quality-gate">Loading...</pre>
+                <pre id="quality-gate"></pre>
               </div>
 
               <div class="section">
                 <h2>📊 Quality Metrics</h2>
-                <pre id="measures">Loading...</pre>
+                <pre id="measures"></pre>
               </div>
 
               <div class="section">
                 <h2>🐛 Issues (Bugs, Vulnerabilities, Code Smells)</h2>
-                <pre id="issues">Loading...</pre>
+                <pre id="issues"></pre>
               </div>
 
               <div class="section">
                 <h2>🔥 Security Hotspots</h2>
-                <pre id="hotspots">Loading...</pre>
+                <pre id="hotspots"></pre>
               </div>
             </div>
 
             <script>
-              fetch('quality-gate.json').then(r => r.json()).then(data => {
-                document.getElementById('quality-gate').textContent = JSON.stringify(data, null, 2);
-              }).catch(e => document.getElementById('quality-gate').textContent = 'Error loading quality gate');
+              // Embedded JSON data
+              const qualityGateData = ${QUALITY_GATE_DATA};
+              const measuresData = ${MEASURES_DATA};
+              const issuesData = ${ISSUES_DATA};
+              const hotspotsData = ${HOTSPOTS_DATA};
 
-              fetch('measures.json').then(r => r.json()).then(data => {
-                document.getElementById('measures').textContent = JSON.stringify(data, null, 2);
-              }).catch(e => document.getElementById('measures').textContent = 'Error loading measures');
-
-              fetch('issues.json').then(r => r.json()).then(data => {
-                document.getElementById('issues').textContent = JSON.stringify(data, null, 2);
-              }).catch(e => document.getElementById('issues').textContent = 'Error loading issues');
-
-              fetch('hotspots.json').then(r => r.json()).then(data => {
-                document.getElementById('hotspots').textContent = JSON.stringify(data, null, 2);
-              }).catch(e => document.getElementById('hotspots').textContent = 'Error loading hotspots');
+              // Display data
+              document.getElementById('quality-gate').textContent = JSON.stringify(qualityGateData, null, 2);
+              document.getElementById('measures').textContent = JSON.stringify(measuresData, null, 2);
+              document.getElementById('issues').textContent = JSON.stringify(issuesData, null, 2);
+              document.getElementById('hotspots').textContent = JSON.stringify(hotspotsData, null, 2);
             </script>
           </body>
           </html>
           EOF
 
-          echo "✅ Generated HTML report"
+          echo "✅ Generated HTML report with embedded data"
 
       # Copy metadata to reports folder
       - name: Copy metadata to reports
