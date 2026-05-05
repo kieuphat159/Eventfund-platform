@@ -87,14 +87,24 @@ export const config = {
 
   // Rate Limiting
   rateLimit: {
-    windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 900000, // 15 minutes
-    maxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
-    authMaxRequests: parseInt(process.env.AUTH_RATE_LIMIT_MAX) || 5
+    windowMs: Number.parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 900000, // 15 minutes
+    maxRequests: Number.parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
+    authMaxRequests: Number.parseInt(process.env.AUTH_RATE_LIMIT_MAX) || 5
   },
 
-  // Redis
+  // Redis Cloud
   redis: {
-    url: process.env.REDIS_URL || 'redis://localhost:6379'
+    host: process.env.REDIS_HOST,
+    port: Number.parseInt(process.env.REDIS_PORT) || 6379,
+    password: process.env.REDIS_PASSWORD,
+    tls: process.env.REDIS_TLS === 'true' ? {} : undefined,
+    // Cache TTLs (in seconds)
+    ttl: {
+      user: Number.parseInt(process.env.REDIS_TTL_USER) || 1800, // 30 minutes
+      event: Number.parseInt(process.env.REDIS_TTL_EVENT) || 600, // 10 minutes
+      eventStats: Number.parseInt(process.env.REDIS_TTL_EVENT_STATS) || 180, // 3 minutes
+      blockchainConfig: Number.parseInt(process.env.REDIS_TTL_BLOCKCHAIN_CONFIG) || 86400, // 24 hours
+    }
   },
 
   // Logging
@@ -106,14 +116,8 @@ export const config = {
           (process.env.NODE_ENV?.toUpperCase() === 'PROD'
             ? process.env.CLOUDINARY_PROD_NAME
             : process.env.CLOUDINARY_PROD_NAM),
-    key: process.env.CLOUDINARY_KEY ||
-         (process.env.NODE_ENV?.toUpperCase() === 'PROD'
-           ? process.env.CLOUDINARY_PROD_KEY
-           : process.env.CLOUDINARY_PROD_KEY),
-    secret: process.env.CLOUDINARY_SECRET ||
-            (process.env.NODE_ENV?.toUpperCase() === 'PROD'
-              ? process.env.CLOUDINARY_PROD_SECRET
-              : process.env.CLOUDINARY_PROD_SECRET)
+    key: process.env.CLOUDINARY_KEY || process.env.CLOUDINARY_PROD_KEY,
+    secret: process.env.CLOUDINARY_SECRET || process.env.CLOUDINARY_PROD_SECRET
   },
 
   // CORS
@@ -141,9 +145,9 @@ export const config = {
 
   // Deposits
   deposits: {
-    minVND: parseInt(process.env.MIN_DEPOSIT_VND) || 100000,
-    maxVND: parseInt(process.env.MAX_DEPOSIT_VND) || 50000000,
-    expiryMinutes: parseInt(process.env.DEPOSIT_ORDER_EXPIRY_MINUTES) || 15,
+    minVND: Number.parseInt(process.env.MIN_DEPOSIT_VND) || 100000,
+    maxVND: Number.parseInt(process.env.MAX_DEPOSIT_VND) || 50000000,
+    expiryMinutes: Number.parseInt(process.env.DEPOSIT_ORDER_EXPIRY_MINUTES) || 15,
   },
 
   // Exchange Rate APIs
@@ -151,9 +155,9 @@ export const config = {
     // CoinMarketCap API key (optional, for fallback)
     coinmarketcapApiKey: process.env.COINMARKETCAP_API_KEY,
     // Cache TTL in milliseconds
-    cacheTTL: parseInt(process.env.EXCHANGE_RATE_CACHE_TTL) || 5 * 60 * 1000, // 5 minutes
+    cacheTTL: Number.parseInt(process.env.EXCHANGE_RATE_CACHE_TTL) || 5 * 60 * 1000, // 5 minutes
     // Fallback max age in milliseconds
-    fallbackMaxAge: parseInt(process.env.EXCHANGE_RATE_FALLBACK_MAX_AGE) || 24 * 60 * 60 * 1000, // 24 hours
+    fallbackMaxAge: Number.parseInt(process.env.EXCHANGE_RATE_FALLBACK_MAX_AGE) || 24 * 60 * 60 * 1000, // 24 hours
   },
 
   // Environment alias

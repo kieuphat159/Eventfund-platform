@@ -1,4 +1,5 @@
 import { User as DefaultUser } from '../models/index.js';
+import cacheService from '../services/cache/redis.service.js';
 
 /**
  * Create a new user
@@ -81,11 +82,18 @@ export async function updateProfile(walletAddress, updates, models = {}) {
 
   const normalizedAddress = walletAddress?.toLowerCase();
 
-  return await User.findOneAndUpdate(
+  const updatedUser = await User.findOneAndUpdate(
     { walletAddress: normalizedAddress },
     updates,
-    { new: true, runValidators: true, lean: true } // Đưa lean vào tận đây
+    { new: true, runValidators: true, lean: true }
   );
+
+  // Invalidate cache after update
+  if (updatedUser) {
+    await cacheService.invalidateUser(normalizedAddress);
+  }
+
+  return updatedUser;
 }
 
 /**
@@ -100,11 +108,18 @@ export async function updateRole(walletAddress, role, models = {}) {
 
   const normalizedAddress = walletAddress?.toLowerCase();
 
-  return await User.findOneAndUpdate(
+  const updatedUser = await User.findOneAndUpdate(
     { walletAddress: normalizedAddress },
     { role },
     { new: true, runValidators: true, lean: true }
   );
+
+  // Invalidate cache after role update
+  if (updatedUser) {
+    await cacheService.invalidateUser(normalizedAddress);
+  }
+
+  return updatedUser;
 }
 
 /**
@@ -148,5 +163,13 @@ export async function deleteByWalletAddress(walletAddress, models = {}) {
  */
 export async function updateById(userId, updates, models = {}) {
   const User = models.User || DefaultUser;
-  return await User.findByIdAndUpdate(userId, updates, { new: true, runValidators: true, lean: true });
+
+  const updatedUser = await User.findByIdAndUpdate(userId, updates, { new: true, runValidators: true, lean: true });
+
+  // Invalidate cache after update
+  if (updatedUser && updatedUser.walletAddress) {
+    await cacheService.invalidateUser(updatedUser.walletAddress);
+  }
+
+  return updatedUser;
 }
