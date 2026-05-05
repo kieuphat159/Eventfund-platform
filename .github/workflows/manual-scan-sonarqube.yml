@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   sonarqube-scan:
-    uses: ./.github/workflows/_reusable/security-scans/sonarqube.yml
+    uses: ./.github/workflows/reusable-scan-sonarqube.yml
     with:
       upload_to_s3: ${{ inputs.upload_to_s3 }}
       scan_type: ${{ inputs.scan_type }}
