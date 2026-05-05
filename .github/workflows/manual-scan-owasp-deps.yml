@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   owasp-scan:
-    uses: ./.github/workflows/_reusable/security-scans/owasp-dependency-check.yml
+    uses: ./.github/workflows/reusable-scan-owasp-deps.yml
     with:
       upload_to_s3: ${{ inputs.upload_to_s3 }}
       path: ${{ inputs.path }}
