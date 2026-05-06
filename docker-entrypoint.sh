@@ -11,8 +11,8 @@ set -e
 #   - AWS credentials (via IAM role, access keys, or profile)
 #
 # Parameter Store naming convention:
-#   /eventfund/{ENV}/{PARAMETER_NAME}
-#   Example: /eventfund/dev/MONGO_URI
+#   /eventfund/{ENV}/backend/{PARAMETER_NAME}
+#   Example: /eventfund/dev/backend/MONGO_URI
 
 if [ -n "$USE_AWS_PARAMS" ] && [ "$USE_AWS_PARAMS" = "true" ]; then
     echo "🔄 Loading environment variables from AWS Parameter Store..."
@@ -28,7 +28,7 @@ if [ -n "$USE_AWS_PARAMS" ] && [ "$USE_AWS_PARAMS" = "true" ]; then
     fi
 
     # Fetch ALL parameters from AWS Parameter Store (no hardcoded list!)
-    PARAM_PATH="/eventfund/${ENV}"
+    PARAM_PATH="/eventfund/${ENV}/backend"
 
     echo "📥 Fetching all parameters from: $PARAM_PATH"
 

@@ -1,0 +1,70 @@
+name: Reusable – Frontend
+
+on:
+  workflow_call:
+    secrets:
+      AWS_ACCOUNT_ID:
+        required: true
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # Load config
+      - name: Load config
+        id: config
+        uses: ./.github/actions/load-config
+
+      # Setup AWS (OIDC) - để pull từ SSM
+      - name: Configure AWS
+        uses: ./.github/actions/setup-aws
+        with:
+          aws_account_id: ${{ secrets.AWS_ACCOUNT_ID }}
+
+      # Pull VITE_* env từ SSM
+      - name: Pull frontend env from AWS SSM
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SSM_PREFIX="/eventfund/dev/frontend"
+          ENV_FILE="frontend/.env"
+
+          echo "📥 Pulling frontend env from: $SSM_PREFIX"
+
+          # Fetch tất cả params từ prefix
+          aws ssm get-parameters-by-path \
+            --path "$SSM_PREFIX" \
+            --recursive \
+            --with-decryption \
+            --region ${{ steps.config.outputs.aws_region }} \
+            --query 'Parameters[*].[Name,Value]' \
+            --output json | \
+          jq -r '.[] | "\(.[0])=\(.[1])"' | \
+          while IFS='=' read -r name value; do
+            # Extract key từ path: /eventfund/dev/frontend/VITE_API_BASE_URL → VITE_API_BASE_URL
+            KEY=$(echo "$name" | sed "s|^$SSM_PREFIX/||")
+            echo "${KEY}=${value}" >> "$ENV_FILE"
+            echo "✅ Loaded: $KEY"
+          done
+
+          echo "✅ Frontend env loaded"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ steps.config.outputs.node_version }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build

@@ -1,0 +1,117 @@
+name: Reusable – Backend
+
+on:
+  workflow_call:
+    secrets:
+      AWS_ACCOUNT_ID:
+        required: true
+      RPC_URL:
+        required: false
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+
+    env:
+      RPC_URL: ${{ secrets.RPC_URL }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # Load config
+      - name: Load config
+        id: config
+        uses: ./.github/actions/load-config
+
+      # Setup AWS (OIDC)
+      - name: Configure AWS
+        uses: ./.github/actions/setup-aws
+        with:
+          aws_account_id: ${{ secrets.AWS_ACCOUNT_ID }}
+
+      # Setup Docker Buildx
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Login ECR
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # Build and push Docker image
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          target: production
+          push: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
+          load: ${{ github.ref != 'refs/heads/main' || github.event_name != 'push' }}
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/${{ steps.config.outputs.ecr_backend_repository }}:latest
+            ${{ steps.login-ecr.outputs.registry }}/${{ steps.config.outputs.ecr_backend_repository }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BUILDKIT_INLINE_CACHE=1
+
+      # Smoke test
+      - name: Smoke test (/health)
+        run: |
+          set -euo pipefail
+
+          IMAGE_TAG="${{ steps.login-ecr.outputs.registry }}/${{ steps.config.outputs.ecr_backend_repository }}:${{ github.sha }}"
+
+          docker run -d \
+            --name backend-test \
+            -p 4000:4000 \
+            -e USE_AWS_PARAMS=true \
+            -e ENV=dev \
+            -e AWS_REGION=${{ steps.config.outputs.aws_region }} \
+            -e AWS_ACCESS_KEY_ID=${{ env.AWS_ACCESS_KEY_ID }} \
+            -e AWS_SECRET_ACCESS_KEY=${{ env.AWS_SECRET_ACCESS_KEY }} \
+            -e AWS_SESSION_TOKEN=${{ env.AWS_SESSION_TOKEN }} \
+            "$IMAGE_TAG"
+
+          for i in {1..60}; do
+            if curl -fsS "http://localhost:4000/health" | jq -e '.ok == true' >/dev/null 2>&1; then
+              echo "✅ Health check passed"
+              docker logs backend-test
+              docker stop backend-test
+              exit 0
+            fi
+            echo "Waiting for backend... ($i/60)"
+            sleep 3
+          done
+
+          echo "❌ Health check failed"
+          docker logs --tail 200 backend-test
+          docker stop backend-test
+          exit 1
+
+      # Trivy scan (PR / dev branch only)
+      - name: Run Trivy security scan
+        if: github.event_name == 'pull_request' || github.ref == 'refs/heads/dev'
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ steps.config.outputs.ecr_backend_repository }}:${{ github.sha }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'
+        env:
+          TRIVY_NO_PROGRESS: 'true'
+
+      - name: Upload Trivy SARIF to GitHub Security
+        if: (github.event_name == 'pull_request' || github.ref == 'refs/heads/dev') && always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+
+      - name: Output build info
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          echo "Image pushed to ECR:"
+          echo "  - ${{ steps.login-ecr.outputs.registry }}/${{ steps.config.outputs.ecr_backend_repository }}:latest"
+          echo "  - ${{ steps.login-ecr.outputs.registry }}/${{ steps.config.outputs.ecr_backend_repository }}:${{ github.sha }}"

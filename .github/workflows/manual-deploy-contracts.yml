@@ -1,0 +1,22 @@
+name: Manual – Deploy Contracts (Sepolia)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-contracts-sepolia-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    uses: ./.github/workflows/reusable-deploy-contracts.yml
+    secrets:
+      AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+      SEPOLIA_RPC_URL: ${{ secrets.SEPOLIA_RPC_URL }}
+      PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+      ROYALTY_BPS: ${{ secrets.ROYALTY_BPS }}
+      DEPLOY_CONFIRMATIONS: ${{ secrets.DEPLOY_CONFIRMATIONS }}

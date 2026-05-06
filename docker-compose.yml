@@ -4,7 +4,6 @@ services:
       context: .
       dockerfile: Dockerfile
       target: production
-      # Enable BuildKit for better caching
       args:
         BUILDKIT_INLINE_CACHE: "1"
 
