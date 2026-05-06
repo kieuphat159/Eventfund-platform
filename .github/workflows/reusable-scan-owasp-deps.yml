@@ -57,6 +57,7 @@ jobs:
         if: always()
         shell: bash
         run: |
+          chmod -R 777 reports/
           cp metadata.json reports/
           echo "✅ Copied metadata.json to reports/"
 

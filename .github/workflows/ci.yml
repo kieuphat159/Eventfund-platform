@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [dev, main, master, ci/cd]
+  pull_request:
+    branches: [dev, main, master, ci/cd]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    uses: ./.github/workflows/reusable-build-frontend.yml
+    permissions:
+      contents: read
+      id-token: write
+    secrets:
+      AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+
+  contracts:
+    uses: ./.github/workflows/reusable-build-contracts.yml
+
+  backend:
+    uses: ./.github/workflows/reusable-build-backend.yml
+    permissions:
+      contents: read
+      id-token: write
+      security-events: write
+    secrets:
+      AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+      RPC_URL: ${{ secrets.RPC_URL }}
+
+  sonarcloud:
+    uses: ./.github/workflows/reusable-scan-sonarqube.yml
+    with:
+      upload_to_s3: false
+      scan_type: pr-diff
+    secrets:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
