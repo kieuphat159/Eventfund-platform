@@ -56,6 +56,18 @@ jobs:
           build-args: |
             BUILDKIT_INLINE_CACHE=1
 
+      # Debug SSM
+      - name: Debug SSM permissions
+        run: |
+          echo "🔍 Checking SSM path: /eventfund/dev/backend"
+          aws ssm get-parameters-by-path \
+            --path "/eventfund/dev/backend" \
+            --recursive \
+            --with-decryption \
+            --region ${{ steps.config.outputs.aws_region }} \
+            --query "Parameters[*].Name" \
+            --output json
+
       # Smoke test
       - name: Smoke test (/health)
         run: |
