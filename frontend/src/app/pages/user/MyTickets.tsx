@@ -28,6 +28,7 @@ import {
 } from "@/app/services/listings.service";
 import { QRCodeCanvas } from "qrcode.react";
 import { useWeb3Auth } from "@web3auth/modal/react";
+import { resolveTransactionProvider } from "../../services/providerService";
 
 const ETH_ADDRESS_REGEX = /^0x[a-fA-F0-9]{40}$/;
 
@@ -209,11 +210,7 @@ export const MyTickets: React.FC = () => {
     }
   };
 
-  const walletProvider = web3Auth?.provider as
-    | {
-        request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
-      }
-    | undefined;
+  const walletProvider = resolveTransactionProvider(web3Auth?.provider);
 
   const refreshTickets = async () => {
     if (!walletAddress || !ETH_ADDRESS_REGEX.test(walletAddress)) {

@@ -15,6 +15,7 @@ import { Textarea } from "../../components/ui/textarea";
 import { Label } from "../../components/ui/label";
 import Loading from "../../components/ui/loading";
 import { createEventOnChain } from "../../services/events.service";
+import { resolveTransactionProvider } from "../../services/providerService";
 import { useAuth } from "../../contexts/AuthContext";
 import { cn } from "@/app/lib/utils";
 
@@ -497,21 +498,7 @@ export const CreateEvent: React.FC = () => {
         ticketTiers: normalizedTiers,
       };
 
-      const provider = web3Auth?.provider as
-        | {
-            request: (args: {
-              method: string;
-              params?: unknown[];
-            }) => Promise<unknown>;
-          }
-        | undefined;
-
-      if (!provider?.request) {
-        setError(
-          "Wallet provider is not ready. Please reconnect wallet and try again.",
-        );
-        return;
-      }
+      const provider = resolveTransactionProvider(web3Auth?.provider);
 
       const created = await createEventOnChain(
         provider!,

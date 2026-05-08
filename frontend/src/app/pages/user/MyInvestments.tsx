@@ -24,6 +24,7 @@ import {
 import { useAuth } from "../../contexts/AuthContext";
 import { useLoading } from "../../components/ui/loadingContext";
 import { useWeb3Auth } from "@web3auth/modal/react";
+import { resolveTransactionProvider } from "../../services/providerService";
 import {
   addIntegerValues,
   calculatePercentage,
@@ -62,14 +63,7 @@ export const MyInvestments: React.FC = () => {
     }
   }, [user]);
 
-  const walletProvider = web3Auth?.provider as
-    | {
-        request: (args: {
-          method: string;
-          params?: unknown[];
-        }) => Promise<unknown>;
-      }
-    | undefined;
+  const walletProvider = resolveTransactionProvider(web3Auth?.provider);
 
   const refreshInvestments = async () => {
     const shares = await getInvestments();

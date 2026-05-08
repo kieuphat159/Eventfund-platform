@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import QrReader from "react-qr-scanner";
 import { useWeb3Auth } from "@web3auth/modal/react";
+import { resolveTransactionProvider } from "../../services/providerService";
 import {
   AlertCircle,
   Calendar,
@@ -499,14 +500,7 @@ export const VerifierDashboard: React.FC = () => {
         }
 
         try {
-          const provider = web3Auth?.provider as
-            | {
-                request: (args: {
-                  method: string;
-                  params?: unknown[];
-                }) => Promise<unknown>;
-              }
-            | undefined;
+          const provider = resolveTransactionProvider(web3Auth?.provider);
           if (!provider) {
             throw new Error(
               "Wallet provider is not ready. Please reconnect wallet and try again.",

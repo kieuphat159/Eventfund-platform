@@ -26,7 +26,8 @@ const messageSchema = Joi.object({
 // Schema for POST /auth/verify
 const verifySchema = Joi.object({
   message: Joi.string().min(1).required(),
-  signature: ethereumSignature.required()
+  signature: ethereumSignature.required(),
+  smartAccountAddress: ethereumAddress.optional()
 });
 
 export const authSchemas = {
