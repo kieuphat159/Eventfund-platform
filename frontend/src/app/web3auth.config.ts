@@ -1,14 +1,15 @@
 import type { Web3AuthContextConfig } from '@web3auth/modal/react';
+import { logger } from './lib/logger';
 
 const clientId = import.meta.env.VITE_WEB3AUTH_CLIENT_ID as string;
 const web3AuthNetwork = (import.meta.env.VITE_WEB3AUTH_NETWORK ?? 'sapphire_devnet') as string;
 const bundlerUrl = import.meta.env.VITE_BUNDLER_URL as string | undefined;
 
 if (!clientId) {
-  console.warn('[Web3Auth] VITE_WEB3AUTH_CLIENT_ID is not set. Social login will not work.');
+  logger.warn('web3auth', 'VITE_WEB3AUTH_CLIENT_ID is not set. Social login will not work.');
 }
 if (!bundlerUrl) {
-  console.warn('[Web3Auth] VITE_BUNDLER_URL is not set. Smart Account transactions will not work.');
+  logger.warn('web3auth', 'VITE_BUNDLER_URL is not set. Smart Account transactions will not work.');
 }
 
 export const web3AuthConfig: Web3AuthContextConfig = {

@@ -58,7 +58,7 @@ export const MyEvents: React.FC = () => {
     if (!eventId) return;
 
     const ok = window.confirm(
-      `Bạn có chắc muốn xoá sự kiện "${event.title || "Untitled event"}" không?\n\nChỉ nên xoá draft vì backend đang giới hạn xoá draft only.`,
+      `Delete "${event.title || "Untitled event"}"?\n\nOnly draft events should be deleted because the backend currently limits deletion to draft records.`,
     );
     if (!ok) return;
 
@@ -68,7 +68,7 @@ export const MyEvents: React.FC = () => {
       setEvents((prev) => prev.filter((e) => (e._id || e.id) !== eventId));
     } catch (err: any) {
       alert(
-        err?.response?.data?.message || err?.message || "Xoá sự kiện thất bại",
+        err?.response?.data?.message || err?.message || "Failed to delete event",
       );
     } finally {
       setDeletingId("");

@@ -24,6 +24,7 @@ import {
   UserProfile,
   UserStats,
 } from "../../services/user.service";
+import { logger } from "../../lib/logger";
 
 export const Profile: React.FC = () => {
   const { user: authUser, refreshProfile } = useAuth();
@@ -50,7 +51,11 @@ export const Profile: React.FC = () => {
         setProfile(profileData);
         setStats(statsData);
       } catch (error: any) {
-        console.error("Failed to fetch profile data:", error?.message, error?.data);
+        logger.error(
+          "profile",
+          "Failed to fetch profile data",
+          error?.message || error,
+        );
       } finally {
         setIsLoading(false);
       }
@@ -75,7 +80,7 @@ export const Profile: React.FC = () => {
       await refreshProfile();
       alert("Profile updated successfully!");
     } catch (error) {
-      console.error("Save profile error:", error);
+      logger.error("profile", "Failed to save profile", error);
       alert("An error occurred while saving changes.");
     } finally {
       setIsSaving(false);

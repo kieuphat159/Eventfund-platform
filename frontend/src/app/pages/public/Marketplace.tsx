@@ -9,6 +9,7 @@ import {
   Ticket,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { ethers } from "ethers";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
@@ -24,27 +25,26 @@ import {
 import { Badge } from "../../components/ui/badge";
 import { listingService, ApiListing } from "../../services/listings.service";
 import { ImageWithFallback } from "../../components/figma/ImageWithFallback";
-import { ethers } from "ethers";
+import { logger } from "../../lib/logger";
 
 export const Marketplace: React.FC = () => {
   const [showFilters, setShowFilters] = React.useState(true);
   const [searchQuery, setSearchQuery] = React.useState("");
-  const [priceRange, setPriceRange] = React.useState([0.01, 10]); // UI
-  const [appliedPriceRange, setAppliedPriceRange] = React.useState([0.01, 10]); // dùng gọi API
+  const [priceRange, setPriceRange] = React.useState([0.01, 10]);
+  const [appliedPriceRange, setAppliedPriceRange] = React.useState([0.01, 10]);
   const [selectedTicketType, setSelectedTicketType] = React.useState("all");
   const [selectedDate, setSelectedDate] = React.useState("all");
   const [sortBy, setSortBy] = React.useState("newest");
-
   const [listings, setListings] = React.useState<ApiListing[]>([]);
-  console.log("Fetched listings:", listings);
   const [loading, setLoading] = React.useState(true);
+  const navigate = useNavigate();
 
   React.useEffect(() => {
     const fetchListings = async () => {
       try {
         setLoading(true);
 
-        const sortMap: Record<string, any> = {
+        const sortMap: Record<string, { sortBy: string; sortOrder: "asc" | "desc" }> = {
           newest: { sortBy: "listedAt", sortOrder: "desc" },
           "price-low": { sortBy: "price", sortOrder: "asc" },
           "price-high": { sortBy: "price", sortOrder: "desc" },
@@ -53,18 +53,14 @@ export const Marketplace: React.FC = () => {
         const res = await listingService.getAll({
           page: 1,
           limit: 20,
-          minPrice: ethers
-            .parseEther(appliedPriceRange[0].toString())
-            .toString(),
-          maxPrice: ethers
-            .parseEther(appliedPriceRange[1].toString())
-            .toString(),
+          minPrice: ethers.parseEther(appliedPriceRange[0].toString()).toString(),
+          maxPrice: ethers.parseEther(appliedPriceRange[1].toString()).toString(),
           ...sortMap[sortBy],
         });
 
         setListings(res.docs);
       } catch (err) {
-        console.error(err);
+        logger.error("marketplace", "Failed to load listings", err);
       } finally {
         setLoading(false);
       }
@@ -75,7 +71,8 @@ export const Marketplace: React.FC = () => {
 
   const clearFilters = () => {
     setSearchQuery("");
-    setPriceRange([0, 10]);
+    setPriceRange([0.01, 10]);
+    setAppliedPriceRange([0.01, 10]);
     setSelectedTicketType("all");
     setSelectedDate("all");
     setSortBy("newest");
@@ -87,17 +84,16 @@ export const Marketplace: React.FC = () => {
     selectedTicketType !== "all",
     selectedDate !== "all",
   ].filter(Boolean).length;
-  const navigate = useNavigate();
+
   if (loading) {
     return (
-      <div className="text-white p-10 text-center">Loading marketplace...</div>
+      <div className="p-10 text-center text-white">Loading marketplace...</div>
     );
   }
 
   const filteredListings = listings.filter((listing) => {
     const eventTitle = listing.eventId?.title?.toLowerCase() || "";
     const matchesSearch = eventTitle.includes(searchQuery.toLowerCase());
-
     const ticketType = listing.ticketId?.ticketType;
     const matchesTicketType =
       selectedTicketType === "all" ? true : ticketType === selectedTicketType;
@@ -106,41 +102,64 @@ export const Marketplace: React.FC = () => {
   });
 
   return (
-    <div className="min-h-screen bg-slate-950 py-8">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold text-white mb-2">
-            NFT Ticket Marketplace
-          </h1>
-          <p className="text-slate-400">
-            Buy and sell event tickets securely on the blockchain
-          </p>
-        </div>
+    <div className="min-h-screen bg-slate-950 py-6 sm:py-8">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <section className="mb-8 overflow-hidden rounded-3xl border border-slate-800 bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.18),_transparent_32%),radial-gradient(circle_at_bottom_right,_rgba(168,85,247,0.2),_transparent_28%),linear-gradient(135deg,_rgba(15,23,42,1),_rgba(17,24,39,0.96))] p-5 sm:p-8">
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+            <div className="max-w-2xl">
+              <p className="mb-2 text-sm uppercase tracking-[0.28em] text-cyan-300/80">
+                Secondary Market
+              </p>
+              <h1 className="text-3xl font-bold text-white sm:text-4xl lg:text-5xl">
+                Discover verified NFT ticket listings
+              </h1>
+              <p className="mt-3 text-sm leading-6 text-slate-300 sm:text-base">
+                Browse live resale opportunities, compare prices quickly, and
+                purchase blockchain-backed tickets with a cleaner mobile-first
+                experience.
+              </p>
+            </div>
 
-        {/* Search and Filter Section */}
+            <div className="grid grid-cols-2 gap-3 sm:w-auto">
+              <div className="rounded-2xl border border-slate-800 bg-slate-950/70 px-4 py-3">
+                <p className="text-xs uppercase tracking-wide text-slate-500">
+                  Live listings
+                </p>
+                <p className="mt-1 text-2xl font-semibold text-white">
+                  {listings.length}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-slate-800 bg-slate-950/70 px-4 py-3">
+                <p className="text-xs uppercase tracking-wide text-slate-500">
+                  Filters active
+                </p>
+                <p className="mt-1 text-2xl font-semibold text-white">
+                  {activeFiltersCount}
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <div className="mb-8 space-y-4">
-          {/* Search Bar and Toggle Filters */}
-          <div className="flex flex-col md:flex-row gap-4">
-            {/* Search Input */}
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+          <div className="flex flex-col gap-4 md:flex-row">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
               <Input
                 type="text"
                 placeholder="Search by event name..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10 bg-slate-900 border-slate-800 text-white placeholder:text-slate-500 h-12"
+                className="h-12 border-slate-800 bg-slate-900 pl-10 text-white placeholder:text-slate-500"
               />
             </div>
 
-            {/* Sort Dropdown */}
             <div className="md:w-64">
               <Select value={sortBy} onValueChange={setSortBy}>
-                <SelectTrigger className="bg-slate-900 border-slate-800 text-white h-12">
+                <SelectTrigger className="h-12 border-slate-800 bg-slate-900 text-white">
                   <SelectValue placeholder="Sort by" />
                 </SelectTrigger>
-                <SelectContent className="bg-slate-900 border-slate-800 text-white">
+                <SelectContent className="border-slate-800 bg-slate-900 text-white">
                   <SelectItem value="newest">New Listings</SelectItem>
                   <SelectItem value="price-low">Price: Low to High</SelectItem>
                   <SelectItem value="price-high">Price: High to Low</SelectItem>
@@ -148,13 +167,12 @@ export const Marketplace: React.FC = () => {
               </Select>
             </div>
 
-            {/* Toggle Filters Button */}
             <Button
               variant="outline"
-              className="border-slate-800 text-white hover:bg-slate-800 h-12"
+              className="h-12 border-slate-800 text-white hover:bg-slate-800"
               onClick={() => setShowFilters(!showFilters)}
             >
-              <SlidersHorizontal className="w-4 h-4 mr-2" />
+              <SlidersHorizontal className="mr-2 h-4 w-4" />
               Filters
               {activeFiltersCount > 0 && (
                 <Badge className="ml-2 bg-purple-600 text-white">
@@ -164,13 +182,12 @@ export const Marketplace: React.FC = () => {
             </Button>
           </div>
 
-          {/* Filters Panel */}
           {showFilters && (
-            <Card className="bg-slate-900 border-slate-800">
-              <CardContent className="p-6">
-                <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-lg font-semibold text-white flex items-center">
-                    <SlidersHorizontal className="w-5 h-5 mr-2 text-purple-400" />
+            <Card className="border-slate-800 bg-slate-900">
+              <CardContent className="p-5 sm:p-6">
+                <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <h3 className="flex items-center text-lg font-semibold text-white">
+                    <SlidersHorizontal className="mr-2 h-5 w-5 text-purple-400" />
                     Filter Options
                   </h3>
                   {activeFiltersCount > 0 && (
@@ -178,55 +195,46 @@ export const Marketplace: React.FC = () => {
                       variant="ghost"
                       size="sm"
                       onClick={clearFilters}
-                      className="text-slate-400 hover:text-white"
+                      className="self-start text-slate-400 hover:text-white"
                     >
-                      <X className="w-4 h-4 mr-1" />
+                      <X className="mr-1 h-4 w-4" />
                       Clear All
                     </Button>
                   )}
                 </div>
 
-                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {/* Price Range Slider */}
-                  <div className="space-y-3">
-                    <Label className="text-slate-300 font-medium">
+                <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
+                  <div className="space-y-3 xl:col-span-2">
+                    <Label className="font-medium text-slate-300">
                       Price Range (ETH)
                     </Label>
-                    <div className="pt-2">
+                    <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
                       <Slider
                         min={0.01}
                         max={10}
                         step={0.01}
                         value={priceRange}
-                        onValueChange={setPriceRange} // kéo mượt
-                        onValueCommit={(value) => setAppliedPriceRange(value)} // thả chuột mới call
+                        onValueChange={setPriceRange}
+                        onValueCommit={(value) => setAppliedPriceRange(value)}
                         className="w-full"
                       />
-                    </div>
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-slate-400">
-                        {priceRange[0].toFixed(2)} ETH
-                      </span>
-                      <span className="text-slate-400">
-                        {priceRange[1].toFixed(2)} ETH
-                      </span>
+                      <div className="mt-4 flex items-center justify-between text-sm text-slate-400">
+                        <span>{priceRange[0].toFixed(2)} ETH</span>
+                        <span>{priceRange[1].toFixed(2)} ETH</span>
+                      </div>
                     </div>
                   </div>
 
-                  {/* Event Date */}
                   <div className="space-y-3">
-                    <Label className="text-slate-300 font-medium flex items-center">
-                      <Calendar className="w-4 h-4 mr-2 text-blue-400" />
+                    <Label className="flex items-center font-medium text-slate-300">
+                      <Calendar className="mr-2 h-4 w-4 text-blue-400" />
                       Event Date
                     </Label>
-                    <Select
-                      value={selectedDate}
-                      onValueChange={setSelectedDate}
-                    >
-                      <SelectTrigger className="bg-slate-800 border-slate-700 text-white">
+                    <Select value={selectedDate} onValueChange={setSelectedDate}>
+                      <SelectTrigger className="border-slate-700 bg-slate-800 text-white">
                         <SelectValue />
                       </SelectTrigger>
-                      <SelectContent className="bg-slate-800 border-slate-700 text-white">
+                      <SelectContent className="border-slate-700 bg-slate-800 text-white">
                         <SelectItem value="all">All Dates</SelectItem>
                         <SelectItem value="today">Today</SelectItem>
                         <SelectItem value="tomorrow">Tomorrow</SelectItem>
@@ -237,20 +245,19 @@ export const Marketplace: React.FC = () => {
                     </Select>
                   </div>
 
-                  {/* Ticket Type */}
                   <div className="space-y-3">
-                    <Label className="text-slate-300 font-medium flex items-center">
-                      <Ticket className="w-4 h-4 mr-2 text-green-400" />
+                    <Label className="flex items-center font-medium text-slate-300">
+                      <Ticket className="mr-2 h-4 w-4 text-green-400" />
                       Ticket Type
                     </Label>
                     <Select
                       value={selectedTicketType}
                       onValueChange={setSelectedTicketType}
                     >
-                      <SelectTrigger className="bg-slate-800 border-slate-700 text-white">
+                      <SelectTrigger className="border-slate-700 bg-slate-800 text-white">
                         <SelectValue />
                       </SelectTrigger>
-                      <SelectContent className="bg-slate-800 border-slate-700 text-white">
+                      <SelectContent className="border-slate-700 bg-slate-800 text-white">
                         <SelectItem value="all">All Types</SelectItem>
                         <SelectItem value="vip">VIP</SelectItem>
                         <SelectItem value="premium">Premium</SelectItem>
@@ -258,67 +265,65 @@ export const Marketplace: React.FC = () => {
                       </SelectContent>
                     </Select>
                   </div>
-
-                  {/* Active Filters Display */}
-                  {activeFiltersCount > 0 && (
-                    <div className="space-y-3">
-                      <Label className="text-slate-300 font-medium">
-                        Active Filters
-                      </Label>
-                      <div className="flex flex-wrap gap-2">
-                        {searchQuery && (
-                          <Badge className="bg-purple-600/10 text-purple-400 border-purple-500/20">
-                            Search: {searchQuery}
-                          </Badge>
-                        )}
-                        {(priceRange[0] !== 0 || priceRange[1] !== 10) && (
-                          <Badge className="bg-green-600/10 text-green-400 border-green-500/20">
-                            {priceRange[0]}-{priceRange[1]} ETH
-                          </Badge>
-                        )}
-                        {selectedTicketType !== "all" && (
-                          <Badge className="bg-blue-600/10 text-blue-400 border-blue-500/20">
-                            {selectedTicketType}
-                          </Badge>
-                        )}
-                        {selectedDate !== "all" && (
-                          <Badge className="bg-cyan-600/10 text-cyan-400 border-cyan-500/20">
-                            {selectedDate}
-                          </Badge>
-                        )}
-                      </div>
-                    </div>
-                  )}
                 </div>
+
+                {activeFiltersCount > 0 && (
+                  <div className="mt-6 space-y-3">
+                    <Label className="font-medium text-slate-300">
+                      Active Filters
+                    </Label>
+                    <div className="flex flex-wrap gap-2">
+                      {searchQuery && (
+                        <Badge className="border-purple-500/20 bg-purple-600/10 text-purple-400">
+                          Search: {searchQuery}
+                        </Badge>
+                      )}
+                      {(priceRange[0] !== 0.01 || priceRange[1] !== 10) && (
+                        <Badge className="border-green-500/20 bg-green-600/10 text-green-400">
+                          {priceRange[0].toFixed(2)}-{priceRange[1].toFixed(2)} ETH
+                        </Badge>
+                      )}
+                      {selectedTicketType !== "all" && (
+                        <Badge className="border-blue-500/20 bg-blue-600/10 text-blue-400">
+                          {selectedTicketType}
+                        </Badge>
+                      )}
+                      {selectedDate !== "all" && (
+                        <Badge className="border-cyan-500/20 bg-cyan-600/10 text-cyan-400">
+                          {selectedDate}
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
           )}
 
-          {/* Results Count */}
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-slate-400">
               Showing{" "}
-              <span className="text-white font-semibold">
-                {listings.length}
+              <span className="font-semibold text-white">
+                {filteredListings.length}
               </span>{" "}
               listings
             </p>
             {activeFiltersCount > 0 && (
               <p className="text-sm text-slate-500">
-                {activeFiltersCount} filter{activeFiltersCount !== 1 ? "s" : ""}{" "}
-                applied
+                {activeFiltersCount} filter{activeFiltersCount !== 1 ? "s" : ""} applied
               </p>
             )}
           </div>
         </div>
 
-        {/* Marketplace Grid */}
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
           {filteredListings.map((listing) => {
             const listingId = listing.id || listing._id;
             const eventTitle = listing.eventId?.title || "Untitled event";
-            const eventImage = listing.eventId?.imageUrls?.[0] || "/placeholder.png";
-            const ticketType = listing.ticketId?.ticketType || "Unknown ticket type";
+            const eventImage =
+              listing.eventId?.imageUrls?.[0] || "/placeholder.png";
+            const ticketType =
+              listing.ticketId?.ticketType || "Unknown ticket type";
             const seller = listing.seller || "Unknown seller";
 
             let formattedPrice = "0";
@@ -332,38 +337,37 @@ export const Marketplace: React.FC = () => {
               <div
                 key={listingId}
                 onClick={() => navigate(`/tickets/${listingId}`)}
-                className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden hover:border-purple-500/50 transition-all hover:shadow-lg hover:shadow-purple-500/10 cursor-pointer"
+                className="cursor-pointer overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/90 transition-all hover:-translate-y-1 hover:border-purple-500/50 hover:shadow-lg hover:shadow-purple-500/10"
               >
-                <div className="aspect-video overflow-hidden relative">
+                <div className="relative aspect-video overflow-hidden">
                   <ImageWithFallback
                     src={eventImage}
                     alt={eventTitle}
-                    className="w-full h-full object-cover"
+                    className="h-full w-full object-cover transition-transform duration-300 hover:scale-105"
                   />
-                  <div className="absolute top-3 right-3 bg-purple-600 text-white text-xs px-2 py-1 rounded-full flex items-center space-x-1">
-                    <Zap className="w-3 h-3" />
+                  <div className="absolute right-3 top-3 flex items-center space-x-1 rounded-full bg-purple-600 px-2 py-1 text-xs text-white">
+                    <Zap className="h-3 w-3" />
                     <span>For Sale</span>
                   </div>
                 </div>
-                <div className="p-5">
-                  <h3 className="text-lg font-semibold text-white mb-1">
+
+                <div className="p-5 sm:p-6">
+                  <h3 className="mb-1 text-lg font-semibold text-white">
                     {eventTitle}
                   </h3>
-                  <p className="text-sm text-slate-400 mb-4">
-                    {ticketType}
-                  </p>
+                  <p className="mb-4 text-sm text-slate-400">{ticketType}</p>
 
-                  <div className="flex items-center justify-between mb-4">
-                    <div>
-                      <p className="text-xs text-slate-500 mb-1">Seller</p>
-                      <p className="text-sm text-slate-300 font-mono">
+                  <div className="mb-5 flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="mb-1 text-xs text-slate-500">Seller</p>
+                      <p className="break-all text-sm font-mono text-slate-300">
                         {seller.length > 14
                           ? `${seller.slice(0, 10)}...${seller.slice(-4)}`
                           : seller}
                       </p>
                     </div>
                     <div className="text-right">
-                      <p className="text-xs text-slate-500 mb-1">Price</p>
+                      <p className="mb-1 text-xs text-slate-500">Price</p>
                       <p className="text-xl font-bold text-purple-400">
                         {formattedPrice} ETH
                       </p>
@@ -375,9 +379,9 @@ export const Marketplace: React.FC = () => {
                       e.stopPropagation();
                       navigate(`/tickets/${listingId}`);
                     }}
-                    className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white"
+                    className="w-full bg-gradient-to-r from-purple-600 to-blue-600 text-white hover:from-purple-700 hover:to-blue-700"
                   >
-                    <ShoppingCart className="w-4 h-4 mr-2" />
+                    <ShoppingCart className="mr-2 h-4 w-4" />
                     Buy Now
                   </Button>
                 </div>
@@ -386,15 +390,14 @@ export const Marketplace: React.FC = () => {
           })}
         </div>
 
-        {/* Empty State Placeholder */}
         {filteredListings.length === 0 && (
-          <div className="text-center py-20">
-            <ShoppingCart className="w-16 h-16 text-slate-700 mx-auto mb-4" />
-            <h3 className="text-xl font-semibold text-white mb-2">
+          <div className="py-20 text-center">
+            <ShoppingCart className="mx-auto mb-4 h-16 w-16 text-slate-700" />
+            <h3 className="mb-2 text-xl font-semibold text-white">
               No listings found
             </h3>
             <p className="text-slate-400">
-              Try adjusting your filters or check back later for new listings
+              Try adjusting your filters or check back later for new listings.
             </p>
           </div>
         )}

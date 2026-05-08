@@ -19,6 +19,7 @@ import {
   formatIntegerWithUnit,
   subtractIntegerValues,
 } from "../../lib/utils";
+import { logger } from "../../lib/logger";
 
 export const InvestmentDetail: React.FC = () => {
   const { id } = useParams();
@@ -41,7 +42,7 @@ export const InvestmentDetail: React.FC = () => {
         const data = await getInvestmentById(id);
         setInvestment(data);
       } catch (err) {
-        console.error("Failed to load investment detail:", err);
+        logger.error("investments", "Failed to load investment detail", err);
         setError(
           err instanceof Error
             ? err.message

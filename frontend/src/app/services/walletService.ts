@@ -1,5 +1,6 @@
 import { createWalletClient, custom } from "viem";
 import { sepolia } from "viem/chains";
+import { logger } from "../lib/logger";
 
 /**
  * Retrieve Smart Account and EOA addresses from Web3Auth provider.
@@ -31,8 +32,10 @@ export async function getWalletAddresses(
   if (!smartAccountAddress) throw new Error("Failed to get Smart Account address.");
   if (!eoaAddress) throw new Error("Failed to get EOA address.");
 
-  console.log("Smart Account:", smartAccountAddress);
-  console.log("EOA:", eoaAddress);
+  logger.debug("wallet", "Resolved wallet addresses", {
+    smartAccountAddress,
+    eoaAddress,
+  });
 
   return { smartAccountAddress, eoaAddress };
 }

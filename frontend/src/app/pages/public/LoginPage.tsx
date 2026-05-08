@@ -3,6 +3,7 @@ import { Wallet } from "lucide-react";
 import { useAuth } from "../../contexts/AuthContext";
 import { Button } from "../../components/ui/button";
 import { useNavigate } from "react-router-dom";
+import { logger } from "../../lib/logger";
 
 export const LoginPage: React.FC = () => {
   const { connectWallet, isLoading, error, user } = useAuth();
@@ -28,7 +29,7 @@ export const LoginPage: React.FC = () => {
     try {
       await connectWallet();
     } catch (err) {
-      console.error("Login failed:", err);
+      logger.error("auth", "Wallet login failed", err);
     }
   };
 

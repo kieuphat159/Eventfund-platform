@@ -252,16 +252,18 @@ export const EventDetail: React.FC = () => {
       )}
 
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="grid lg:grid-cols-2 gap-8 mb-8">
-          <div className="aspect-video rounded-xl overflow-hidden">
-            <ImageWithFallback
-              src={coverImage}
-              alt={event.title || "Event image"}
-              className="w-full h-full object-cover"
-            />
+        <div className="mb-8 grid gap-8 xl:grid-cols-[1.2fr_1fr]">
+          <div className="overflow-hidden rounded-3xl border border-slate-800 bg-slate-900/60 shadow-2xl shadow-cyan-950/20">
+            <div className="aspect-[16/10] sm:aspect-video">
+              <ImageWithFallback
+                src={coverImage}
+                alt={event.title || "Event image"}
+                className="h-full w-full object-cover"
+              />
+            </div>
           </div>
 
-          <div className="relative grid lg:grid-cols-2 gap-8">
+          <div className="relative grid gap-8">
             <div className="aspect-video rounded-2xl overflow-hidden border border-slate-800">
               <ImageWithFallback
                 src={coverImage}
@@ -401,7 +403,7 @@ export const EventDetail: React.FC = () => {
                     </ul>
 
                     <Button
-                      onClick={connectWallet}
+                      onClick={() => handlePurchaseClick(tier.name)}
                       className="w-full bg-cyan-600 hover:bg-cyan-500 text-white"
                     >
                       {user?.walletAddress ? "Buy Ticket" : "Connect Wallet"}
@@ -504,9 +506,9 @@ export const EventDetail: React.FC = () => {
           <div className="bg-slate-900 p-6 rounded-xl border border-slate-700 w-[340px]">
             <h3 className="text-white mb-2 font-semibold">Confirm Purchase</h3>
             <p className="text-slate-300 text-sm mb-4">
-              Bạn có muốn mua vé{" "}
+              Do you want to purchase{" "}
               <span className="font-semibold">{purchaseConfirmTier}</span>{" "}
-              không?
+              now?
             </p>
 
             <div className="flex gap-2">

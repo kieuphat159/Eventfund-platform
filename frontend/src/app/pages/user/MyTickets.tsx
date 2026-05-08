@@ -24,6 +24,7 @@ import {
 } from "@/app/services/listings.service";
 import { QRCodeCanvas } from "qrcode.react";
 import { ethers, formatEther } from "ethers";
+import { logger } from "../../lib/logger";
 
 const ETH_ADDRESS_REGEX = /^0x[a-fA-F0-9]{40}$/;
 
@@ -123,7 +124,7 @@ export const MyTickets: React.FC = () => {
   const totalValue = useMemo(() => {
     return tickets.reduce(
       (sum, ticket) => sum + BigInt(ticket.originalPrice || "0"),
-      0n, // 0n là khởi tạo kiểu BigInt
+      0n,
     );
   }, [tickets]);
 
@@ -131,13 +132,13 @@ export const MyTickets: React.FC = () => {
     if (!wei || wei === "0" || wei === "0x0") return "0";
 
     try {
-      // formatEther nhận string hoặc bigint
       const ethString = formatEther(wei.toString());
 
       return parseFloat(ethString)
         .toFixed(3)
         .replace(/\.?0+$/, "");
     } catch (error) {
+      logger.debug("tickets", "Failed to format ticket value", error);
       return "0";
     }
   };
@@ -192,7 +193,6 @@ export const MyTickets: React.FC = () => {
 
     return null;
   };
-  console.log("Tickets:", tickets);
   return (
     <div className="space-y-6">
       {listingPopup && (

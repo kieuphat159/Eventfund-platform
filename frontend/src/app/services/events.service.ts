@@ -1,4 +1,5 @@
 import { api } from '../lib/api';
+import { logger } from '../lib/logger';
 
 export interface EventVenue {
   address?: string;
@@ -209,7 +210,7 @@ export async function createEvent(payload: CreateEventPayload): Promise<EventIte
     const response = await api.post<CreateEventResponse>('/events', payload);
     return response.data || null;
   } catch (error) {
-    console.error('createEvent failed:', error);
+    logger.error('events', 'Create event failed', error);
     throw error;
   }
 }

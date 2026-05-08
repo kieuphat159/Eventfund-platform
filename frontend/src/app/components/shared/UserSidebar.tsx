@@ -1,6 +1,5 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-
 import {
   LayoutDashboard,
   Calendar,
@@ -15,15 +14,20 @@ import {
 } from "lucide-react";
 import { useAuth } from "../../contexts/AuthContext";
 import { cn } from "../../lib/utils";
+import { SidebarShell } from "./SidebarShell";
 
 interface SidebarProps {
   collapsed: boolean;
   onToggle: () => void;
+  mobileOpen: boolean;
+  onCloseMobile: () => void;
 }
 
 export const UserSidebar: React.FC<SidebarProps> = ({
   collapsed,
   onToggle,
+  mobileOpen,
+  onCloseMobile,
 }) => {
   const location = useLocation();
   const { user } = useAuth();
@@ -53,42 +57,15 @@ export const UserSidebar: React.FC<SidebarProps> = ({
       : userNavItems;
 
   return (
-    <aside
-      className={cn(
-        "fixed left-0 top-16 h-[calc(100vh-4rem)] bg-slate-900 border-r border-slate-800 transition-all duration-300 z-40",
-        collapsed ? "w-16" : "w-64",
-      )}
-    >
-      <div className="flex flex-col h-full">
-        <nav className="flex-1 px-2 py-4 space-y-1 overflow-y-auto">
-          {allNavItems.map((item) => {
-            const Icon = item.icon;
-            // Exact path check for active state
-            const isActive = location.pathname === item.path;
-
-            return (
-              <Link
-                key={item.path}
-                to={item.path}
-                className={cn(
-                  "flex items-center px-3 py-2 rounded-lg transition-all",
-                  isActive
-                    ? "bg-gradient-to-r from-purple-600 to-blue-600 text-white"
-                    : "text-slate-400 hover:bg-slate-800 hover:text-white",
-                )}
-              >
-                <Icon className="w-5 h-5 flex-shrink-0" />
-                {!collapsed && (
-                  <span className="ml-3 text-sm">{item.label}</span>
-                )}
-              </Link>
-            );
-          })}
-        </nav>
-
+    <SidebarShell
+      title="Navigation"
+      collapsed={collapsed}
+      mobileOpen={mobileOpen}
+      onCloseMobile={onCloseMobile}
+      footer={
         <button
           onClick={onToggle}
-          className="flex items-center justify-center h-12 border-t border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+          className="hidden items-center justify-center border-t border-slate-800 text-slate-400 transition-colors hover:bg-slate-800 hover:text-white md:flex md:h-12"
         >
           {collapsed ? (
             <ChevronRight className="w-5 h-5" />
@@ -96,7 +73,33 @@ export const UserSidebar: React.FC<SidebarProps> = ({
             <ChevronLeft className="w-5 h-5" />
           )}
         </button>
-      </div>
-    </aside>
+      }
+    >
+      <nav className="space-y-1 px-2 py-4">
+        {allNavItems.map((item) => {
+          const Icon = item.icon;
+          const isActive = location.pathname === item.path;
+
+          return (
+            <Link
+              key={item.path}
+              to={item.path}
+              onClick={onCloseMobile}
+              className={cn(
+                "flex items-center rounded-lg px-3 py-2 transition-all",
+                isActive
+                  ? "bg-gradient-to-r from-purple-600 to-blue-600 text-white"
+                  : "text-slate-400 hover:bg-slate-800 hover:text-white",
+              )}
+            >
+              <Icon className="w-5 h-5 flex-shrink-0" />
+              <span className={cn("ml-3 text-sm md:block", collapsed ? "md:hidden" : "md:block")}>
+                {item.label}
+              </span>
+            </Link>
+          );
+        })}
+      </nav>
+    </SidebarShell>
   );
 };
