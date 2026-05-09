@@ -12,7 +12,12 @@ export async function upsertOrganizerStake(data, models = {}) {
   // Resolve eventId ObjectId from contractEventId if not provided directly
   let eventId = data.eventId;
   if (!eventId && data.eventContractId) {
-    const eventDoc = await Event.findOne({ contractEventId: data.eventContractId }).lean();
+    const filter = { contractEventId: data.eventContractId };
+    if (data.fundContractAddress) {
+      filter.fundContractAddress = String(data.fundContractAddress).toLowerCase();
+    }
+
+    const eventDoc = await Event.findOne(filter).lean();
     eventId = eventDoc?._id;
   }
 
@@ -116,11 +121,22 @@ export async function markDonatorContributionsAsRefunded(eventId, contributor, m
   return markContributionsAsRefunded(eventId, contributor, models);
 }
 
+export async function findRefundableContributors(eventId, models = {}) {
+  const Contribution = models.Contribution || DefaultContribution;
+
+  return await Contribution.distinct("contributor", {
+    eventId,
+    type: "donator_contribution",
+    status: "confirmed",
+  });
+}
+
 export default {
   upsertOrganizerStake,
   upsertDonatorContribution,
   rebuildFundState,
   markContributionsAsRefunded,
   markDonatorContributionsAsRefunded,
+  findRefundableContributors,
   deleteByTxHashes,
 };

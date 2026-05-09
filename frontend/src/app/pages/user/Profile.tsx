@@ -19,6 +19,7 @@ import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
 import { Textarea } from "../../components/ui/textarea";
 import { useAuth } from "../../contexts/AuthContext";
+import { useLoading } from "../../components/ui/loadingContext";
 import {
   userService,
   UserProfile,
@@ -28,6 +29,7 @@ import { logger } from "../../lib/logger";
 
 export const Profile: React.FC = () => {
   const { user: authUser, refreshProfile } = useAuth();
+  const { show: showLoading, hide: hideLoading } = useLoading();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [stats, setStats] = useState<UserStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -42,6 +44,7 @@ export const Profile: React.FC = () => {
 
       try {
         setIsLoading(true);
+        showLoading('Loading profile...');
 
         const [profileData, statsData] = await Promise.all([
           userService.getProfile(),
@@ -58,6 +61,7 @@ export const Profile: React.FC = () => {
         );
       } finally {
         setIsLoading(false);
+        hideLoading();
       }
     };
 
@@ -69,6 +73,7 @@ export const Profile: React.FC = () => {
 
     try {
       setIsSaving(true);
+      showLoading('Saving profile...');
 
       const updated = await userService.updateProfile({
         username: profile.username,
@@ -84,6 +89,7 @@ export const Profile: React.FC = () => {
       alert("An error occurred while saving changes.");
     } finally {
       setIsSaving(false);
+      hideLoading();
     }
   };
 

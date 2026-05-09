@@ -1,11 +1,15 @@
-import React from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Wallet as WalletIcon,
   Send,
   Download,
   ArrowUpRight,
   ArrowDownLeft,
+  Copy,
+  CheckCircle2,
 } from "lucide-react";
+import { DepositModal } from "../../components/shared/DepositModal";
+import { formatEther } from "ethers";
 import {
   Card,
   CardContent,
@@ -15,64 +19,264 @@ import {
 } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { useAuth } from "../../contexts/AuthContext";
+import { useLoading } from "../../components/ui/loadingContext";
+import { getUserTickets } from "../../services/tickets.service";
+import { getInvestments } from "../../services/investment.service";
+import { getMarketplaceHistory } from "../../services/listings.service";
+import { userService } from "../../services/user.service";
+import {
+  addIntegerValues,
+  compareIntegerValues,
+  formatIntegerValue,
+  formatIntegerWithUnit,
+  subtractIntegerValues,
+} from "../../lib/utils";
+
+type WalletTransaction = {
+  id: string;
+  type: "received" | "sent";
+  description: string;
+  amountWei: string;
+  date: string;
+  hash?: string | null;
+};
+
+type WalletBalance = {
+  wei: string;
+  eth: string;
+};
+
+const BALANCE_RPC_URL =
+  (import.meta.env.VITE_WEB3AUTH_RPC_URL as string | undefined) ||
+  (import.meta.env.VITE_RPC_URL as string | undefined) ||
+  "https://ethereum-sepolia-rpc.publicnode.com";
+
+async function fetchWalletBalance(walletAddress: string): Promise<WalletBalance> {
+  const response = await fetch(BALANCE_RPC_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "eth_getBalance",
+      params: [walletAddress, "latest"],
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch wallet balance (${response.status})`);
+  }
+
+  const payload = await response.json();
+  const wei = BigInt(payload?.result || "0x0").toString();
+  const eth = Number(formatEther(BigInt(wei))).toLocaleString("en-US", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 6,
+  });
+
+  return { wei, eth };
+}
+
+function truncateHash(hash?: string | null): string {
+  if (!hash) return "No tx hash";
+  if (hash.length <= 16) return hash;
+  return `${hash.slice(0, 10)}...${hash.slice(-6)}`;
+}
 
 export const Wallet: React.FC = () => {
   const { user } = useAuth();
-
-  const balance = {
-    eth: "12.458",
-    usd: "$24,916.00",
-  };
-
-  const transactions = [
-    {
-      id: "1",
-      type: "received",
-      description: "Ticket Sale - Crypto Music Festival",
-      amount: "+2.5 ETH",
-      date: "2026-03-04",
-      time: "14:32",
-      hash: "0x9a3bc...7f2e1",
-    },
-    {
-      id: "2",
-      type: "sent",
-      description: "Investment - Web3 Summit",
-      amount: "-3.0 ETH",
-      date: "2026-03-03",
-      time: "10:15",
-      hash: "0x7c2ab...4d9f2",
-    },
-    {
-      id: "3",
-      type: "received",
-      description: "Marketplace Sale - VIP Ticket",
-      amount: "+0.8 ETH",
-      date: "2026-03-02",
-      time: "18:45",
-      hash: "0x5e1cd...3a8b4",
-    },
-    {
-      id: "4",
-      type: "sent",
-      description: "Ticket Purchase - NFT Art Gallery",
-      amount: "-0.6 ETH",
-      date: "2026-03-01",
-      time: "09:20",
-      hash: "0x2d4ef...6c5a7",
-    },
-    {
-      id: "5",
-      type: "received",
-      description: "Investment Return - Blockchain Workshop",
-      amount: "+1.2 ETH",
-      date: "2026-02-28",
-      time: "16:00",
-      hash: "0x8f6ba...1e3d9",
-    },
-  ];
-
   const walletAddress = user?.walletAddress;
+  const { show: showLoading, hide: hideLoading } = useLoading();
+
+  const [addressCopied, setAddressCopied] = useState(false);
+  const [copiedTxIds, setCopiedTxIds] = useState<Record<string, boolean>>({});
+
+  const [balance, setBalance] = useState<WalletBalance>({
+    wei: "0",
+    eth: "0",
+  });
+  const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [isDepositModalOpen, setIsDepositModalOpen] = useState(false);
+
+  useEffect(() => {
+    const loadWalletData = async () => {
+      if (!walletAddress) {
+        setBalance({ wei: "0", eth: "0" });
+        setTransactions([]);
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      showLoading('Loading wallet...');
+
+      const [
+        balanceResult,
+        ticketsResult,
+        investmentsResult,
+        rewardsResult,
+        marketplaceSalesResult,
+      ] = await Promise.allSettled([
+        fetchWalletBalance(walletAddress),
+        getUserTickets(walletAddress),
+        getInvestments(),
+        userService.getUserRewards(),
+        getMarketplaceHistory({
+          seller: walletAddress.toLowerCase(),
+          page: 1,
+          limit: 100,
+          sort: "soldAt",
+          order: "desc",
+        }),
+      ]);
+
+      setBalance(
+        balanceResult.status === "fulfilled"
+          ? balanceResult.value
+          : { wei: "0", eth: "0" },
+      );
+
+      const nextTransactions: WalletTransaction[] = [];
+
+      if (ticketsResult.status === "fulfilled") {
+        ticketsResult.value.forEach((ticket) => {
+          if (!ticket.soldAt) return;
+
+          const eventTitle =
+            typeof ticket.eventId === "object" ? ticket.eventId?.title : null;
+
+          nextTransactions.push({
+            id: `ticket-${ticket.tokenId}-purchase`,
+            type: "sent",
+            description: `Ticket Purchase - ${eventTitle || `Event ${ticket.eventIdRaw || "-"}`}`,
+            amountWei: String(ticket.originalPrice || "0"),
+            date: ticket.soldAt,
+            hash:
+              // prefer explicit soldTxHash set by backend, fall back to any transferHistory entry
+              (ticket as any).soldTxHash ||
+              ((ticket as any).transferHistory?.length
+                ? (ticket as any).transferHistory[(ticket as any).transferHistory.length - 1].txHash
+                : null) ||
+              null,
+          });
+        });
+      }
+
+      if (investmentsResult.status === "fulfilled") {
+        investmentsResult.value.forEach((investment) => {
+          if (!investment.createdAt) return;
+
+          nextTransactions.push({
+            id: `investment-${investment._id}`,
+            type: "sent",
+            description: `Investment - ${investment.eventId?.title || "Event"}`,
+            amountWei: String(investment.contributionAmount || "0"),
+            date: investment.createdAt,
+            hash: (investment as any).txHash || (investment as any).transactionHash || null,
+          });
+        });
+      }
+
+      if (rewardsResult.status === "fulfilled") {
+        rewardsResult.value.claimed.forEach((reward, index) => {
+          if (!reward.claimedAt) return;
+
+          const eventTitle =
+            reward.eventTitle ||
+            (typeof reward.eventId === "object" ? reward.eventId?.title : null) ||
+            "Event";
+
+          nextTransactions.push({
+            id: `reward-${reward.txHash || index}`,
+            type: "received",
+            description: `Reward Claim - ${eventTitle}`,
+            amountWei: String(reward.rewardAmount || "0"),
+            date: reward.claimedAt,
+            hash: reward.txHash || null,
+          });
+        });
+      }
+
+      if (marketplaceSalesResult.status === "fulfilled") {
+        marketplaceSalesResult.value.docs.forEach((sale) => {
+          if (!sale.time) return;
+
+          nextTransactions.push({
+            id: `marketplace-sale-${sale.listingId}`,
+            type: "received",
+            description: `Marketplace Sale - ${sale.event || `Ticket #${sale.tokenId}`}`,
+            amountWei: String(sale.price || "0"),
+            date: sale.time,
+            hash: (sale as any).txHash || (sale as any).transactionHash || null,
+          });
+        });
+      }
+
+      nextTransactions.sort(
+        (left, right) =>
+          new Date(right.date).getTime() - new Date(left.date).getTime(),
+      );
+
+      setTransactions(nextTransactions.slice(0, 20));
+      setLoading(false);
+      hideLoading();
+    };
+
+    loadWalletData();
+  }, [walletAddress]);
+
+  const currentMonthTransactions = useMemo(() => {
+    const now = new Date();
+    const month = now.getMonth();
+    const year = now.getFullYear();
+
+    return transactions.filter((transaction) => {
+      const transactionDate = new Date(transaction.date);
+      return (
+        transactionDate.getMonth() === month &&
+        transactionDate.getFullYear() === year
+      );
+    });
+  }, [transactions]);
+
+  const monthlyIncome = useMemo(() => {
+    return currentMonthTransactions
+      .filter((transaction) => transaction.type === "received")
+      .reduce(
+        (sum, transaction) => addIntegerValues(sum, transaction.amountWei),
+        "0",
+      );
+  }, [currentMonthTransactions]);
+
+  const monthlyExpenses = useMemo(() => {
+    return currentMonthTransactions
+      .filter((transaction) => transaction.type === "sent")
+      .reduce(
+        (sum, transaction) => addIntegerValues(sum, transaction.amountWei),
+        "0",
+      );
+  }, [currentMonthTransactions]);
+
+  const netChange = useMemo(() => {
+    return subtractIntegerValues(monthlyIncome, monthlyExpenses);
+  }, [monthlyExpenses, monthlyIncome]);
+
+  const isNetPositive = compareIntegerValues(netChange, "0") >= 0;
+
+  const handleDepositSuccess = async () => {
+    // Reload wallet balance after successful deposit
+    if (walletAddress) {
+      try {
+        const newBalance = await fetchWalletBalance(walletAddress);
+        setBalance(newBalance);
+      } catch (error) {
+        console.error("Failed to reload balance:", error);
+      }
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -82,6 +286,13 @@ export const Wallet: React.FC = () => {
           Manage your digital assets and transactions
         </p>
       </div>
+
+      {/* Deposit Modal */}
+      <DepositModal
+        isOpen={isDepositModalOpen}
+        onClose={() => setIsDepositModalOpen(false)}
+        onSuccess={handleDepositSuccess}
+      />
 
       <Card className="bg-gradient-to-br from-purple-900/50 to-blue-900/50 border-purple-500/30">
         <CardContent className="p-8">
@@ -98,14 +309,30 @@ export const Wallet: React.FC = () => {
                   variant="outline"
                   size="sm"
                   className="border-purple-500/30 hover:bg-purple-500/10"
-                  onClick={() => {
-                    if (walletAddress) {
-                      navigator.clipboard.writeText(walletAddress);
+                  onClick={async () => {
+                    if (!walletAddress) return;
+                    try {
+                      await navigator.clipboard.writeText(walletAddress);
+                      setAddressCopied(true);
+                      setTimeout(() => setAddressCopied(false), 2000);
+                    } catch (err) {
+                      console.error("Copy failed", err);
                     }
                   }}
                   disabled={!walletAddress}
+                  aria-live="polite"
                 >
-                  Copy
+                  {addressCopied ? (
+                    <>
+                      <CheckCircle2 className="w-4 h-4 text-green-400 mr-2" />
+                      Copied
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-4 h-4 mr-2" />
+                      Copy
+                    </>
+                  )}
                 </Button>
               </div>
             </div>
@@ -116,23 +343,36 @@ export const Wallet: React.FC = () => {
           </div>
 
           <div className="mb-6">
-            <p className="text-sm text-purple-300 mb-2">Total Balance</p>
-            <div className="flex items-baseline space-x-3">
-              <h2 className="text-4xl font-bold text-white">{balance.eth} ETH</h2>
-              <span className="text-xl text-slate-300">{balance.usd}</span>
+            <p className="text-sm text-purple-300 mb-2">On-chain Balance</p>
+            <div className="flex flex-col gap-1">
+              <h2 className="text-4xl font-bold text-white">
+                {loading ? "Loading..." : `${balance.eth} ETH`}
+              </h2>
+              <span className="text-sm text-slate-300">
+                {formatIntegerWithUnit(balance.wei, "wei")}
+              </span>
             </div>
           </div>
 
           <div className="grid grid-cols-3 gap-4">
-            <Button className="bg-slate-900/50 hover:bg-slate-900/70 text-white border border-purple-500/30">
+            <Button
+              className="bg-slate-900/50 hover:bg-slate-900/70 text-white border border-purple-500/30"
+              disabled
+            >
               <Send className="w-4 h-4 mr-2" />
               Send
             </Button>
-            <Button className="bg-slate-900/50 hover:bg-slate-900/70 text-white border border-purple-500/30">
+            <Button
+              className="bg-purple-600 hover:bg-purple-700 text-white border-0"
+              onClick={() => setIsDepositModalOpen(true)}
+            >
               <Download className="w-4 h-4 mr-2" />
               Receive
             </Button>
-            <Button className="bg-slate-900/50 hover:bg-slate-900/70 text-white border border-purple-500/30">
+            <Button
+              className="bg-slate-900/50 hover:bg-slate-900/70 text-white border border-purple-500/30"
+              disabled
+            >
               Swap
             </Button>
           </div>
@@ -143,7 +383,9 @@ export const Wallet: React.FC = () => {
         <Card className="bg-slate-900 border-slate-800">
           <CardContent className="p-6">
             <p className="text-sm text-slate-400 mb-1">This Month</p>
-            <p className="text-2xl font-bold text-green-400">+5.8 ETH</p>
+            <p className="text-2xl font-bold text-green-400">
+              +{formatIntegerValue(monthlyIncome)} wei
+            </p>
             <p className="text-xs text-slate-500 mt-1">Income</p>
           </CardContent>
         </Card>
@@ -151,7 +393,9 @@ export const Wallet: React.FC = () => {
         <Card className="bg-slate-900 border-slate-800">
           <CardContent className="p-6">
             <p className="text-sm text-slate-400 mb-1">This Month</p>
-            <p className="text-2xl font-bold text-red-400">-4.2 ETH</p>
+            <p className="text-2xl font-bold text-red-400">
+              -{formatIntegerValue(monthlyExpenses)} wei
+            </p>
             <p className="text-xs text-slate-500 mt-1">Expenses</p>
           </CardContent>
         </Card>
@@ -159,8 +403,18 @@ export const Wallet: React.FC = () => {
         <Card className="bg-slate-900 border-slate-800">
           <CardContent className="p-6">
             <p className="text-sm text-slate-400 mb-1">Net Change</p>
-            <p className="text-2xl font-bold text-white">+1.6 ETH</p>
-            <p className="text-xs text-green-500 mt-1">+12.8%</p>
+            <p
+              className={`text-2xl font-bold ${isNetPositive ? "text-white" : "text-red-300"}`}
+            >
+              {isNetPositive ? "+" : ""}
+              {formatIntegerValue(netChange)} wei
+            </p>
+            <p
+              className={`text-xs mt-1 ${isNetPositive ? "text-green-500" : "text-red-400"}`}
+            >
+              {currentMonthTransactions.length} tracked transaction
+              {currentMonthTransactions.length === 1 ? "" : "s"}
+            </p>
           </CardContent>
         </Card>
       </div>
@@ -169,63 +423,111 @@ export const Wallet: React.FC = () => {
         <CardHeader>
           <CardTitle className="text-white">Transaction History</CardTitle>
           <CardDescription className="text-slate-400">
-            Your recent wallet activity
+            Your recent wallet activity built from tickets, rewards, investments,
+            and marketplace sales
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="space-y-3">
-            {transactions.map((tx) => (
-              <div
-                key={tx.id}
-                className="flex items-center justify-between p-4 rounded-lg bg-slate-800/50 hover:bg-slate-800 transition-colors"
-              >
-                <div className="flex items-center space-x-4">
-                  <div
-                    className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                      tx.type === "received" ? "bg-green-500/10" : "bg-red-500/10"
-                    }`}
-                  >
-                    {tx.type === "received" ? (
-                      <ArrowDownLeft className="w-5 h-5 text-green-400" />
-                    ) : (
-                      <ArrowUpRight className="w-5 h-5 text-red-400" />
-                    )}
-                  </div>
+          {loading ? (
+            <div className="py-12 text-center text-slate-400">
+              Loading wallet activity...
+            </div>
+          ) : transactions.length === 0 ? (
+            <div className="py-12 text-center text-slate-400">
+              No wallet activity found yet.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {transactions.map((transaction) => {
+                const transactionDate = new Date(transaction.date);
 
-                  <div>
-                    <p className="text-sm font-medium text-white">
-                      {tx.description}
-                    </p>
-                    <div className="flex items-center space-x-3 mt-1">
-                      <span className="text-xs text-slate-500">
-                        {tx.date} at {tx.time}
-                      </span>
-                      <code className="text-xs text-slate-500 bg-slate-900 px-2 py-1 rounded">
-                        {tx.hash}
-                      </code>
+                return (
+                  <div
+                    key={transaction.id}
+                    className="flex items-center justify-between p-4 rounded-lg bg-slate-800/50 hover:bg-slate-800 transition-colors"
+                  >
+                    <div className="flex items-center space-x-4">
+                      <div
+                        className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                          transaction.type === "received"
+                            ? "bg-green-500/10"
+                            : "bg-red-500/10"
+                        }`}
+                      >
+                        {transaction.type === "received" ? (
+                          <ArrowDownLeft className="w-5 h-5 text-green-400" />
+                        ) : (
+                          <ArrowUpRight className="w-5 h-5 text-red-400" />
+                        )}
+                      </div>
+
+                      <div>
+                        <p className="text-sm font-medium text-white">
+                          {transaction.description}
+                        </p>
+                        <div className="flex items-center space-x-3 mt-1">
+                          <span className="text-xs text-slate-500">
+                            {transactionDate.toLocaleDateString()} at{" "}
+                            {transactionDate.toLocaleTimeString("en-US", {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          </span>
+                          <div className="flex items-center space-x-2">
+                            <code className="text-xs text-slate-500 bg-slate-900 px-2 py-1 rounded">
+                              {truncateHash(transaction.hash)}
+                            </code>
+                            {transaction.hash && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-slate-400 hover:text-white"
+                                onClick={async () => {
+                                  try {
+                                    await navigator.clipboard.writeText(transaction.hash || "");
+                                    setCopiedTxIds((prev) => ({ ...prev, [transaction.id]: true }));
+                                    setTimeout(() => {
+                                      setCopiedTxIds((prev) => {
+                                        const next = { ...prev };
+                                        delete next[transaction.id];
+                                        return next;
+                                      });
+                                    }, 2000);
+                                  } catch (err) {
+                                    console.error("Copy tx hash failed", err);
+                                  }
+                                }}
+                                title={transaction.hash}
+                              >
+                                {copiedTxIds[transaction.id] ? (
+                                  <CheckCircle2 className="w-4 h-4 text-green-400" />
+                                ) : (
+                                  <Copy className="w-4 h-4" />
+                                )}
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="text-right">
+                      <p
+                        className={`text-sm font-semibold ${
+                          transaction.type === "received"
+                            ? "text-green-400"
+                            : "text-red-400"
+                        }`}
+                      >
+                        {transaction.type === "received" ? "+" : "-"}
+                        {formatIntegerValue(transaction.amountWei)} wei
+                      </p>
                     </div>
                   </div>
-                </div>
-
-                <div className="text-right">
-                  <p
-                    className={`text-sm font-semibold ${
-                      tx.type === "received" ? "text-green-400" : "text-red-400"
-                    }`}
-                  >
-                    {tx.amount}
-                  </p>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-xs text-slate-500 hover:text-white"
-                  >
-                    View
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

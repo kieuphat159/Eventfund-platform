@@ -22,20 +22,46 @@ import {
 import {
   getAdminEventById,
   updateAdminEvent,
+  updateAdminEventStatus,
   type EventStatus,
 } from "../../services/events.service";
 
 const EVENT_STATUSES: EventStatus[] = [
+  'draft',
+  'funding',
   'funded',
   'ticketing',
+  'ongoing',
   'completed',
   'cancelled',
+  'failed',
 ];
 
 type TicketTierForm = {
   name: string;
   price: string;
   supply: string;
+};
+
+const isPositiveWeiInteger = (value: string) => {
+  const trimmed = value.trim();
+  return /^[0-9]+$/.test(trimmed) && BigInt(trimmed) > 0n;
+};
+
+const toLocalDateTimeInputValue = (value?: string | null) => {
+  if (!value) return "";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+
+  const pad = (num: number) => String(num).padStart(2, "0");
+  const year = date.getFullYear();
+  const month = pad(date.getMonth() + 1);
+  const day = pad(date.getDate());
+  const hours = pad(date.getHours());
+  const minutes = pad(date.getMinutes());
+
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
 };
 
 export const AdminEditEvent: React.FC = () => {
@@ -46,6 +72,7 @@ export const AdminEditEvent: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [currentStatus, setCurrentStatus] = useState<EventStatus>('draft');
 
   const [formData, setFormData] = useState({
     title: '',
@@ -54,6 +81,9 @@ export const AdminEditEvent: React.FC = () => {
     status: 'draft' as EventStatus,
     startDate: '',
     endDate: '',
+    fundingGoal: '',
+    minStakeRequired: '',
+    fundingDeadline: '',
     venueName: '',
     venueAddress: '',
     quantity: '1',
@@ -92,20 +122,24 @@ export const AdminEditEvent: React.FC = () => {
           title: foundEvent.title || '',
           description: foundEvent.description || '',
           category: foundEvent.category || '',
-          status: EVENT_STATUSES.includes((foundEvent.status || 'funded') as EventStatus)
+          status: EVENT_STATUSES.includes((foundEvent.status || 'draft') as EventStatus)
             ? (foundEvent.status as EventStatus)
-            : 'funded',
-          startDate: foundEvent.startDate
-            ? new Date(foundEvent.startDate).toISOString().slice(0, 16)
-            : "",
-          endDate: foundEvent.endDate
-            ? new Date(foundEvent.endDate).toISOString().slice(0, 16)
-            : '',
+            : 'draft',
+          startDate: toLocalDateTimeInputValue(foundEvent.startDate),
+          endDate: toLocalDateTimeInputValue(foundEvent.endDate),
+          fundingGoal:
+            foundEvent.fundingGoal != null ? String(foundEvent.fundingGoal) : '',
+          minStakeRequired:
+            foundEvent.minStakeRequired != null
+              ? String(foundEvent.minStakeRequired)
+              : '',
+          fundingDeadline: toLocalDateTimeInputValue(foundEvent.fundingDeadline),
           venueName: foundEvent.venue?.name || '',
           venueAddress: foundEvent.venue?.address || '',
           quantity: String(foundEvent.totalTickets && foundEvent.totalTickets > 0 ? foundEvent.totalTickets : 1),
           ticketType: '0',
         });
+        setCurrentStatus((foundEvent.status as EventStatus) || 'draft');
         setTicketTiers(
           foundEvent.ticketTiers?.length
             ? foundEvent.ticketTiers.map((tier) => ({
@@ -171,22 +205,32 @@ export const AdminEditEvent: React.FC = () => {
       setError("");
       setSuccess("");
 
-      const quantity = Number(formData.quantity);
       const ticketType = Number(formData.ticketType);
 
-      if (formData.status === 'ticketing') {
-        if (!Number.isInteger(quantity) || quantity <= 0) {
-          throw new Error('Quantity must be a positive integer for ticketing status');
-        }
-      }
-
-      await updateAdminEventStatus(id, formData.status, {
-        quantity: formData.status === 'ticketing' ? quantity : undefined,
-        ticketType: formData.status === 'ticketing' ? ticketType : undefined,
-      });
+      const filledTiers = ticketTiers
+        .filter(
+          (tier) => tier.name.trim() && tier.price !== "" && tier.supply !== "",
+        );
+      const normalizedTiers = filledTiers.map((tier) => ({
+        name: tier.name.trim(),
+        price: Number.parseInt(tier.price.trim(), 10),
+        totalSupply: Number(tier.supply),
+      }));
 
       if (!normalizedTiers.length) {
         setError("At least one valid ticket tier is required");
+        return;
+      }
+
+      const hasInvalidTier = normalizedTiers.some(
+        (_tier, index) =>
+          !isPositiveWeiInteger(filledTiers[index]?.price || "") ||
+          Number.isNaN(normalizedTiers[index]?.totalSupply) ||
+          !Number.isInteger(normalizedTiers[index]?.totalSupply) ||
+          normalizedTiers[index]?.totalSupply <= 0,
+      );
+      if (hasInvalidTier) {
+        setError("Tier price (wei) and supply must be positive integers");
         return;
       }
 
@@ -204,12 +248,12 @@ export const AdminEditEvent: React.FC = () => {
         (sum, tier) => sum + tier.totalSupply,
         0,
       );
+      const quantity = totalTickets;
 
-      await updateAdminEvent(id, {
+      const updatedEvent = await updateAdminEvent(id, {
         title: formData.title,
         description: formData.description,
         category: formData.category,
-        status: formData.status,
         startDate: new Date(formData.startDate).toISOString(),
         endDate: new Date(formData.endDate).toISOString(),
         fundingGoal: formData.fundingGoal || "0",
@@ -224,7 +268,21 @@ export const AdminEditEvent: React.FC = () => {
         ticketTiers: normalizedTiers,
       });
 
+      let resolvedStatus = currentStatus;
+      if (formData.status !== currentStatus) {
+        const statusResult = await updateAdminEventStatus(id, formData.status, {
+          quantity: formData.status === 'ticketing' ? quantity : undefined,
+          ticketType: formData.status === 'ticketing' ? ticketType : undefined,
+        });
+        resolvedStatus =
+          (statusResult?.status as EventStatus) ||
+          (updatedEvent?.status as EventStatus) ||
+          formData.status;
+      }
+
       setSuccess("Event updated successfully");
+      setCurrentStatus(resolvedStatus);
+      setFormData((prev) => ({ ...prev, status: resolvedStatus }));
       navigate(`/admin/events/${id}`);
     } catch (err) {
       setError(
@@ -336,6 +394,11 @@ export const AdminEditEvent: React.FC = () => {
                     ))}
                   </SelectContent>
                 </Select>
+                <p className="text-xs text-slate-500">
+                  `cancelled` is for manual admin/organizer cancellation. `failed`
+                  is for terminal auto-failure cases such as ticket sales not
+                  meeting threshold.
+                </p>
               </div>
             </div>
 
@@ -454,7 +517,7 @@ export const AdminEditEvent: React.FC = () => {
                 <div>
                   <Label className="text-slate-300">Ticket Tiers</Label>
                   <p className="text-sm text-slate-500 mt-1">
-                    Admin can tune supply and pricing here.
+                    Admin can tune supply and pricing here (price unit: wei).
                   </p>
                 </div>
                 <Button
@@ -480,11 +543,13 @@ export const AdminEditEvent: React.FC = () => {
                     placeholder="Tier name"
                   />
                   <Input
-                    type="number"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     value={tier.price}
                     onChange={(e) => updateTier(index, "price", e.target.value)}
                     className="bg-slate-800 border-slate-700 text-white"
-                    placeholder="Price"
+                    placeholder="Price (wei)"
                   />
                   <Input
                     type="number"

@@ -1,7 +1,6 @@
 import React from "react";
 import {
   ShoppingCart,
-  Zap,
   Search,
   SlidersHorizontal,
   X,
@@ -24,6 +23,7 @@ import {
 } from "../../components/ui/select";
 import { Badge } from "../../components/ui/badge";
 import { listingService, ApiListing } from "../../services/listings.service";
+import Loading from "../../components/ui/loading";
 import { ImageWithFallback } from "../../components/figma/ImageWithFallback";
 import { logger } from "../../lib/logger";
 
@@ -67,7 +67,7 @@ export const Marketplace: React.FC = () => {
     };
 
     fetchListings();
-  }, [appliedPriceRange, sortBy]);
+  }, [minPriceWei, maxPriceWei, sortBy]);
 
   const clearFilters = () => {
     setSearchQuery("");
@@ -80,7 +80,7 @@ export const Marketplace: React.FC = () => {
 
   const activeFiltersCount = [
     searchQuery !== "",
-    priceRange[0] !== 0.01 || priceRange[1] !== 10,
+    minPriceWei.trim() !== "" || maxPriceWei.trim() !== "",
     selectedTicketType !== "all",
     selectedDate !== "all",
   ].filter(Boolean).length;
@@ -326,13 +326,6 @@ export const Marketplace: React.FC = () => {
               listing.ticketId?.ticketType || "Unknown ticket type";
             const seller = listing.seller || "Unknown seller";
 
-            let formattedPrice = "0";
-            try {
-              formattedPrice = ethers.formatEther(listing.price || "0");
-            } catch {
-              formattedPrice = "0";
-            }
-
             return (
               <div
                 key={listingId}
@@ -369,14 +362,21 @@ export const Marketplace: React.FC = () => {
                     <div className="text-right">
                       <p className="mb-1 text-xs text-slate-500">Price</p>
                       <p className="text-xl font-bold text-purple-400">
-                        {formattedPrice} ETH
+                        {formatWei(listing.price)} wei
                       </p>
                     </div>
                   </div>
 
                   <Button
-                    onClick={(e) => {
+                    onClick={async (e) => {
                       e.stopPropagation();
+                      if (buyLoading) return;
+                      setBuyMessage("Processing purchase...");
+                      setBuyLoading(true);
+                      const delay = fakeLoadingEnabled ? fakeLoadingMs : 600;
+                      await new Promise((r) => setTimeout(r, delay));
+                      setBuyLoading(false);
+                      setBuyMessage(undefined);
                       navigate(`/tickets/${listingId}`);
                     }}
                     className="w-full bg-gradient-to-r from-purple-600 to-blue-600 text-white hover:from-purple-700 hover:to-blue-700"

@@ -11,13 +11,13 @@ const objectId = Joi.string()
   .message('must be a valid MongoDB ObjectId');
 
 // Ticket status enum
-const ticketStatusEnum = ['minted', 'sold', 'used', 'expired'];
+const ticketStatusEnum = ['minted', 'sold', 'used', 'expired', 'refunded'];
 
 // Schema for POST /tickets/verify
 const verifyTicketSchema = Joi.object({
   tokenId: Joi.string().min(1).required(),
   eventId: objectId.required(),
-  walletAddress: ethereumAddress.required()
+  walletAddress: ethereumAddress.optional()
 });
 
 // Schema for POST /tickets/:tokenId/use
@@ -36,6 +36,12 @@ const purchaseIntentSchema = Joi.object({
 }).or('eventId', 'tokenId');
 
 const confirmPurchaseSchema = Joi.object({
+  txHash: txHashSchema.required(),
+  tokenId: Joi.string().min(1).optional(),
+  buyerWallet: ethereumAddress.optional()
+});
+
+const confirmRefundSchema = Joi.object({
   txHash: txHashSchema.required(),
   tokenId: Joi.string().min(1).optional(),
   buyerWallet: ethereumAddress.optional()
@@ -85,6 +91,7 @@ export const ticketSchemas = {
   useTicket: useTicketSchema,
   purchaseIntent: purchaseIntentSchema,
   confirmPurchase: confirmPurchaseSchema,
+  confirmRefund: confirmRefundSchema,
   confirmUseTicket: confirmUseTicketSchema,
   queryTickets: queryTicketsSchema,
   tokenIdParams: tokenIdParamsSchema,

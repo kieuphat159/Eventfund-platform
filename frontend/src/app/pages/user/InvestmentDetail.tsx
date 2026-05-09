@@ -13,6 +13,7 @@ import {
   InvestmentDetail as InvestmentDetailType,
 } from "../../services/investment.service";
 import { Button } from "@/app/components/ui/button";
+import { useLoading } from "../../components/ui/loadingContext";
 import {
   addIntegerValues,
   calculatePercentage,
@@ -28,6 +29,7 @@ export const InvestmentDetail: React.FC = () => {
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const { show: showLoading, hide: hideLoading } = useLoading();
 
   useEffect(() => {
     const fetchInvestment = async () => {
@@ -39,6 +41,7 @@ export const InvestmentDetail: React.FC = () => {
 
       try {
         setLoading(true);
+        showLoading('Loading investment details...');
         const data = await getInvestmentById(id);
         setInvestment(data);
       } catch (err) {
@@ -50,6 +53,7 @@ export const InvestmentDetail: React.FC = () => {
         );
       } finally {
         setLoading(false);
+        hideLoading();
       }
     };
 

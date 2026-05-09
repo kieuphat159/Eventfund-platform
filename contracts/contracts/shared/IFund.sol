@@ -12,6 +12,12 @@ interface IFund {
         Cancelled
     }
 
+    enum CancellationReason {
+        funding_goal_not_met,
+        organizer_cancelled,
+        ticket_sales_not_met
+    }
+
     enum PenaltyReason {
         cancelled,
         fraud,
@@ -44,15 +50,38 @@ interface IFund {
         uint256 usedThreshold
     ) external payable returns (uint256 eventId);
 
+    function createEventWithInvestment(
+        uint256 fundingGoal,
+        uint256 fundingDeadline,
+        uint256 minStakeRequired,
+        uint256 organizerShareBps,
+        uint256 ticketPrice,
+        uint256 maxTickets,
+        uint256 usedThreshold,
+        bool investmentEnabled
+    ) external payable returns (uint256 eventId);
+
     function contribute(uint256 eventId) external payable;
 
     function finalizeFunding(uint256 eventId) external;
+
+    function cancelEvent(
+        uint256 eventId,
+        CancellationReason reason
+    ) external;
 
     
     function startTicketing(
         uint256 eventId,
         uint8 ticketType,
         uint256 quantity
+    ) external returns (uint256[] memory tokenIds);
+
+    function startTicketingWithPrice(
+        uint256 eventId,
+        uint8 ticketType,
+        uint256 quantity,
+        uint256 batchPrice
     ) external returns (uint256[] memory tokenIds);
 
     function setCompletedIfThresholdMet(uint256 eventId) external;
@@ -71,4 +100,7 @@ interface IFund {
 
     
     function pendingReward(uint256 eventId, address user) external view returns (uint256);
+
+    function getEventStatus(uint256 eventId) external view returns (EventStatus);
+
 }

@@ -14,10 +14,12 @@ import { ImageWithFallback } from '../../components/figma/ImageWithFallback';
 import { StatusBadge } from '../../components/StatusBadge';
 import { getEvents, type EventItem } from '../../services/events.service';
 import { useAuth } from '../../contexts/AuthContext';
+import { useLoading } from '../../components/ui/loadingContext';
 
 export const Explore: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { show: showLoading, hide: hideLoading } = useLoading();
 
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [searchQuery, setSearchQuery] = useState('');
@@ -33,12 +35,14 @@ export const Explore: React.FC = () => {
       try {
         setLoading(true);
         setError('');
+        showLoading('Loading events...');
         const data = await getEvents();
         setEvents(data);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load events');
       } finally {
         setLoading(false);
+        hideLoading();
       }
     };
 
@@ -333,7 +337,7 @@ export const Explore: React.FC = () => {
                         {event.venue?.address || 'Unknown location'}
                       </span>
                       <span className="text-purple-400 font-medium whitespace-nowrap">
-                        From {firstTierPrice ?? 0} ETH
+                        From {firstTierPrice ?? 0} wei
                       </span>
                     </div>
 
@@ -411,7 +415,7 @@ export const Explore: React.FC = () => {
                       <div className="text-right">
                         <p className="text-sm text-slate-400 mb-1">Starting from</p>
                         <p className="text-xl font-semibold text-purple-400">
-                          {firstTierPrice ?? 0} ETH
+                          {firstTierPrice ?? 0} wei
                         </p>
                       </div>
                     </div>

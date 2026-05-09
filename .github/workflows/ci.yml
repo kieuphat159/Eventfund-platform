@@ -2,13 +2,10 @@ name: CI
 
 on:
   push:
-    branches: [dev, master]
+    branches: [dev, main, ci/cd]
   pull_request:
-    branches: [dev, master]
+    branches: [dev, main, ci/cd]
   workflow_dispatch:
-
-permissions:
-  contents: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -16,118 +13,22 @@ concurrency:
 
 jobs:
   frontend:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+    uses: ./.github/workflows/ci_frontend.yml
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20.19.0'
-          cache: npm
-          cache-dependency-path: |
-            frontend/package-lock.json
-
-      - name: Install dependencies
-        working-directory: frontend
-        run: npm ci
-
-      - name: Build
-        working-directory: frontend
-        run: npm run build
+  sonarcloud:
+    uses: ./.github/workflows/ci_sonarcloud.yml
+    secrets:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
   contracts:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20.19.0'
-          cache: npm
-          cache-dependency-path: |
-            contracts/package-lock.json
-
-      - name: Install dependencies
-        working-directory: contracts
-        run: npm ci
-
-      - name: Compile
-        working-directory: contracts
-        env:
-          SEPOLIA_RPC_URL: http://127.0.0.1:8545
-        run: npx hardhat compile
+    uses: ./.github/workflows/ci_contracts.yml
 
   backend:
-    runs-on: ubuntu-latest
-
-    env:
+    uses: ./.github/workflows/ci_backend.yml
+    permissions:
+      contents: read
+      id-token: write
+      security-events: write
+    secrets:
+      AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
       RPC_URL: ${{ secrets.RPC_URL }}
-      
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20.19.0'
-          cache: npm
-          cache-dependency-path: |
-            backend/package-lock.json
-
-      - name: Debug backend folder
-        working-directory: backend
-        run: |
-          set -euo pipefail
-          echo "pwd=$(pwd)"
-          ls -la
-          echo "--- package.json (head) ---"
-          sed -n '1,80p' package.json || true
-          echo "--- end package.json (head) ---"
-
-          echo "Validating package.json JSON..."
-          python3 -m json.tool package.json >/dev/null
-          echo "package.json valid"
-
-          if [ -f package-lock.json ]; then
-            echo "package-lock.json present"
-            python3 -c "import json; print('lockfileVersion=', json.load(open('package-lock.json'))['lockfileVersion'])"
-          else
-            echo "package-lock.json MISSING"
-          fi
-
-      - name: Install dependencies
-        working-directory: backend
-        run: npm ci
-
-      - name: Smoke test (/health)
-        env:
-          PORT: '4000'
-          NODE_ENV: ${{ secrets.NODE_ENV }}
-          MONGO_DEV_URI: ${{ secrets.MONGO_DEV_URI }}
-          CLOUDINARY_NAME: ${{ secrets.CLOUDINARY_NAME }}
-          CLOUDINARY_KEY: ${{ secrets.CLOUDINARY_KEY }}
-          CLOUDINARY_SECRET: ${{ secrets.CLOUDINARY_SECRET }}
-        working-directory: backend
-        run: |
-          set -euo pipefail
-          npm start &
-          SERVER_PID=$!
-
-          for i in {1..30}; do
-            if curl -fsS "http://localhost:4000/health" | node -e "const fs=require('fs');const j=JSON.parse(fs.readFileSync(0,'utf8')); if(!j.ok) process.exit(1);"; then
-              kill $SERVER_PID
-              wait $SERVER_PID || true
-              exit 0
-            fi
-            sleep 1
-          done
-
-          echo "Backend healthcheck failed"
-          kill $SERVER_PID
-          wait $SERVER_PID || true
-          exit 1

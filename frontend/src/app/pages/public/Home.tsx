@@ -1,13 +1,17 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Wallet, Ticket, TrendingUp, Shield, ArrowRight, Zap } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { useAuth } from '../../contexts/AuthContext';
-import { mockEvents } from '../../data/mockData';
+import { useLoading } from '../../components/ui/loadingContext';
 import { ImageWithFallback } from '../../components/figma/ImageWithFallback';
+import { getEvents, type EventItem } from '../../services/events.service';
 
 export const Home: React.FC = () => {
-  const { connectWallet, isLoading } = useAuth();
+  const { connectWallet, isLoading, user } = useAuth();
+  const { show: showLoading, hide: hideLoading } = useLoading();
+  const [events, setEvents] = useState<EventItem[]>([]);
+  const [eventsLoading, setEventsLoading] = useState(true);
 
   const features = [
     {
@@ -33,6 +37,49 @@ export const Home: React.FC = () => {
     { number: '03', title: 'Purchase NFT Tickets', description: 'Buy tickets as unique NFTs' },
     { number: '04', title: 'Trade or Invest', description: 'Resell tickets or invest in events' },
   ];
+
+  useEffect(() => {
+    const fetchEvents = async () => {
+      try {
+        showLoading('Loading events...');
+        const data = await getEvents();
+        setEvents(data);
+      } catch {
+        setEvents([]);
+      } finally {
+        setEventsLoading(false);
+        hideLoading();
+      }
+    };
+
+    fetchEvents();
+  }, []);
+
+  const featuredEvents = useMemo(() => {
+    const now = Date.now();
+
+    return events
+      .filter((event) =>
+        ['funding', 'funded', 'ticketing', 'ongoing', 'completed'].includes(
+          event.status || '',
+        ),
+      )
+      .filter((event) => {
+        if (!event.startDate) return true;
+        const eventTime = new Date(event.startDate).getTime();
+        return !Number.isFinite(eventTime) || eventTime >= now;
+      })
+      .sort((left, right) => {
+        const leftTime = left.startDate
+          ? new Date(left.startDate).getTime()
+          : Number.MAX_SAFE_INTEGER;
+        const rightTime = right.startDate
+          ? new Date(right.startDate).getTime()
+          : Number.MAX_SAFE_INTEGER;
+        return leftTime - rightTime;
+      })
+      .slice(0, 4);
+  }, [events]);
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-950 via-purple-950/20 to-slate-950">
@@ -83,15 +130,17 @@ export const Home: React.FC = () => {
             </p>
 
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Button
-                size="lg"
-                onClick={connectWallet}
-                disabled={isLoading}
-                className="px-8 text-lg h-12"
-              >
-                <Wallet className="w-5 h-5 mr-2" />
-                {isLoading ? 'Connecting...' : 'Connect Wallet'}
-              </Button>
+              {(!user || user.role === 'public') && (
+                <Button
+                  size="lg"
+                  onClick={connectWallet}
+                  disabled={isLoading}
+                  className="px-8 text-lg h-12"
+                >
+                  <Wallet className="w-5 h-5 mr-2" />
+                  {isLoading ? 'Connecting...' : 'Connect Wallet'}
+                </Button>
+              )}
               <Link to="/explore">
                 <Button
                   size="lg"
@@ -165,34 +214,49 @@ export const Home: React.FC = () => {
           </div>
 
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {mockEvents.filter(e => e.status === 'approved').slice(0, 4).map((event) => (
+            {featuredEvents.map((event) => {
+              const eventId = event._id || event.id || '';
+              const coverImage = event.imageUrls?.[0] || '';
+              const eventDate = event.startDate ? new Date(event.startDate) : null;
+
+              return (
               <Link
-                key={event.id}
-                to={`/events/${event.id}`}
+                key={eventId}
+                to={`/events/${eventId}`}
                 className="group relative bg-gradient-to-br from-slate-900/80 to-slate-950 backdrop-blur-sm border border-slate-800/50 rounded-xl overflow-hidden hover:border-purple-500/50 transition-all duration-300"
               >
                 {/* Card Hover Glow */}
                 <div className="absolute inset-0 bg-gradient-to-t from-purple-600/0 via-transparent to-transparent group-hover:from-purple-600/10 transition-all duration-300 pointer-events-none" />
                 <div className="aspect-[4/3] overflow-hidden">
                   <ImageWithFallback
-                    src={event.image}
-                    alt={event.title}
+                    src={coverImage}
+                    alt={event.title || 'Event'}
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                   />
                 </div>
                 <div className="p-4">
                   <h3 className="font-semibold text-white mb-2 group-hover:text-purple-400 transition-colors">
-                    {event.title}
+                    {event.title || 'Untitled event'}
                   </h3>
-                  <p className="text-sm text-slate-400 mb-3 line-clamp-2">{event.description}</p>
+                  <p className="text-sm text-slate-400 mb-3 line-clamp-2">
+                    {event.description || 'No description available yet.'}
+                  </p>
                   <div className="flex items-center justify-between text-xs text-slate-500">
-                    <span>{event.location}</span>
-                    <span>{new Date(event.date).toLocaleDateString()}</span>
+                    <span>{event.venue?.address || 'Unknown location'}</span>
+                    <span>
+                      {eventDate ? eventDate.toLocaleDateString() : 'TBA'}
+                    </span>
                   </div>
                 </div>
               </Link>
-            ))}
+              );
+            })}
           </div>
+          {!eventsLoading && featuredEvents.length === 0 && (
+            <div className="mt-6 rounded-xl border border-slate-800 bg-slate-900/60 p-6 text-center text-slate-400">
+              No featured events available right now.
+            </div>
+          )}
         </div>
       </section>
 
@@ -250,15 +314,17 @@ export const Home: React.FC = () => {
           <p className="text-xl text-slate-300 mb-8">
             Join thousands of users experiencing the future of event ticketing
           </p>
-          <Button
-            size="lg"
-            onClick={connectWallet}
-            disabled={isLoading}
-            className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white px-12 text-lg h-14"
-          >
-            <Wallet className="w-5 h-5 mr-2" />
-            {isLoading ? 'Connecting...' : 'Connect Your Wallet'}
-          </Button>
+          {(!user || user.role === 'public') && (
+            <Button
+              size="lg"
+              onClick={connectWallet}
+              disabled={isLoading}
+              className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white px-12 text-lg h-14"
+            >
+              <Wallet className="w-5 h-5 mr-2" />
+              {isLoading ? 'Connecting...' : 'Connect Your Wallet'}
+            </Button>
+          )}
         </div>
       </section>
     </div>

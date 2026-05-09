@@ -87,6 +87,24 @@ class MarketplaceController {
     res.status(200).json({ success: true, data: result });
   });
 
+  confirmCreatedTransaction = asyncHandler(async (req, res) => {
+    const body = req.validated?.body || req.body;
+
+    const result =
+      await this.marketplaceService.confirmListingCreatedTransaction(body);
+
+    res.status(200).json({ success: true, data: result });
+  });
+
+  confirmCancelledTransaction = asyncHandler(async (req, res) => {
+    const body = req.validated?.body || req.body;
+
+    const result =
+      await this.marketplaceService.confirmListingCancelledTransaction(body);
+
+    res.status(200).json({ success: true, data: result });
+  });
+
   cancelListing = asyncHandler(async (req, res) => {
     // Giao hết việc ném lỗi 403, 404 cho Service. Controller chỉ việc nhận kết quả.
     const listing = await this.marketplaceService.cancelListing(

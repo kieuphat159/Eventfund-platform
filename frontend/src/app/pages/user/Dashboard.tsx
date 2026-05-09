@@ -3,9 +3,15 @@ import { Link } from 'react-router-dom';
 import { Calendar, Ticket, TrendingUp, Wallet, ArrowRight } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
-import { mockInvestments } from '../../data/mockData';
 import { useAuth } from '../../contexts/AuthContext';
+import { useLoading } from '../../components/ui/loadingContext';
 import { getUserTickets, type ApiTicket } from '../../services/tickets.service';
+import { getMyEvents, type EventItem } from '../../services/events.service';
+import {
+  getInvestments,
+  type InvestmentDetail,
+} from '../../services/investment.service';
+import { addIntegerValues, formatIntegerWithUnit } from '../../lib/utils';
 
 const ETH_ADDRESS_REGEX = /^0x[a-fA-F0-9]{40}$/;
 
@@ -26,27 +32,63 @@ type TicketActivity = {
 
 export const Dashboard: React.FC = () => {
   const { user } = useAuth();
+  const { show: showLoading, hide: hideLoading } = useLoading();
   const [tickets, setTickets] = useState<ApiTicket[]>([]);
+  const [myEvents, setMyEvents] = useState<EventItem[]>([]);
+  const [investments, setInvestments] = useState<InvestmentDetail[]>([]);
 
   const walletAddress = user?.walletAddress?.trim();
 
   useEffect(() => {
-    const fetchTickets = async () => {
+    const fetchDashboardData = async () => {
+      try {
+        showLoading('Loading dashboard...');
       if (!walletAddress || !ETH_ADDRESS_REGEX.test(walletAddress)) {
         setTickets([]);
+        setMyEvents([]);
+        setInvestments([]);
         return;
       }
 
-      try {
-        const data = await getUserTickets(walletAddress);
-        setTickets(data);
-      } catch {
-        setTickets([]);
+      const [ticketsResult, eventsResult, investmentsResult] =
+        await Promise.allSettled([
+          getUserTickets(walletAddress),
+          getMyEvents(walletAddress),
+          getInvestments(),
+        ]);
+
+      setTickets(
+        ticketsResult.status === 'fulfilled' ? ticketsResult.value : [],
+      );
+      setMyEvents(eventsResult.status === 'fulfilled' ? eventsResult.value : []);
+      setInvestments(
+        investmentsResult.status === 'fulfilled' ? investmentsResult.value : [],
+      );
+      } catch (err) {
+        console.error('Failed to load dashboard data:', err);
+      } finally {
+        hideLoading();
       }
     };
 
-    fetchTickets();
+    fetchDashboardData();
   }, [walletAddress]);
+
+  const activeInvestmentCount = useMemo(() => {
+    return investments.filter((investment) =>
+      ['funding', 'ticketing', 'ongoing', 'completed'].includes(
+        investment.eventId?.status || '',
+      ),
+    ).length;
+  }, [investments]);
+
+  const totalReturns = useMemo(() => {
+    return investments.reduce(
+      (sum, investment) =>
+        addIntegerValues(sum, investment.claimedReward, investment.pendingReward),
+      '0',
+    );
+  }, [investments]);
 
   const upcomingEvents = useMemo<UpcomingEvent[]>(() => {
     const now = Date.now();
@@ -128,7 +170,7 @@ export const Dashboard: React.FC = () => {
   const stats = [
     {
       title: 'My Events',
-      value: '3',
+      value: myEvents.length.toString(),
       icon: Calendar,
       color: 'from-purple-500 to-blue-500',
       link: '/app/events/my-events',
@@ -142,14 +184,14 @@ export const Dashboard: React.FC = () => {
     },
     {
       title: 'Active Investments',
-      value: mockInvestments.filter(i => i.status === 'active').length.toString(),
+      value: activeInvestmentCount.toString(),
       icon: TrendingUp,
       color: 'from-green-500 to-emerald-500',
       link: '/app/investments',
     },
     {
       title: 'Total Returns',
-      value: `${mockInvestments.reduce((sum, inv) => sum + inv.returns, 0).toFixed(2)} ETH`,
+      value: formatIntegerWithUnit(totalReturns, 'wei'),
       icon: Wallet,
       color: 'from-orange-500 to-red-500',
       link: '/app/wallet',

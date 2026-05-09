@@ -16,11 +16,15 @@ import {
 } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { useAuth } from "../../contexts/AuthContext";
-import { getUserTickets, type ApiTicket } from "../../services/tickets.service";
 import {
-  cancelListing,
+  claimTicketRefundOnChain,
+  getUserTickets,
+  type ApiTicket,
+} from "../../services/tickets.service";
+import {
+  cancelListingOnchain,
   getListings,
-  listTicket,
+  listTicketOnchain,
 } from "@/app/services/listings.service";
 import { QRCodeCanvas } from "qrcode.react";
 import { ethers, formatEther } from "ethers";
@@ -28,8 +32,20 @@ import { logger } from "../../lib/logger";
 
 const ETH_ADDRESS_REGEX = /^0x[a-fA-F0-9]{40}$/;
 
+const resolveTicketEventId = (ticket: ApiTicket): string | null => {
+  if (ticket.eventIdRaw) return ticket.eventIdRaw;
+  if (typeof ticket.eventId === "string") return ticket.eventId;
+  if (typeof ticket.eventId === "object" && ticket.eventId?._id) {
+    return ticket.eventId._id;
+  }
+  return null;
+};
+
 const buildQR = (ticket: ApiTicket) => {
-  return `http://localhost:3000/tickets/verify/${ticket.tokenId}`;
+  const tokenId = String(ticket.tokenId).trim();
+  const eventId = (resolveTicketEventId(ticket) || "").trim();
+
+  return `eft1:${tokenId}:${eventId}`;
 };
 
 const getTicketQrCanvasId = (ticket: ApiTicket) => {
@@ -42,8 +58,14 @@ const formatTicketType = (type?: string) => {
   return type.charAt(0).toUpperCase() + type.slice(1);
 };
 
+const isPositiveWeiInteger = (value: string) => {
+  const trimmed = value.trim();
+  return /^[0-9]+$/.test(trimmed) && BigInt(trimmed) > 0n;
+};
+
 export const MyTickets: React.FC = () => {
-  const { user } = useAuth();
+  const { user, connectWallet } = useAuth();
+  const { web3Auth } = useWeb3Auth();
   const [listingPopup, setListingPopup] = useState<{
     type: "success" | "error";
     message: string;
@@ -59,6 +81,7 @@ export const MyTickets: React.FC = () => {
   const [listingLoading, setListingLoading] = useState(false);
   const [cancelTicket, setCancelTicket] = useState<ApiTicket | null>(null);
   const [cancelLoading, setCancelLoading] = useState(false);
+  const [refundingTokenId, setRefundingTokenId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!listingPopup) return;
@@ -234,7 +257,7 @@ export const MyTickets: React.FC = () => {
           <CardContent className="p-6">
             <p className="text-sm text-slate-400 mb-1">Total Value</p>
             <p className="text-3xl font-bold text-white">
-              {formatEth(totalValue)} ETH
+              {formatWei(totalValue)} wei
             </p>
           </CardContent>
         </Card>
@@ -266,6 +289,9 @@ export const MyTickets: React.FC = () => {
               .filter(Boolean)
               .join(" - ") || "Unknown venue";
           const purchasePrice = ticket.originalPrice || "0";
+          const canClaimRefund =
+            ticket.status === "sold" &&
+            ["cancelled", "failed"].includes(event?.status || "");
 
           return (
             <Card
@@ -314,17 +340,20 @@ export const MyTickets: React.FC = () => {
                       Purchase Price
                     </span>
                     <span className="text-sm font-semibold text-purple-400">
-                      {formatEth(purchasePrice)} ETH
+                      {formatWei(purchasePrice)} wei
                     </span>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-2 gap-2">
                   <div className="hidden">
                     <QRCodeCanvas
                       id={getTicketQrCanvasId(ticket)}
                       value={buildQR(ticket)}
                       size={800}
+                      level="L"
+                      bgColor="#ffffff"
+                      fgColor="#111111"
                       includeMargin
                     />
                   </div>
@@ -352,34 +381,39 @@ export const MyTickets: React.FC = () => {
                   >
                     <Download className="w-4 h-4" />
                   </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="border-slate-700 hover:bg-slate-800"
-                  >
-                    <Share2 className="w-4 h-4" />
-                  </Button>
                 </div>
 
-                <Button
-                  className={`w-full mt-3 text-white ${
-                    ticket.isListed
-                      ? "bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700"
-                      : "bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700"
-                  }`}
-                  onClick={() => {
-                    if (ticket.isListed) {
-                      setCancelTicket(ticket);
-                      return;
-                    }
+                {canClaimRefund ? (
+                  <Button
+                    className="w-full mt-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white"
+                    disabled={refundingTokenId === ticket.tokenId}
+                    onClick={() => void handleClaimRefund(ticket)}
+                  >
+                    {refundingTokenId === ticket.tokenId
+                      ? "Claiming Refund..."
+                      : "Claim Refund"}
+                  </Button>
+                ) : (
+                  <Button
+                    className={`w-full mt-3 text-white ${
+                      ticket.isListed
+                        ? "bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700"
+                        : "bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700"
+                    }`}
+                    onClick={() => {
+                      if (ticket.isListed) {
+                        setCancelTicket(ticket);
+                        return;
+                      }
 
-                    setListingTicket(ticket);
-                    setListingError(null);
-                    setListingPrice("");
-                  }}
-                >
-                  {ticket.isListed ? "Cancel Listing" : "List on Marketplace"}
-                </Button>
+                      setListingTicket(ticket);
+                      setListingError(null);
+                      setListingPrice("");
+                    }}
+                  >
+                    {ticket.isListed ? "Cancel Listing" : "List on Marketplace"}
+                  </Button>
+                )}
               </CardContent>
             </Card>
           );
@@ -405,16 +439,25 @@ export const MyTickets: React.FC = () => {
       )}
       {selectedTicket && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-          <div className="bg-slate-900 p-6 rounded-xl border border-slate-700 text-center w-[300px]">
+          <div className="bg-slate-900 p-6 rounded-xl border border-slate-700 text-center w-[380px] max-w-[92vw]">
             <h3 className="text-white mb-4 font-semibold">
               Ticket #{selectedTicket.tokenId}
             </h3>
 
             <div className="flex justify-center items-center">
-              <QRCodeCanvas value={buildQR(selectedTicket)} size={200} />
+              <QRCodeCanvas
+                value={buildQR(selectedTicket)}
+                size={280}
+                level="L"
+                bgColor="#ffffff"
+                fgColor="#111111"
+                includeMargin
+              />
             </div>
 
-            <p className="text-slate-400 text-xs mt-3">Scan to verify ticket</p>
+            <p className="text-slate-400 text-xs mt-3">
+              Verifier sẽ quét mã này để xác thực vé
+            </p>
 
             <Button
               className="mt-4 w-full"
@@ -432,9 +475,24 @@ export const MyTickets: React.FC = () => {
               List Ticket #{listingTicket.tokenId}
             </h3>
 
+            {(() => {
+              const originalPriceWei = BigInt(listingTicket.originalPrice || "0");
+              const maxAllowedWei = (originalPriceWei * 150n) / 100n;
+              return (
+                <div className="mb-3 rounded-md border border-slate-700 bg-slate-800/60 p-3 text-xs text-slate-300">
+                  <p>Original price: {formatWei(originalPriceWei)} wei</p>
+                  <p>
+                    Max resale (150% cap): {formatWei(maxAllowedWei)} wei
+                  </p>
+                </div>
+              );
+            })()}
+
             <input
-              type="number"
-              placeholder="Enter price (ETH)"
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              placeholder="Enter price (wei)"
               value={listingPrice}
               onChange={(e) => setListingPrice(e.target.value)}
               className="w-full mb-4 p-2 rounded bg-slate-800 text-white border border-slate-700"
@@ -450,26 +508,59 @@ export const MyTickets: React.FC = () => {
                 onClick={async () => {
                   setListingError(null);
 
-                  if (!listingPrice || Number(listingPrice) <= 0) {
-                    setListingError("Price must be greater than 0");
+                  if (!isPositiveWeiInteger(listingPrice)) {
+                    setListingError("Price must be a positive integer in wei");
                     showListingPopup(
                       "error",
-                      "Listing failed: price must be greater than 0.",
+                      "Listing failed: price must be a positive integer in wei.",
                     );
                     return;
                   }
 
+                  const normalizedPriceWei = listingPrice.trim();
+                  const originalPriceWei = BigInt(listingTicket.originalPrice || "0");
+                  const maxAllowedWei = (originalPriceWei * 150n) / 100n;
+                  if (BigInt(normalizedPriceWei) > maxAllowedWei) {
+                    const message = `Price exceeds maximum allowed (${maxAllowedWei.toString()} wei)`;
+                    setListingError(message);
+                    showListingPopup("error", `Listing failed: ${message}`);
+                    return;
+                  }
+
                   try {
+                    if (!user?.walletAddress) {
+                      await connectWallet();
+                      showListingPopup(
+                        "success",
+                        "Wallet connected. Please click Confirm again.",
+                      );
+                      return;
+                    }
+
+                    if (!walletProvider?.request) {
+                      throw new Error(
+                        "Wallet provider is not ready. Please reconnect wallet and try again.",
+                      );
+                    }
+
+                    if (!listingTicket._id) {
+                      throw new Error("Ticket ID is missing");
+                    }
+
                     setListingLoading(true);
 
-                    await listTicket({
-                      ticketId: listingTicket._id,
-                      price: ethers.parseEther(listingPrice).toString(),
-                      expiresAt: new Date(
-                        Date.now() + 7 * 24 * 60 * 60 * 1000,
-                      ).toISOString(),
-                    });
-                    showListingPopup("success", "Ticket listed successfully.");
+                    const result = await listTicketOnchain(
+                      walletProvider,
+                      {
+                        ticketId: listingTicket._id,
+                        price: normalizedPriceWei,
+                      },
+                      user.walletAddress,
+                    );
+                    showListingPopup(
+                      "success",
+                      `Ticket listed on-chain. Tx: ${result.txHash}`,
+                    );
                     setTickets((prevTickets) =>
                       prevTickets.map((ticket) =>
                         ticket._id === listingTicket._id
@@ -519,6 +610,21 @@ export const MyTickets: React.FC = () => {
                 disabled={cancelLoading}
                 onClick={async () => {
                   try {
+                    if (!user?.walletAddress) {
+                      await connectWallet();
+                      showListingPopup(
+                        "success",
+                        "Wallet connected. Please click Confirm again.",
+                      );
+                      return;
+                    }
+
+                    if (!walletProvider?.request) {
+                      throw new Error(
+                        "Wallet provider is not ready. Please reconnect wallet and try again.",
+                      );
+                    }
+
                     setCancelLoading(true);
 
                     const listingId =
@@ -528,7 +634,11 @@ export const MyTickets: React.FC = () => {
                       throw new Error("Listing not found");
                     }
 
-                    await cancelListing(listingId);
+                    const result = await cancelListingOnchain(
+                      walletProvider,
+                      listingId,
+                      user.walletAddress,
+                    );
 
                     setTickets((prevTickets) =>
                       prevTickets.map((ticket) =>
@@ -539,7 +649,7 @@ export const MyTickets: React.FC = () => {
                     );
                     showListingPopup(
                       "success",
-                      `Cancelled listing for ticket #${cancelTicket.tokenId}.`,
+                      `Cancelled on-chain listing for ticket #${cancelTicket.tokenId}. Tx: ${result.txHash}`,
                     );
                     setCancelTicket(null);
                   } catch (err: any) {

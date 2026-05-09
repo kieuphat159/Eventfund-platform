@@ -1,5 +1,6 @@
 import { api } from "../lib/api";
 import { ApiError } from "../lib/api";
+import { Interface } from "ethers";
 
 // Ticket (embedded)
 export interface ApiTicket {
@@ -116,9 +117,75 @@ export interface ConfirmSoldData {
   ticket?: ApiTicket;
 }
 
+export interface ConfirmCreatedPayload {
+  txHash: string;
+  tokenId?: string;
+  sellerWallet?: string;
+}
+
+export interface ConfirmCreatedData {
+  synced: boolean;
+  alreadySynced: boolean;
+  txHash: string;
+  listing?: ApiListing;
+  ticket?: ApiTicket;
+}
+
+export interface ConfirmCancelledPayload {
+  txHash: string;
+  listingId?: string;
+  sellerWallet?: string;
+}
+
+export interface ConfirmCancelledData {
+  synced: boolean;
+  alreadySynced: boolean;
+  txHash: string;
+  listing?: ApiListing;
+  ticket?: ApiTicket;
+}
+
 export interface Eip1193Provider {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
 }
+
+const WEB3AUTH_TX_GAS_CAP = 16_000_000n;
+const MARKETPLACE_FALLBACK_GAS_LIMIT = 1_200_000n;
+const CONFIRM_TX_MAX_RETRIES = 15;
+const CONFIRM_TX_RETRY_DELAY_MS = 2000;
+
+const MARKETPLACE_READ_INTERFACE = new Interface([
+  "function ticketNFT() view returns (address)",
+  "function ticketContract() view returns (address)",
+  "function ticketAddress() view returns (address)",
+]);
+
+const ERC721_INTERFACE = new Interface([
+  "function isApprovedForAll(address owner,address operator) view returns (bool)",
+  "function getApproved(uint256 tokenId) view returns (address)",
+  "function setApprovalForAll(address operator,bool approved)",
+]);
+
+export type BuyListingProgressStage =
+  | "preparing_intent"
+  | "awaiting_wallet_confirmation"
+  | "waiting_onchain_confirmation"
+  | "syncing_backend"
+  | "completed";
+
+export type ListListingProgressStage =
+  | "preparing_intent"
+  | "awaiting_wallet_confirmation"
+  | "waiting_onchain_confirmation"
+  | "syncing_backend"
+  | "completed";
+
+export type CancelListingProgressStage =
+  | "preparing_intent"
+  | "awaiting_wallet_confirmation"
+  | "waiting_onchain_confirmation"
+  | "syncing_backend"
+  | "completed";
 
 export interface MarketplaceStats {
   totalListings: number;
@@ -139,6 +206,7 @@ export interface TransactionHistory {
   seller: string | null;
   time: string | null;
   tokenId: string;
+  txHash?: string | null;
 }
 
 export interface GetHistoryParams {
@@ -237,8 +305,8 @@ export async function listTicket(payload: CreateListingPayload) {
     throw new Error("Ticket ID is required");
   }
 
-  if (!payload.price || Number(payload.price) <= 0) {
-    throw new Error("Price must be greater than 0");
+  if (!payload.price || BigInt(payload.price) <= 0n) {
+    throw new Error("Price must be greater than 0 (wei)");
   }
 
   if (payload.expiresAt && isNaN(Date.parse(payload.expiresAt))) {
@@ -303,17 +371,94 @@ export async function createCancelListingIntent(listingId: string) {
   return res.data || null;
 }
 
-export async function confirmSoldTransaction(payload: ConfirmSoldPayload) {
+export async function confirmSoldTransaction(
+  payload: ConfirmSoldPayload,
+  maxRetries = CONFIRM_TX_MAX_RETRIES,
+  retryDelayMs = CONFIRM_TX_RETRY_DELAY_MS,
+) {
   if (!payload.txHash?.trim()) {
     throw new Error("Transaction hash is required");
   }
 
-  const res = await api.post<IntentResponse<ConfirmSoldData>>(
-    "/marketplace/listings/confirm-sold",
-    payload,
-  );
+  for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
+    try {
+      const res = await api.post<IntentResponse<ConfirmSoldData>>(
+        "/marketplace/listings/confirm-sold",
+        payload,
+      );
 
-  return res.data || null;
+      return res.data || null;
+    } catch (error: any) {
+      const isNotMined = error?.message?.includes("Transaction not mined yet");
+      if (isNotMined && attempt < maxRetries) {
+        await sleep(retryDelayMs);
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  return null;
+}
+
+export async function confirmCreatedTransaction(
+  payload: ConfirmCreatedPayload,
+  maxRetries = CONFIRM_TX_MAX_RETRIES,
+  retryDelayMs = CONFIRM_TX_RETRY_DELAY_MS,
+) {
+  if (!payload.txHash?.trim()) {
+    throw new Error("Transaction hash is required");
+  }
+
+  for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
+    try {
+      const res = await api.post<IntentResponse<ConfirmCreatedData>>(
+        "/marketplace/listings/confirm-created",
+        payload,
+      );
+
+      return res.data || null;
+    } catch (error: any) {
+      const isNotMined = error?.message?.includes("Transaction not mined yet");
+      if (isNotMined && attempt < maxRetries) {
+        await sleep(retryDelayMs);
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  return null;
+}
+
+export async function confirmCancelledTransaction(
+  payload: ConfirmCancelledPayload,
+  maxRetries = CONFIRM_TX_MAX_RETRIES,
+  retryDelayMs = CONFIRM_TX_RETRY_DELAY_MS,
+) {
+  if (!payload.txHash?.trim()) {
+    throw new Error("Transaction hash is required");
+  }
+
+  for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
+    try {
+      const res = await api.post<IntentResponse<ConfirmCancelledData>>(
+        "/marketplace/listings/confirm-cancelled",
+        payload,
+      );
+
+      return res.data || null;
+    } catch (error: any) {
+      const isNotMined = error?.message?.includes("Transaction not mined yet");
+      if (isNotMined && attempt < maxRetries) {
+        await sleep(retryDelayMs);
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  return null;
 }
 
 export async function getMarketplaceHistory(params: GetHistoryParams = {}) {
@@ -359,6 +504,233 @@ function toHexValue(decimalString: string): string {
   return `0x${value.toString(16)}`;
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function normalizeAddress(value?: string | null): string | null {
+  if (!value) return null;
+  return value.toLowerCase();
+}
+
+function parseHexToBigInt(value: unknown): bigint | null {
+  if (typeof value !== "string") return null;
+  try {
+    return BigInt(value);
+  } catch {
+    return null;
+  }
+}
+
+async function estimateMarketplaceGasLimit(
+  provider: Eip1193Provider,
+  tx: MarketplaceTransaction,
+  from: string,
+): Promise<string> {
+  const txRequest = {
+    from,
+    to: tx.to,
+    data: tx.data,
+    value: toHexValue(tx.value || "0"),
+  };
+
+  try {
+    const estimated = await provider.request({
+      method: "eth_estimateGas",
+      params: [txRequest],
+    });
+
+    const estimatedGas = parseHexToBigInt(estimated);
+    if (estimatedGas && estimatedGas > 0n) {
+      const padded = estimatedGas + estimatedGas / 5n + 15000n;
+      const clamped = padded > WEB3AUTH_TX_GAS_CAP ? WEB3AUTH_TX_GAS_CAP : padded;
+      return toHexValue(clamped.toString());
+    }
+  } catch (error) {
+    console.warn(
+      "[Marketplace] Failed to estimate gas via wallet provider. Falling back to safe default gas limit.",
+      error,
+    );
+  }
+
+  return toHexValue(
+    (
+      MARKETPLACE_FALLBACK_GAS_LIMIT > WEB3AUTH_TX_GAS_CAP
+        ? WEB3AUTH_TX_GAS_CAP
+        : MARKETPLACE_FALLBACK_GAS_LIMIT
+    ).toString(),
+  );
+}
+
+async function ethCall(
+  provider: Eip1193Provider,
+  to: string,
+  data: string,
+): Promise<string> {
+  const result = await provider.request({
+    method: "eth_call",
+    params: [{ to, data }, "latest"],
+  });
+  if (typeof result !== "string") {
+    throw new Error("Invalid eth_call response");
+  }
+  return result;
+}
+
+async function getTicketAddressFromMarketplace(
+  provider: Eip1193Provider,
+  marketplaceAddress: string,
+): Promise<string> {
+  const readFns = ["ticketNFT", "ticketContract", "ticketAddress"] as const;
+
+  for (const fn of readFns) {
+    try {
+      const data = MARKETPLACE_READ_INTERFACE.encodeFunctionData(fn, []);
+      const result = await ethCall(provider, marketplaceAddress, data);
+      const [addressValue] = MARKETPLACE_READ_INTERFACE.decodeFunctionResult(
+        fn,
+        result,
+      );
+      const normalized = normalizeAddress(String(addressValue));
+      if (normalized) {
+        return normalized;
+      }
+    } catch {
+      // Try next getter.
+    }
+  }
+
+  throw new Error(
+    "Unable to resolve Ticket contract address from Marketplace contract.",
+  );
+}
+
+async function isMarketplaceApprovedForToken(
+  provider: Eip1193Provider,
+  owner: string,
+  marketplaceAddress: string,
+  tokenId: string,
+): Promise<boolean> {
+  const ticketAddress = await getTicketAddressFromMarketplace(
+    provider,
+    marketplaceAddress,
+  );
+
+  const isApprovedForAllData = ERC721_INTERFACE.encodeFunctionData(
+    "isApprovedForAll",
+    [owner, marketplaceAddress],
+  );
+  const isApprovedForAllResult = await ethCall(
+    provider,
+    ticketAddress,
+    isApprovedForAllData,
+  );
+  const [isApprovedForAll] = ERC721_INTERFACE.decodeFunctionResult(
+    "isApprovedForAll",
+    isApprovedForAllResult,
+  );
+  if (Boolean(isApprovedForAll)) {
+    return true;
+  }
+
+  try {
+    const getApprovedData = ERC721_INTERFACE.encodeFunctionData("getApproved", [
+      BigInt(tokenId),
+    ]);
+    const getApprovedResult = await ethCall(
+      provider,
+      ticketAddress,
+      getApprovedData,
+    );
+    const [approvedAddress] = ERC721_INTERFACE.decodeFunctionResult(
+      "getApproved",
+      getApprovedResult,
+    );
+    return (
+      normalizeAddress(String(approvedAddress)) ===
+      normalizeAddress(marketplaceAddress)
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function waitForTransactionReceipt(
+  provider: Eip1193Provider,
+  txHash: string,
+  maxRetries = CONFIRM_TX_MAX_RETRIES,
+  retryDelayMs = CONFIRM_TX_RETRY_DELAY_MS,
+): Promise<void> {
+  for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
+    const receipt = (await provider.request({
+      method: "eth_getTransactionReceipt",
+      params: [txHash],
+    })) as { status?: string } | null;
+
+    if (receipt) {
+      const status = parseHexToBigInt(receipt.status);
+      if (status === 0n) {
+        throw new Error(`Transaction reverted on-chain: ${txHash}`);
+      }
+      return;
+    }
+
+    if (attempt < maxRetries) {
+      await sleep(retryDelayMs);
+    }
+  }
+
+  throw new Error(`Transaction not mined yet: ${txHash}`);
+}
+
+async function ensureMarketplaceApprovalForListing(
+  provider: Eip1193Provider,
+  sellerWallet: string,
+  marketplaceAddress: string,
+  tokenId: string,
+): Promise<string | null> {
+  const normalizedSeller = normalizeAddress(sellerWallet);
+  const normalizedMarketplace = normalizeAddress(marketplaceAddress);
+
+  if (!normalizedSeller || !normalizedMarketplace) {
+    throw new Error("Invalid seller or marketplace address for approval check");
+  }
+
+  const alreadyApproved = await isMarketplaceApprovedForToken(
+    provider,
+    normalizedSeller,
+    normalizedMarketplace,
+    tokenId,
+  );
+  if (alreadyApproved) {
+    return null;
+  }
+
+  const ticketAddress = await getTicketAddressFromMarketplace(
+    provider,
+    normalizedMarketplace,
+  );
+  const approvalData = ERC721_INTERFACE.encodeFunctionData("setApprovalForAll", [
+    normalizedMarketplace,
+    true,
+  ]);
+
+  const approvalTxHash = await sendMarketplaceTransaction(
+    provider,
+    {
+      to: ticketAddress,
+      data: approvalData,
+      value: "0",
+      chainId: "",
+      functionName: "setApprovalForAll",
+    },
+    normalizedSeller,
+  );
+
+  await waitForTransactionReceipt(provider, approvalTxHash);
+  return approvalTxHash;
+}
+
 export async function sendMarketplaceTransaction(
   provider: Eip1193Provider,
   transaction: MarketplaceTransaction,
@@ -372,6 +744,8 @@ export async function sendMarketplaceTransaction(
     throw new Error("Wallet address is required");
   }
 
+  const gas = await estimateMarketplaceGasLimit(provider, transaction, from);
+
   const txHash = (await provider.request({
     method: "eth_sendTransaction",
     params: [
@@ -380,6 +754,7 @@ export async function sendMarketplaceTransaction(
         to: transaction.to,
         data: transaction.data,
         value: toHexValue(transaction.value || "0"),
+        gas,
       },
     ],
   })) as string;
@@ -395,24 +770,99 @@ export async function buyListing(
   provider: Eip1193Provider,
   listingId: string,
   buyerWallet: string,
+  onProgress?: (stage: BuyListingProgressStage, txHash?: string) => void,
 ) {
+  onProgress?.("preparing_intent");
   const intent = await createBuyListingIntent(listingId);
   if (!intent?.transaction) {
     throw new Error("Unable to create buy intent");
   }
 
+  onProgress?.("awaiting_wallet_confirmation");
   const txHash = await sendMarketplaceTransaction(
     provider,
     intent.transaction,
     buyerWallet,
   );
 
+  onProgress?.("waiting_onchain_confirmation", txHash);
+  onProgress?.("syncing_backend", txHash);
   const confirmation = await confirmSoldTransaction({
     txHash,
     listingId: intent.listingId,
     buyerWallet,
   });
 
+  onProgress?.("completed", txHash);
+  return { txHash, intent, confirmation };
+}
+
+export async function listTicketOnchain(
+  provider: Eip1193Provider,
+  payload: ListingIntentPayload,
+  sellerWallet: string,
+  onProgress?: (stage: ListListingProgressStage, txHash?: string) => void,
+) {
+  onProgress?.("preparing_intent");
+  const intent = await createListingIntent(payload);
+  if (!intent?.transaction) {
+    throw new Error("Unable to create listing intent");
+  }
+
+  await ensureMarketplaceApprovalForListing(
+    provider,
+    sellerWallet,
+    intent.transaction.to,
+    intent.tokenId,
+  );
+
+  onProgress?.("awaiting_wallet_confirmation");
+  const txHash = await sendMarketplaceTransaction(
+    provider,
+    intent.transaction,
+    sellerWallet,
+  );
+
+  onProgress?.("waiting_onchain_confirmation", txHash);
+  onProgress?.("syncing_backend", txHash);
+  const confirmation = await confirmCreatedTransaction({
+    txHash,
+    tokenId: intent.tokenId,
+    sellerWallet,
+  });
+
+  onProgress?.("completed", txHash);
+  return { txHash, intent, confirmation };
+}
+
+export async function cancelListingOnchain(
+  provider: Eip1193Provider,
+  listingId: string,
+  sellerWallet: string,
+  onProgress?: (stage: CancelListingProgressStage, txHash?: string) => void,
+) {
+  onProgress?.("preparing_intent");
+  const intent = await createCancelListingIntent(listingId);
+  if (!intent?.transaction) {
+    throw new Error("Unable to create cancel intent");
+  }
+
+  onProgress?.("awaiting_wallet_confirmation");
+  const txHash = await sendMarketplaceTransaction(
+    provider,
+    intent.transaction,
+    sellerWallet,
+  );
+
+  onProgress?.("waiting_onchain_confirmation", txHash);
+  onProgress?.("syncing_backend", txHash);
+  const confirmation = await confirmCancelledTransaction({
+    txHash,
+    listingId: intent.listingId,
+    sellerWallet,
+  });
+
+  onProgress?.("completed", txHash);
   return { txHash, intent, confirmation };
 }
 
@@ -474,7 +924,11 @@ export const listingService = {
   buyIntent: createBuyListingIntent,
   cancelIntent: createCancelListingIntent,
   confirmSold: confirmSoldTransaction,
+  confirmCreated: confirmCreatedTransaction,
+  confirmCancelled: confirmCancelledTransaction,
   buy: buyListing,
+  listOnchain: listTicketOnchain,
+  cancelOnchain: cancelListingOnchain,
   sendTransaction: sendMarketplaceTransaction,
   cancel: cancelListing,
   getStats: getMarketplaceStats,

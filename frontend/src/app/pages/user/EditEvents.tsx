@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Calendar, MapPin, Upload, Plus, Trash2 } from "lucide-react";
+import { Calendar, MapPin, Upload, Plus } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -14,11 +14,26 @@ import { Textarea } from "../../components/ui/textarea";
 import { Label } from "../../components/ui/label";
 import { StatusBadge } from "../../components/StatusBadge";
 import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogAction,
+  AlertDialogCancel,
+} from "../../components/ui/alert-dialog";
+import {
+  completeEventWithWalletFallback,
   getEventById,
   updateEvent,
   type EventItem,
   type EventStatus,
+  type Eip1193Provider,
 } from "../../services/events.service";
+import { useAuth } from "../../contexts/AuthContext";
+import { useLoading } from "../../components/ui/loadingContext";
+import { useWeb3Auth } from "@web3auth/modal/react";
 
 type TicketTierForm = {
   name: string;
@@ -30,6 +45,13 @@ const OWNER_FORWARD_STATUS_OPTIONS: Partial<Record<EventStatus, EventStatus[]>> 
   ticketing: ["ongoing"],
   ongoing: ["completed"],
 };
+
+const OWNER_CANCELABLE_STATUSES = new Set<EventStatus>([
+  "draft",
+  "funding",
+  "funded",
+  "ticketing",
+]);
 
 const toDateInputValue = (iso?: string) => {
   if (!iso) return "";
@@ -50,9 +72,17 @@ const toTimeInputValue = (iso?: string) => {
   return `${hh}:${mm}`;
 };
 
+const isPositiveWeiInteger = (value: string) => {
+  const trimmed = value.trim();
+  return /^[0-9]+$/.test(trimmed) && BigInt(trimmed) > 0n;
+};
+
 export const EditEvent: React.FC = () => {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
+  const { user, connectWallet } = useAuth();
+  const { web3Auth } = useWeb3Auth();
+  const { show: showLoading, hide: hideLoading } = useLoading();
 
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -88,6 +118,8 @@ export const EditEvent: React.FC = () => {
 
         setLoading(true);
         setError("");
+        // show global loader
+        showLoading("Loading event...");
 
         const data = await getEventById(id);
         if (!data) {
@@ -125,6 +157,7 @@ export const EditEvent: React.FC = () => {
         );
       } finally {
         setLoading(false);
+        hideLoading();
       }
     };
 
@@ -138,11 +171,13 @@ export const EditEvent: React.FC = () => {
   }, [error, success]);
 
   const addTier = () => {
-    setTicketTiers((prev) => [...prev, { name: "", price: "", supply: "" }]);
+    // no-op in view-only mode
+    return;
   };
 
   const removeTier = (index: number) => {
-    setTicketTiers((prev) => prev.filter((_, i) => i !== index));
+    // no-op in view-only mode
+    return;
   };
 
   const updateTierField = (
@@ -166,6 +201,8 @@ export const EditEvent: React.FC = () => {
   const allowedForwardStatuses =
     OWNER_FORWARD_STATUS_OPTIONS[currentStatus] || [];
   const canOwnerAdvanceStatus = allowedForwardStatuses.length > 0;
+  const canOwnerCancel = OWNER_CANCELABLE_STATUSES.has(currentStatus);
+  const canOwnerChangeStatus = canOwnerAdvanceStatus || canOwnerCancel;
 
   const handleSubmit = async () => {
     try {
@@ -192,6 +229,7 @@ export const EditEvent: React.FC = () => {
         return;
       }
 
+      // Only allow updating title, description, location, category in this view
       if (!location.trim()) {
         setError("Please enter a location.");
         return;
@@ -215,23 +253,27 @@ export const EditEvent: React.FC = () => {
         return;
       }
 
-      const hasInvalidTier = normalizedTiers.some(
-        (tier) =>
-          Number.isNaN(tier.price) ||
-          Number.isNaN(tier.totalSupply) ||
-          tier.price < 0 ||
-          tier.totalSupply <= 0,
-      );
+      const updated = await updateEvent(id, updatePayload);
 
       if (hasInvalidTier) {
         setError("Ticket price or supply is invalid.");
         return;
       }
 
-      const totalTickets = normalizedTiers.reduce(
-        (sum, tier) => sum + tier.totalSupply,
-        0,
+      setSuccess("Event updated successfully");
+      setEventData(updated);
+      setStatus((updated.status as EventStatus) || status);
+    } catch (err: any) {
+      setError(
+        err?.response?.data?.message ||
+          err?.message ||
+          "Failed to update event",
       );
+    } finally {
+      setSubmitting(false);
+      hideLoading();
+    }
+  };
 
       const start = buildStartDate();
       if (!start) {
@@ -239,9 +281,7 @@ export const EditEvent: React.FC = () => {
         return;
       }
 
-      const end = eventData?.endDate
-        ? new Date(eventData.endDate)
-        : new Date(start.getTime() + 2 * 60 * 60 * 1000);
+      // confirmation handled by modal trigger; proceed when called
 
       const fundingDeadline = eventData?.fundingDeadline
         ? new Date(eventData.fundingDeadline)
@@ -252,7 +292,13 @@ export const EditEvent: React.FC = () => {
         return;
       }
 
-      setSubmitting(true);
+      const provider = web3Auth?.provider as Eip1193Provider | undefined;
+      if (!provider?.request) {
+        setError(
+          "Wallet provider is not ready. Please reconnect wallet and try again.",
+        );
+        return;
+      }
 
       const updated = await updateEvent(id, {
         title: title.trim(),
@@ -276,7 +322,8 @@ export const EditEvent: React.FC = () => {
 
       setSuccess("Event updated successfully.");
       setEventData(updated);
-      setStatus((updated.status as EventStatus) || status);
+      setStatus((updated.status as EventStatus) || "completed");
+      setSuccess("Event completed successfully");
     } catch (err: any) {
       setError(
         err?.response?.data?.message ||
@@ -284,13 +331,11 @@ export const EditEvent: React.FC = () => {
           "An error occurred while updating the event.",
       );
     } finally {
-      setSubmitting(false);
+      setCompleting(false);
+      hideLoading();
     }
   };
 
-  if (loading) {
-    return <div className="text-white">Loading event...</div>;
-  }
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -328,8 +373,8 @@ export const EditEvent: React.FC = () => {
         <CardHeader>
           <CardTitle className="text-white">Event Details</CardTitle>
           <CardDescription className="text-slate-400">
-            Admin reviews the early workflow. After ticketing starts, you can
-            only move status forward.
+            Organizer can cancel eligible events here, and can still move the
+            status forward once ticketing has started.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -340,8 +385,10 @@ export const EditEvent: React.FC = () => {
                   Current workflow status
                 </p>
                 <p className="text-xs text-slate-400">
-                  Admin controls review states up to ticketing. You can only
-                  advance from ticketing to ongoing, then ongoing to completed.
+                  You can cancel events in `draft`, `funding`, `funded`, or
+                  `ticketing`. Once funding is settled, you can move a funded
+                  event to `ticketing`, then advance to `ongoing` and
+                  `completed`.
                 </p>
               </div>
               <StatusBadge status={currentStatus as string} />
@@ -376,13 +423,13 @@ export const EditEvent: React.FC = () => {
 
           <div className="grid gap-4 md:grid-cols-2">
             <div>
-              <Label htmlFor="date" className="text-white">
-                Event Date *
+              <Label htmlFor="start-date" className="text-white">
+                Event Start Date
               </Label>
               <div className="relative mt-1.5">
                 <Calendar className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
                 <Input
-                  id="date"
+                  id="start-date"
                   type="date"
                   value={date}
                   onChange={(e) => setDate(e.target.value)}
@@ -392,11 +439,11 @@ export const EditEvent: React.FC = () => {
             </div>
 
             <div>
-              <Label htmlFor="time" className="text-white">
-                Event Time *
+              <Label htmlFor="start-time" className="text-white">
+                Event Start Time
               </Label>
               <Input
-                id="time"
+                id="start-time"
                 type="time"
                 value={time}
                 onChange={(e) => setTime(e.target.value)}
@@ -404,6 +451,79 @@ export const EditEvent: React.FC = () => {
               />
             </div>
           </div>
+
+          <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              <Label htmlFor="end-date" className="text-white">
+                Event End Date
+              </Label>
+              <Input
+                id="end-date"
+                type="date"
+                value={toDateInputValue(eventData?.endDate)}
+                disabled
+                className="mt-1.5 bg-slate-800 border-slate-700 text-white"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="end-time" className="text-white">
+                Event End Time
+              </Label>
+              <Input
+                id="end-time"
+                type="time"
+                value={toTimeInputValue(eventData?.endDate)}
+                disabled
+                className="mt-1.5 bg-slate-800 border-slate-700 text-white"
+              />
+            </div>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              <Label htmlFor="ticketing-start" className="text-white">
+                Ticketing Start Date
+              </Label>
+              <Input
+                id="ticketing-start"
+                type="date"
+                value={toDateInputValue(eventData?.ticketingStartAt)}
+                disabled
+                className="mt-1.5 bg-slate-800 border-slate-700 text-white"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="ticketing-end" className="text-white">
+                Ticketing End Date
+              </Label>
+              <Input
+                id="ticketing-end"
+                type="date"
+                value={toDateInputValue(eventData?.ticketingEndAt)}
+                disabled
+                className="mt-1.5 bg-slate-800 border-slate-700 text-white"
+              />
+            </div>
+          </div>
+
+          {eventData?.investmentEnabled !== false ? (
+            <div className="grid md:grid-cols-1 gap-4">
+              <div>
+                <Label htmlFor="funding-deadline" className="text-white">
+                  Funding Deadline
+                </Label>
+                <Input
+                  id="funding-deadline"
+                  type="date"
+                  value={toDateInputValue(eventData?.fundingDeadline)}
+                  disabled
+                  className="mt-1.5 bg-slate-800 border-slate-700 text-white"
+                />
+              </div>
+            </div>
+          ) : null}
 
           <div>
             <Label htmlFor="location" className="text-white">
@@ -458,12 +578,63 @@ export const EditEvent: React.FC = () => {
                   {nextStatus}
                 </option>
               ))}
+              {canOwnerCancel && currentStatus !== "cancelled" && (
+                <option value="cancelled">cancelled</option>
+              )}
             </select>
             <p className="mt-1 text-xs text-slate-500">
               {canOwnerAdvanceStatus
                 ? "You can only advance to the next workflow step, not move backward."
                 : "You cannot change the workflow status at this stage."}
             </p>
+            {status === "cancelled" && currentStatus !== "cancelled" && (
+              <div className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+                Event will be submitted according to the existing cancellation flow of the backend. If the event
+                is in `ticketing` status, the system will process it according to the corresponding ticketing cancellation
+                branch.
+              </div>
+            )}
+            {(currentStatus === "ticketing" || currentStatus === "ongoing") && (
+              <div className="mt-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+                <p>
+                  When eligible, the organizer's wallet can mark the event as completed to trigger
+                  on-chain completion and release revenue.
+                </p>
+                <>
+                  <Button
+                    type="button"
+                    onClick={() => setShowConfirmOpen(true)}
+                    disabled={submitting || completing}
+                    className="mt-3 bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50"
+                  >
+                    {completing ? "Completing..." : "Mark as Completed"}
+                  </Button>
+
+                  {/* Confirmation modal */}
+                  <AlertDialog open={showConfirmOpen} onOpenChange={setShowConfirmOpen}>
+                    <AlertDialogContent className="max-w-md border-slate-700 bg-slate-900">
+                      <AlertDialogHeader>
+                        <AlertDialogTitle className="text-white">Confirm Completion</AlertDialogTitle>
+                        <AlertDialogDescription className="text-slate-400">
+                          Are you sure you want to complete this event? The system will trigger on-chain completion and release revenue.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                          onClick={async () => {
+                            setShowConfirmOpen(false);
+                            await handleCompleteEvent();
+                          }}
+                        >
+                          Confirm
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                </>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -551,9 +722,10 @@ export const EditEvent: React.FC = () => {
                   </Label>
                   <Input
                     id={`tier-price-${index}`}
-                    type="number"
-                    step="0.01"
-                    placeholder="0.00"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    placeholder="e.g., 1000000000000000"
                     value={tier.price}
                     onChange={(e) => updateTierField(index, "price", e.target.value)}
                     className="mt-1.5 border-slate-700 bg-slate-800 text-white"
@@ -595,7 +767,7 @@ export const EditEvent: React.FC = () => {
               <Input
                 id="funding-goal"
                 value={fundingGoal}
-                onChange={(e) => setFundingGoal(e.target.value)}
+                disabled
                 placeholder="5000000000000000000"
                 className="mt-1.5 border-slate-700 bg-slate-800 text-white"
               />
@@ -608,7 +780,7 @@ export const EditEvent: React.FC = () => {
               <Input
                 id="min-stake-required"
                 value={minStakeRequired}
-                onChange={(e) => setMinStakeRequired(e.target.value)}
+                disabled
                 placeholder="1000000000000000000"
                 className="mt-1.5 border-slate-700 bg-slate-800 text-white"
               />

@@ -1,5 +1,5 @@
-import asyncHandler from '../utils/asyncHandler.js';
-import * as ticketsService from '../services/tickets/tickets.service.js';
+import asyncHandler from "../utils/asyncHandler.js";
+import * as ticketsService from "../services/tickets/tickets.service.js";
 
 /**
  * TicketsController - Handles ticket management endpoints
@@ -36,7 +36,7 @@ class TicketsController {
 
     const intent = await this.ticketsService.createPurchaseIntent(
       body,
-      req.user.walletAddress
+      req.user.walletAddress,
     );
 
     res.status(200).json({
@@ -56,11 +56,37 @@ class TicketsController {
     });
   });
 
+  createRefundIntent = asyncHandler(async (req, res) => {
+    const intent = await this.ticketsService.createRefundIntent(
+      req.params.tokenId,
+      req.user.walletAddress,
+    );
+
+    res.status(200).json({
+      success: true,
+      data: intent,
+    });
+  });
+
+  confirmRefundTransaction = asyncHandler(async (req, res) => {
+    const body = req.validated?.body || req.body;
+
+    const result = await this.ticketsService.confirmRefundTransaction(body);
+
+    res.status(200).json({
+      success: true,
+      data: result,
+    });
+  });
+
   getUserTickets = asyncHandler(async (req, res) => {
     const { walletAddress } = req.params;
     const query = req.query;
 
-    const result = await this.ticketsService.getUserTickets(walletAddress, query);
+    const result = await this.ticketsService.getUserTickets(
+      walletAddress,
+      query,
+    );
 
     res.status(200).json({
       success: true,
@@ -69,13 +95,14 @@ class TicketsController {
   });
 
   verifyTicket = asyncHandler(async (req, res) => {
-    const { tokenId, walletAddress } = req.validated?.body || req.body;
+    const { tokenId, eventId, walletAddress } = req.validated?.body || req.body;
 
     // NEW: truyền thêm verifier đang đăng nhập
     const result = await this.ticketsService.verifyTicket(
       tokenId,
+      eventId,
       walletAddress,
-      req.user.walletAddress
+      req.user.walletAddress,
     );
 
     res.status(200).json({
@@ -88,7 +115,10 @@ class TicketsController {
     const { tokenId } = req.params;
     const verifierAddress = req.user.walletAddress;
 
-    const ticket = await this.ticketsService.markTicketAsUsed(tokenId, verifierAddress);
+    const ticket = await this.ticketsService.markTicketAsUsed(
+      tokenId,
+      verifierAddress,
+    );
 
     res.status(200).json({
       success: true,
@@ -101,7 +131,7 @@ class TicketsController {
 
     const intent = await this.ticketsService.createUseTicketIntent(
       tokenId,
-      req.user.walletAddress
+      req.user.walletAddress,
     );
 
     res.status(200).json({

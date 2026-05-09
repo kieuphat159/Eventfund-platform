@@ -1,20 +1,22 @@
-import React, { useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Calendar, MapPin, Upload, Plus, Trash2 } from 'lucide-react';
+import React, { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { MapPin, Upload, Plus, Trash2, Info, AlertTriangle, Clock } from "lucide-react";
+import { useWeb3Auth } from "@web3auth/modal/react";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from '../../components/ui/card';
-import { Button } from '../../components/ui/button';
-import { Input } from '../../components/ui/input';
-import { Textarea } from '../../components/ui/textarea';
-import { Label } from '../../components/ui/label';
-import {
-  createEvent,
-} from '../../services/events.service';
+} from "../../components/ui/card";
+import { Button } from "../../components/ui/button";
+import { Input } from "../../components/ui/input";
+import { Textarea } from "../../components/ui/textarea";
+import { Label } from "../../components/ui/label";
+import Loading from "../../components/ui/loading";
+import { createEventOnChain } from "../../services/events.service";
+import { useAuth } from "../../contexts/AuthContext";
+import { cn } from "@/app/lib/utils";
 
 type TicketTierForm = {
   name: string;
@@ -25,51 +27,92 @@ type TicketTierForm = {
 type FieldErrors = Record<string, string>;
 
 const createEmptyTier = (): TicketTierForm => ({
-  name: '',
-  price: '',
-  supply: '',
+  name: "",
+  price: "",
+  supply: "",
 });
 
 export const CreateEvent: React.FC = () => {
   const navigate = useNavigate();
   const submitInFlightRef = useRef(false);
+  const { web3Auth } = useWeb3Auth();
+  const { user, connectWallet } = useAuth();
 
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [date, setDate] = useState('');
-  const [time, setTime] = useState('');
-  const [location, setLocation] = useState('');
-  const [category, setCategory] = useState('');
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [startAt, setStartAt] = useState("");
+  const [endAt, setEndAt] = useState("");
+  const [fundingDeadlineAt, setFundingDeadlineAt] = useState("");
+  const [ticketingStartAt, setTicketingStartAt] = useState("");
+  const [ticketingEndAt, setTicketingEndAt] = useState("");
+  const [location, setLocation] = useState("");
+  const [category, setCategory] = useState("");
 
-  const [fundingGoal, setFundingGoal] = useState('');
-  const [minStakeRequired, setMinStakeRequired] = useState('');
-  const [organizerStake, setOrganizerStake] = useState('');
+  const [fundingGoal, setFundingGoal] = useState("");
+  const [minStakeRequired, setMinStakeRequired] = useState("");
+  const [minInvestmentAmount, setMinInvestmentAmount] = useState("");
   const [investmentEnabled, setInvestmentEnabled] = useState(true);
 
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
+  // Fake submit/loading helpers for long on-chain create flows (always enabled in dev)
+  const [fakeSubmitEnabled, setFakeSubmitEnabled] = useState(true);
+  const [fakeSubmitMs, setFakeSubmitMs] = useState<number>(3000);
+  const [fakeStepIndex, setFakeStepIndex] = useState(0);
+  const [fakeTxHash, setFakeTxHash] = useState<string | null>(null);
+  const [fakeStepMessage, setFakeStepMessage] = useState<string | undefined>(
+    undefined,
+  );
+
   const [ticketTiers, setTicketTiers] = useState<TicketTierForm[]>([
-    { name: 'General', price: '', supply: '' },
+    { name: "General", price: "", supply: "" },
   ]);
 
   const resetForm = () => {
-    setTitle('');
-    setDescription('');
-    setDate('');
-    setTime('');
-    setLocation('');
-    setCategory('');
-    setFundingGoal('');
-    setMinStakeRequired('');
-    setOrganizerStake('');
+    setTitle("");
+    setDescription("");
+    setStartAt("");
+    setEndAt("");
+    setFundingDeadlineAt("");
+    setTicketingStartAt("");
+    setTicketingEndAt("");
+    setLocation("");
+    setCategory("");
+    setFundingGoal("");
+    setMinStakeRequired("");
+    setMinInvestmentAmount("");
     setInvestmentEnabled(true);
-    setTicketTiers([{ name: 'General', price: '', supply: '' }]);
+    setTicketTiers([{ name: "General", price: "", supply: "" }]);
     setFieldErrors({});
-    setError('');
-    setSuccess('');
+    setError("");
+    setSuccess("");
+  };
+
+  const AlertBox: React.FC<{
+    variant?: "info" | "warning" | "muted";
+    title?: string;
+    children?: React.ReactNode;
+  }> = ({ variant = "info", title, children }) => {
+    const base = "w-full rounded-md p-3 flex gap-3 items-start";
+    const styles: Record<string, string> = {
+      info: "bg-slate-800 border border-slate-700 text-slate-100",
+      warning: "bg-amber-900/10 border border-amber-600 text-amber-200",
+      muted: "bg-slate-900 border border-slate-800 text-slate-300",
+    };
+    const Icon = variant === "warning" ? AlertTriangle : Info;
+
+    return (
+      <div className={`${base} ${styles[variant]}`}>
+        <Icon className="w-5 h-5 mt-1 text-current" />
+        <div className="flex-1 text-sm">
+          {title && <div className="font-semibold text-white mb-1">{title}</div>}
+          <div className="text-sm">{children}</div>
+        </div>
+      </div>
+    );
   };
 
   const addTier = () => {
@@ -89,8 +132,8 @@ export const CreateEvent: React.FC = () => {
 
   const updateTier = (
     index: number,
-    field: 'name' | 'price' | 'supply',
-    value: string
+    field: "name" | "price" | "supply",
+    value: string,
   ) => {
     setTicketTiers((prev) => {
       const updated = [...prev];
@@ -106,108 +149,200 @@ export const CreateEvent: React.FC = () => {
     });
   };
 
+  // Calculate total ticket value (price in wei)
+  const calculateTotalTicketValue = () => {
+    return ticketTiers.reduce((total, tier) => {
+      try {
+        const price = BigInt(tier.price || "0");
+        const supply = BigInt(tier.supply || "0");
+        return total + price * supply;
+      } catch {
+        return total;
+      }
+    }, 0n);
+  };
+
+  // Creation fee is fixed at 5% of total ticket value for all event modes.
+  const calculateCreationFeeWei = () => {
+    const totalValue = calculateTotalTicketValue();
+    if (totalValue <= 0n) {
+      return "0";
+    }
+
+    const minStakeInWei = totalValue / 20n; // 5% = divide by 20
+    if (minStakeInWei <= 0n) {
+      return "1";
+    }
+
+    return minStakeInWei.toString();
+  };
+
+  // Always keep creation fee synced with ticket tiers.
+  useEffect(() => {
+    setMinStakeRequired(calculateCreationFeeWei());
+  }, [ticketTiers]);
+
   const buildStartDate = () => {
-    if (!date || !time) return null;
-    return new Date(`${date}T${time}`);
+    return parseOptionalDateTime(startAt);
+  };
+
+  const buildEndDate = () => {
+    return parseOptionalDateTime(endAt);
+  };
+
+  const buildFundingDeadline = () => {
+    return parseOptionalDateTime(fundingDeadlineAt);
+  };
+
+  const parseOptionalDateTime = (value: string) => {
+    if (!value) return null;
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed;
+  };
+
+  const isPositiveWeiInteger = (value: string) => {
+    const trimmed = value.trim();
+    return /^[0-9]+$/.test(trimmed) && BigInt(trimmed) > 0n;
   };
 
   const getInputClass = (hasError?: boolean) =>
     `mt-1.5 bg-slate-800 text-white ${
       hasError
-        ? 'border-red-500 focus-visible:ring-red-500'
-        : 'border-slate-700'
+        ? "border-red-500 focus-visible:ring-red-500"
+        : "border-slate-700"
     }`;
 
   const validateForm = () => {
     const errors: FieldErrors = {};
 
     if (!title.trim()) {
-      errors.title = 'Event title is required.';
+      errors.title = "Event title is required.";
     }
 
-    if (!date) {
-      errors.date = 'Event date is required.';
+    if (!startAt) {
+      errors.startAt = "Event start date and time are required.";
     }
 
-    if (!time) {
-      errors.time = 'Event time is required.';
+    if (!endAt) {
+      errors.endAt = "Event end date and time are required.";
     }
 
     const start = buildStartDate();
-    if (date && time && (!start || Number.isNaN(start.getTime()))) {
-      errors.dateTime = 'Event date and time are invalid.';
+    if (startAt && (!start || Number.isNaN(start.getTime()))) {
+      errors.startAt = "Event start date and time are invalid.";
     }
 
-    if (!investmentEnabled) {
-      errors.investmentEnabled =
-        'Investment must be enabled for the on-chain event funding flow.';
+    const end = buildEndDate();
+    if (endAt && (!end || Number.isNaN(end.getTime()))) {
+      errors.endAt = "Event end date and time are invalid.";
     }
 
-    if (!fundingGoal.trim()) {
-      errors.fundingGoal = 'Funding goal is required.';
-    } else if (!/^\d+$/.test(fundingGoal.trim()) || BigInt(fundingGoal.trim()) <= 0n) {
-      errors.fundingGoal = 'Funding goal must be a positive integer string.';
+    if (start && end && end <= start) {
+      errors.endAt = "Event end must be after the start time.";
     }
 
-    if (
-      minStakeRequired.trim() &&
-      (!/^\d+$/.test(minStakeRequired.trim()) || BigInt(minStakeRequired.trim()) <= 0n)
-    ) {
-      errors.minStakeRequired =
-        'Min stake required must be a positive integer string.';
-    }
+    if (investmentEnabled) {
+      if (!fundingGoal.trim()) {
+        errors.fundingGoal = "Funding goal is required.";
+      } else if (
+        !/^\d+$/.test(fundingGoal.trim()) ||
+        BigInt(fundingGoal.trim()) <= 0n
+      ) {
+        errors.fundingGoal = "Funding goal must be a positive integer string.";
+      }
 
-    if (
-      organizerStake.trim() &&
-      (!/^\d+$/.test(organizerStake.trim()) || BigInt(organizerStake.trim()) <= 0n)
-    ) {
-      errors.organizerStake =
-        'Organizer stake must be a positive integer string.';
-    }
-
-    if (
-      minStakeRequired.trim() &&
-      organizerStake.trim() &&
-      /^\d+$/.test(minStakeRequired.trim()) &&
-      /^\d+$/.test(organizerStake.trim()) &&
-      BigInt(organizerStake.trim()) < BigInt(minStakeRequired.trim())
-    ) {
-      errors.organizerStake = 'Organizer stake must be >= min stake required.';
-    }
-
-    if (!investmentEnabled) {
-      errors.investmentEnabled = 'Enable investment before creating event.';
-    }
-
-    if (!description.trim()) {
-      errors.description = 'Event description is required.';
-    }
-
-    if (!location.trim()) {
-      errors.location = 'Location is required.';
-    }
-
-    if (!category) {
-      errors.category = 'Category is required.';
-    }
-
-    if (start) {
-      const fundingDeadline = new Date(
-        start.getTime() - 7 * 24 * 60 * 60 * 1000
-      );
-
-      if (fundingDeadline <= new Date()) {
-        errors.fundingDeadline =
-          'The event must be scheduled at least 7 days from now to create a valid funding deadline.';
+      if (!minInvestmentAmount.trim()) {
+        errors.minInvestmentAmount = "Minimum investment amount is required.";
+      } else if (!isPositiveWeiInteger(minInvestmentAmount)) {
+        errors.minInvestmentAmount =
+          "Minimum investment amount must be a positive integer string.";
       }
     }
 
+    if (!isPositiveWeiInteger(minStakeRequired || "0")) {
+      errors.minStakeRequired =
+        "Creation fee must be greater than 0. Please add ticket tiers with valid price and supply.";
+    }
+
+    if (!description.trim()) {
+      errors.description = "Event description is required.";
+    }
+
+    if (!location.trim()) {
+      errors.location = "Location is required.";
+    }
+
+    if (!category) {
+      errors.category = "Category is required.";
+    }
+
+    if (investmentEnabled) {
+      if (!fundingDeadlineAt) {
+        errors.fundingDeadlineAt =
+          "Funding deadline date and time are required.";
+      }
+
+      const fundingDeadline = buildFundingDeadline();
+      if (
+        fundingDeadlineAt &&
+        (!fundingDeadline || Number.isNaN(fundingDeadline.getTime()))
+      ) {
+        errors.fundingDeadlineAt =
+          "Funding deadline date and time are invalid.";
+      }
+
+      if (start && fundingDeadline && fundingDeadline >= start) {
+        errors.fundingDeadlineAt =
+          "Funding deadline must be after the current time and before the event start time.";
+      }
+
+      if (fundingDeadline && fundingDeadline <= new Date()) {
+        errors.fundingDeadlineAt =
+          "Funding deadline must be after the current time and before the event start time.";
+      }
+    }
+
+    const ticketingStart = parseOptionalDateTime(ticketingStartAt);
+    const ticketingEnd = parseOptionalDateTime(ticketingEndAt);
+
+    if (ticketingStartAt && !ticketingStart) {
+      errors.ticketingStartAt = "Ticketing start time is invalid.";
+    }
+
+    if (ticketingEndAt && !ticketingEnd) {
+      errors.ticketingEndAt = "Ticketing end time is invalid.";
+    }
+
+    if (ticketingEnd && !ticketingStartAt) {
+      errors.ticketingStartAt =
+        "Ticketing start time is required when ticketing end time is set.";
+    }
+
+    if (investmentEnabled && ticketingStart) {
+      const fundingDeadline = buildFundingDeadline();
+      if (fundingDeadline && ticketingStart <= fundingDeadline) {
+        errors.ticketingStartAt =
+          "Ticketing start time must be after funding deadline.";
+      }
+    }
+
+    if (ticketingStart && ticketingEnd && ticketingEnd <= ticketingStart) {
+      errors.ticketingEndAt =
+        "Ticketing end time must be after ticketing start time.";
+    }
+
+    if (start && ticketingEnd && ticketingEnd >= start) {
+      errors.ticketingEndAt =
+        "Ticketing end time must be before event start time.";
+    }
+
     const filledTiers = ticketTiers.filter(
-      (tier) => tier.name.trim() || tier.price.trim() || tier.supply.trim()
+      (tier) => tier.name.trim() || tier.price.trim() || tier.supply.trim(),
     );
 
     if (!filledTiers.length) {
-      errors.ticketTiers = 'At least one ticket tier is required.';
+      errors.ticketTiers = "At least one ticket tier is required.";
     }
 
     ticketTiers.forEach((tier, index) => {
@@ -217,9 +352,9 @@ export const CreateEvent: React.FC = () => {
 
       if (!hasAnyValue) {
         if (index === 0) {
-          errors[`tier-${index}-name`] = 'Tier name is required.';
-          errors[`tier-${index}-price`] = 'Tier price is required.';
-          errors[`tier-${index}-supply`] = 'Tier supply is required.';
+          errors[`tier-${index}-name`] = "Tier name is required.";
+          errors[`tier-${index}-price`] = "Tier price is required.";
+          errors[`tier-${index}-supply`] = "Tier supply is required.";
         }
         return;
       }
@@ -228,23 +363,25 @@ export const CreateEvent: React.FC = () => {
         errors[`tier-${index}-name`] = `Tier ${tierNumber} name is required.`;
       }
 
-      if (tier.price.trim() === '') {
+      if (tier.price.trim() === "") {
         errors[`tier-${index}-price`] = `Tier ${tierNumber} price is required.`;
       } else if (
-        Number.isNaN(Number(tier.price)) ||
-        !Number.isInteger(Number(tier.price)) ||
-        Number(tier.price) <= 0
+        !/^\d+$/.test(tier.price.trim()) ||
+        BigInt(tier.price.trim()) <= 0n
       ) {
-        errors[`tier-${index}-price`] = `Tier ${tierNumber} price must be a positive integer.`;
+        errors[`tier-${index}-price`] =
+          `Tier ${tierNumber} price must be a positive integer (in wei).`;
       }
 
-      if (tier.supply.trim() === '') {
-        errors[`tier-${index}-supply`] = `Tier ${tierNumber} total supply is required.`;
+      if (tier.supply.trim() === "") {
+        errors[`tier-${index}-supply`] =
+          `Tier ${tierNumber} total supply is required.`;
       } else if (
         Number.isNaN(Number(tier.supply)) ||
         Number(tier.supply) <= 0
       ) {
-        errors[`tier-${index}-supply`] = `Tier ${tierNumber} total supply must be greater than 0.`;
+        errors[`tier-${index}-supply`] =
+          `Tier ${tierNumber} total supply must be greater than 0.`;
       }
     });
 
@@ -259,8 +396,8 @@ export const CreateEvent: React.FC = () => {
     submitInFlightRef.current = true;
 
     try {
-      setError('');
-      setSuccess('');
+      setError("");
+      setSuccess("");
       setFieldErrors({});
 
       const errors = validateForm();
@@ -273,62 +410,142 @@ export const CreateEvent: React.FC = () => {
 
       const start = buildStartDate();
       if (!start || Number.isNaN(start.getTime())) {
-        setError('Event date and time are invalid.');
+        setError("Event date and time are invalid.");
         return;
       }
 
-      const end = new Date(start.getTime() + 2 * 60 * 60 * 1000);
-      const fundingDeadline = new Date(
-        start.getTime() - 7 * 24 * 60 * 60 * 1000
-      );
+      const end = buildEndDate();
+      if (!end || Number.isNaN(end.getTime())) {
+        setError("Event end date and time are invalid.");
+        return;
+      }
+
+      if (end <= start) {
+        setError("Event end must be after the start time.");
+        return;
+      }
+
+      const fundingDeadline = buildFundingDeadline();
+      if (investmentEnabled) {
+        if (!fundingDeadline || Number.isNaN(fundingDeadline.getTime())) {
+          setError("Funding deadline date and time are invalid.");
+          return;
+        }
+
+        if (fundingDeadline <= new Date()) {
+          setError(
+            "Funding deadline must be after the current time and before the event start time.",
+          );
+          return;
+        }
+
+        if (fundingDeadline >= start) {
+          setError(
+            "Funding deadline must be after the current time and before the event start time.",
+          );
+          return;
+        }
+      }
+
+      const parsedTicketingStart = parseOptionalDateTime(ticketingStartAt);
+      const parsedTicketingEnd = parseOptionalDateTime(ticketingEndAt);
 
       const normalizedTiers = ticketTiers
         .filter(
-          (tier) => tier.name.trim() || tier.price.trim() || tier.supply.trim()
+          (tier) => tier.name.trim() || tier.price.trim() || tier.supply.trim(),
         )
         .map((tier) => ({
           name: tier.name.trim(),
+          // Price is already in wei
           price: Number(tier.price),
           totalSupply: Number(tier.supply),
         }));
 
       const totalTickets = normalizedTiers.reduce(
         (sum, tier) => sum + tier.totalSupply,
-        0
+        0,
       );
+      const primaryTicketPriceWei =
+        normalizedTiers[0]?.price?.toString() ?? "0";
 
       setSubmitting(true);
 
-      const created = await createEvent({
-        title: title.trim(),
-        description: description.trim() || 'Draft event',
-        category: category || 'conference',
-        startDate: start.toISOString(),
-        endDate: end.toISOString(),
-        fundingGoal: fundingGoal.trim(),
-        minStakeRequired: minStakeRequired.trim() || undefined,
-        organizerStake: organizerStake.trim() || undefined,
-        fundingDeadline: fundingDeadline.toISOString(),
-        totalTickets,
-        ticketPrice: String(normalizedTiers[0].price),
-        venue: {
-          address: location.trim() || 'TBA',
-        },
-        ticketTiers: normalizedTiers,
-      });
-
-      if (!created) {
-        setError('Failed to create event.');
+      if (!user?.walletAddress) {
+        await connectWallet();
+        setError(
+          investmentEnabled
+            ? "Wallet connected. Please submit again to sign the create-event transaction."
+            : "Wallet connected. Please submit again to continue.",
+        );
         return;
       }
 
-      setSuccess('Event created successfully via backend relayer.');
-      navigate('/app/events/my-events');
+      const basePayload = {
+        title: title.trim(),
+        description: description.trim() || "Draft event",
+        category: category || "conference",
+        investmentEnabled,
+        startDate: start.toISOString(),
+        endDate: end.toISOString(),
+        ticketingStartAt: parsedTicketingStart?.toISOString(),
+        ticketingEndAt: parsedTicketingEnd?.toISOString(),
+        totalTickets,
+        ticketPrice: primaryTicketPriceWei,
+        venue: {
+          address: location.trim() || "TBA",
+        },
+        ticketTiers: normalizedTiers,
+      };
+
+      const provider = web3Auth?.provider as
+        | {
+            request: (args: {
+              method: string;
+              params?: unknown[];
+            }) => Promise<unknown>;
+          }
+        | undefined;
+
+      if (!provider?.request) {
+        setError(
+          "Wallet provider is not ready. Please reconnect wallet and try again.",
+        );
+        return;
+      }
+
+      const created = await createEventOnChain(
+        provider!,
+        {
+          ...basePayload,
+          fundingGoal: investmentEnabled ? fundingGoal.trim() : "0",
+          minStakeRequired,
+          minInvestmentAmount: investmentEnabled
+            ? minInvestmentAmount.trim()
+            : undefined,
+          fundingDeadline: investmentEnabled
+            ? fundingDeadline?.toISOString()
+            : new Date(start.getTime() - 24 * 60 * 60 * 1000).toISOString(), // startDate - 1 day when investment disabled
+        },
+        user.walletAddress,
+        user.smartAccountAddress,
+      );
+
+      if (!created) {
+        setError("Failed to create event.");
+        return;
+      }
+
+      setSuccess(
+        investmentEnabled
+          ? `Event created on-chain successfully. `
+          : `Self-funded event created on-chain successfully. `,
+      );
+      navigate("/app/events/my-events");
     } catch (err: any) {
       setError(
         err?.response?.data?.message ||
           err?.message ||
-          'An unexpected error occurred while creating the event.'
+          "An unexpected error occurred while creating the event.",
       );
     } finally {
       setSubmitting(false);
@@ -336,16 +553,71 @@ export const CreateEvent: React.FC = () => {
     }
   };
 
+  // Fake progress simulation while submitting (does not interfere with actual flow)
+  React.useEffect(() => {
+    if (!submitting || !fakeSubmitEnabled) {
+      setFakeStepIndex(0);
+      setFakeTxHash(null);
+      setFakeStepMessage(undefined);
+      return;
+    }
+
+    // generate fake tx hash once
+    const genHash = () => {
+      const hex = Array.from({ length: 64 })
+        .map(() => "0123456789abcdef"[Math.floor(Math.random() * 16)])
+        .join("");
+      return `0x${hex}`;
+    };
+
+    const tx = genHash();
+    setFakeTxHash(tx);
+
+    const steps = [
+      "Preparing event metadata...",
+      "Uploading metadata to IPFS...",
+      "Estimating gas and preparing transaction...",
+      `Sending transaction ${tx.slice(0, 10)}...`,
+      "Waiting for transaction to be mined (0/3 confirmations)...",
+      "Confirming on-chain and syncing database...",
+    ];
+
+    let idx = 0;
+    setFakeStepIndex(0);
+    setFakeStepMessage(steps[0]);
+
+    const iv = setInterval(() => {
+      idx = Math.min(idx + 1, steps.length - 1);
+      setFakeStepIndex(idx);
+      setFakeStepMessage(steps[idx]);
+    }, Math.max(500, fakeSubmitMs));
+
+    return () => {
+      clearInterval(iv);
+    };
+  }, [submitting, fakeSubmitEnabled, fakeSubmitMs]);
+
   const handleSubmit = async () => {
     await submitEvent();
   };
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-white mb-2">Create Event</h1>
-        <p className="text-slate-400">Create a draft event and send it to admin review before funding opens</p>
-      </div>
+          <div>
+            <h1 className="text-3xl font-bold text-white mb-2">Create Event</h1>
+            <AlertBox title="Creation fee & revenue split" variant="info">
+              <div className="space-y-1">
+                <div>
+                  Creation fee: <span className="font-semibold">5% of total ticket value</span>
+                </div>
+                <div>
+                  Revenue split: <span className="font-semibold">Organizer 100%</span> when
+                  investment is off; <span className="font-semibold">Organizer 70% / Investors 30%</span> when investment is enabled.
+                </div>
+                <div className="text-xs text-slate-400 mt-1">These values are applied automatically during on-chain creation.</div>
+              </div>
+            </AlertBox>
+          </div>
 
       {!!error && (
         <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
@@ -363,7 +635,7 @@ export const CreateEvent: React.FC = () => {
         <CardHeader>
           <CardTitle className="text-white">Event Details</CardTitle>
           <CardDescription className="text-slate-400">
-            Basic information for the draft that admin will review
+            Basic information for your on-chain event
           </CardDescription>
         </CardHeader>
 
@@ -413,8 +685,8 @@ export const CreateEvent: React.FC = () => {
               placeholder="Describe your event..."
               className={`mt-1.5 bg-slate-800 text-white min-h-[120px] ${
                 fieldErrors.description
-                  ? 'border-red-500 focus-visible:ring-red-500'
-                  : 'border-slate-700'
+                  ? "border-red-500 focus-visible:ring-red-500"
+                  : "border-slate-700"
               }`}
             />
             {fieldErrors.description && (
@@ -426,79 +698,118 @@ export const CreateEvent: React.FC = () => {
 
           <div className="grid md:grid-cols-2 gap-4">
             <div>
-              <Label htmlFor="date" className="text-white">
-                Event Date *
-              </Label>
-              <div className="relative mt-1.5">
-                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-cyan-300" />
-                <Input
-                  id="date"
-                  type="date"
-                  value={date}
-                  onChange={(e) => {
-                    setDate(e.target.value);
-                    setFieldErrors((prev) => {
-                      const next = { ...prev };
-                      delete next.date;
-                      delete next.dateTime;
-                      delete next.fundingDeadline;
-                      return next;
-                    });
-                  }}
-                  className={`pl-10 bg-slate-800 text-white ${
-                    fieldErrors.date ||
-                    fieldErrors.dateTime ||
-                    fieldErrors.fundingDeadline
-                      ? 'border-red-500 focus-visible:ring-red-500'
-                      : 'border-slate-700'
-                  }`}
-                />
-              </div>
-              {fieldErrors.date && (
-                <p className="mt-1 text-sm text-red-400">{fieldErrors.date}</p>
-              )}
-              {!fieldErrors.date && fieldErrors.dateTime && (
-                <p className="mt-1 text-sm text-red-400">
-                  {fieldErrors.dateTime}
-                </p>
-              )}
-              {!fieldErrors.date &&
-                !fieldErrors.dateTime &&
-                fieldErrors.fundingDeadline && (
-                  <p className="mt-1 text-sm text-red-400">
-                    {fieldErrors.fundingDeadline}
-                  </p>
-                )}
-            </div>
-
-            <div>
-              <Label htmlFor="time" className="text-white">
-                Event Time *
+              <Label htmlFor="start-at" className="text-white">
+                Event Start At *
               </Label>
               <Input
-                id="time"
-                type="time"
-                value={time}
+                id="start-at"
+                type="datetime-local"
+                value={startAt}
                 onChange={(e) => {
-                  setTime(e.target.value);
+                  setStartAt(e.target.value);
                   setFieldErrors((prev) => {
                     const next = { ...prev };
-                    delete next.time;
-                    delete next.dateTime;
-                    delete next.fundingDeadline;
+                    delete next.startAt;
+                    delete next.ticketingStartAt;
+                    delete next.ticketingEndAt;
                     return next;
                   });
                 }}
-                className={`mt-1.5 bg-slate-800 text-white ${
-                  fieldErrors.time ||
-                  fieldErrors.dateTime ||
-                  fieldErrors.fundingDeadline
-                    ? 'border-red-500 focus-visible:ring-red-500'
-                    : 'border-slate-700'
-                }`}
+                className={cn(
+                  getInputClass(
+                    !!fieldErrors.startAt ||
+                      !!fieldErrors.ticketingStartAt ||
+                      !!fieldErrors.ticketingEndAt,
+                  ),
+                  "[color-scheme:dark]",
+                )}
               />
-              {fieldErrors.time && (
-                <p className="mt-1 text-sm text-red-400">{fieldErrors.time}</p>
+              {fieldErrors.startAt && (
+                <p className="mt-1 text-sm text-red-400">
+                  {fieldErrors.startAt}
+                </p>
+              )}
+            </div>
+
+            <div>
+              <Label htmlFor="end-at" className="text-white">
+                Event End At *
+              </Label>
+              <Input
+                id="end-at"
+                type="datetime-local"
+                value={endAt}
+                onChange={(e) => {
+                  setEndAt(e.target.value);
+                  setFieldErrors((prev) => {
+                    const next = { ...prev };
+                    delete next.endAt;
+                    return next;
+                  });
+                }}
+                className={cn(getInputClass(!!fieldErrors.endAt), "[color-scheme:dark]")}
+              />
+              {fieldErrors.endAt && (
+                <p className="mt-1 text-sm text-red-400">{fieldErrors.endAt}</p>
+              )}
+            </div>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              <Label htmlFor="ticketing-start-at" className="text-white">
+                Ticketing Start At
+              </Label>
+              <Input
+                id="ticketing-start-at"
+                type="datetime-local"
+                value={ticketingStartAt}
+                onChange={(e) => {
+                  setTicketingStartAt(e.target.value);
+                  setFieldErrors((prev) => {
+                    const next = { ...prev };
+                    delete next.ticketingStartAt;
+                    delete next.ticketingEndAt;
+                    return next;
+                  });
+                }}
+                className={cn(
+                  getInputClass(
+                    !!fieldErrors.ticketingStartAt ||
+                      !!fieldErrors.ticketingEndAt,
+                  ),
+                  "[color-scheme:dark]",
+                )}
+              />
+              {fieldErrors.ticketingStartAt && (
+                <p className="mt-1 text-sm text-red-400">
+                  {fieldErrors.ticketingStartAt}
+                </p>
+              )}
+            </div>
+
+            <div>
+              <Label htmlFor="ticketing-end-at" className="text-white">
+                Ticketing End At
+              </Label>
+              <Input
+                id="ticketing-end-at"
+                type="datetime-local"
+                value={ticketingEndAt}
+                onChange={(e) => {
+                  setTicketingEndAt(e.target.value);
+                  setFieldErrors((prev) => {
+                    const next = { ...prev };
+                    delete next.ticketingEndAt;
+                    return next;
+                  });
+                }}
+                className={cn(getInputClass(!!fieldErrors.ticketingEndAt), "[color-scheme:dark]")}
+              />
+              {fieldErrors.ticketingEndAt && (
+                <p className="mt-1 text-sm text-red-400">
+                  {fieldErrors.ticketingEndAt}
+                </p>
               )}
             </div>
           </div>
@@ -525,8 +836,8 @@ export const CreateEvent: React.FC = () => {
                 placeholder="Enter venue or address"
                 className={`pl-10 bg-slate-800 text-white ${
                   fieldErrors.location
-                    ? 'border-red-500 focus-visible:ring-red-500'
-                    : 'border-slate-700'
+                    ? "border-red-500 focus-visible:ring-red-500"
+                    : "border-slate-700"
                 }`}
               />
             </div>
@@ -556,8 +867,8 @@ export const CreateEvent: React.FC = () => {
               }}
               className={`mt-1.5 w-full h-9 px-3 rounded-md bg-slate-800 text-white text-sm ${
                 fieldErrors.category
-                  ? 'border border-red-500'
-                  : 'border border-slate-700'
+                  ? "border border-red-500"
+                  : "border border-slate-700"
               }`}
             >
               <option value="">Select a category</option>
@@ -587,7 +898,9 @@ export const CreateEvent: React.FC = () => {
         <CardContent>
           <div className="border-2 border-dashed border-slate-700 rounded-lg p-12 text-center opacity-90">
             <Upload className="w-12 h-12 text-fuchsia-300 mx-auto mb-4" />
-            <p className="text-white mb-2">Image upload is not connected yet.</p>
+            <p className="text-white mb-2">
+              Image upload is not connected yet.
+            </p>
             <p className="text-sm text-slate-400">
               The backend already supports image upload, but this form is not
               sending FormData yet.
@@ -667,13 +980,11 @@ export const CreateEvent: React.FC = () => {
                     id={`tier-name-${index}`}
                     placeholder="e.g. VIP, General"
                     value={tier.name}
-                    onChange={(e) =>
-                      updateTier(index, 'name', e.target.value)
-                    }
+                    onChange={(e) => updateTier(index, "name", e.target.value)}
                     className={`mt-1.5 bg-slate-800 text-white ${
                       fieldErrors[`tier-${index}-name`]
-                        ? 'border-red-500 focus-visible:ring-red-500'
-                        : 'border-slate-700'
+                        ? "border-red-500 focus-visible:ring-red-500"
+                        : "border-slate-700"
                     }`}
                   />
                   {fieldErrors[`tier-${index}-name`] && (
@@ -688,21 +999,19 @@ export const CreateEvent: React.FC = () => {
                     htmlFor={`tier-price-${index}`}
                     className="text-slate-300"
                   >
-                    Price (ETH)
+                    Price (wei)
                   </Label>
                   <Input
                     id={`tier-price-${index}`}
                     type="number"
-                    step="0.01"
-                    placeholder="0.00"
+                    step="1"
+                    placeholder="800000000000000000"
                     value={tier.price}
-                    onChange={(e) =>
-                      updateTier(index, 'price', e.target.value)
-                    }
+                    onChange={(e) => updateTier(index, "price", e.target.value)}
                     className={`mt-1.5 bg-slate-800 text-white ${
                       fieldErrors[`tier-${index}-price`]
-                        ? 'border-red-500 focus-visible:ring-red-500'
-                        : 'border-slate-700'
+                        ? "border-red-500 focus-visible:ring-red-500"
+                        : "border-slate-700"
                     }`}
                   />
                   {fieldErrors[`tier-${index}-price`] && (
@@ -710,6 +1019,9 @@ export const CreateEvent: React.FC = () => {
                       {fieldErrors[`tier-${index}-price`]}
                     </p>
                   )}
+                  <p className="mt-1 text-xs text-slate-500">
+                    Enter wei as an integer string.
+                  </p>
                 </div>
 
                 <div>
@@ -725,12 +1037,12 @@ export const CreateEvent: React.FC = () => {
                     placeholder="100"
                     value={tier.supply}
                     onChange={(e) =>
-                      updateTier(index, 'supply', e.target.value)
+                      updateTier(index, "supply", e.target.value)
                     }
                     className={`mt-1.5 bg-slate-800 text-white ${
                       fieldErrors[`tier-${index}-supply`]
-                        ? 'border-red-500 focus-visible:ring-red-500'
-                        : 'border-slate-700'
+                        ? "border-red-500 focus-visible:ring-red-500"
+                        : "border-slate-700"
                     }`}
                   />
                   {fieldErrors[`tier-${index}-supply`] && (
@@ -749,7 +1061,11 @@ export const CreateEvent: React.FC = () => {
         <CardHeader>
           <CardTitle className="text-white">Investment Options</CardTitle>
           <CardDescription className="text-slate-400">
-            Optional funding configuration. Event funding only opens after admin approval.
+            <AlertBox variant="muted">
+              <div className="mt-0.5">
+                Investment mode allows outside investors and changes distribution to <span className="font-semibold">70% organizer / 30% investors</span> when enabled.
+              </div>
+            </AlertBox>
           </CardDescription>
         </CardHeader>
 
@@ -760,14 +1076,21 @@ export const CreateEvent: React.FC = () => {
               id="enable-investment"
               checked={investmentEnabled}
               onChange={(e) => {
-                setInvestmentEnabled(e.target.checked);
-                if (!e.target.checked) {
+                const enabled = e.target.checked;
+                setInvestmentEnabled(enabled);
+                if (!enabled) {
+                  setFundingGoal("0");
+                  setFundingDeadlineAt("");
+                  setMinInvestmentAmount("");
                   setFieldErrors((prev) => {
                     const next = { ...prev };
                     delete next.fundingGoal;
-                    delete next.fundingDeadline;
+                    delete next.minInvestmentAmount;
+                    delete next.fundingDeadlineAt;
                     return next;
                   });
+                } else {
+                  setFundingGoal("");
                 }
               }}
               className="w-4 h-4 rounded border-slate-700 bg-slate-800 accent-cyan-400"
@@ -798,8 +1121,8 @@ export const CreateEvent: React.FC = () => {
                 placeholder="5000000000000000000"
                 className={`mt-1.5 bg-slate-800 text-white ${
                   fieldErrors.fundingGoal
-                    ? 'border-red-500 focus-visible:ring-red-500'
-                    : 'border-slate-700'
+                    ? "border-red-500 focus-visible:ring-red-500"
+                    : "border-slate-700"
                 }`}
                 disabled={!investmentEnabled}
               />
@@ -812,27 +1135,21 @@ export const CreateEvent: React.FC = () => {
 
             <div>
               <Label htmlFor="min-stake-required" className="text-slate-300">
-                Minimum Organizer Stake
+                Event Creation Fee (wei)
+                <span className="text-xs text-slate-400 ml-2">
+                  (Auto-calculated: 5% of total ticket value)
+                </span>
               </Label>
               <Input
                 id="min-stake-required"
                 value={minStakeRequired}
-                onChange={(e) => {
-                  setMinStakeRequired(e.target.value);
-                  setFieldErrors((prev) => {
-                    const next = { ...prev };
-                    delete next.minStakeRequired;
-                    delete next.organizerStake;
-                    return next;
-                  });
-                }}
-                placeholder="1000000000000000000"
+                placeholder="Auto-calculated based on ticket tiers"
                 className={`mt-1.5 bg-slate-800 text-white ${
-                  fieldErrors.minStakeRequired || fieldErrors.organizerStake
-                    ? 'border-red-500 focus-visible:ring-red-500'
-                    : 'border-slate-700'
-                }`}
-                disabled={!investmentEnabled}
+                  fieldErrors.minStakeRequired
+                    ? "border-red-500 focus-visible:ring-red-500"
+                    : "border-slate-700"
+                } bg-slate-700 text-slate-300`}
+                readOnly
               />
               {fieldErrors.minStakeRequired && (
                 <p className="mt-1 text-sm text-red-400">
@@ -840,44 +1157,85 @@ export const CreateEvent: React.FC = () => {
                 </p>
               )}
             </div>
+          </div>
 
+          {investmentEnabled && (
             <div>
-              <Label htmlFor="organizer-stake" className="text-slate-300">
-                Organizer Stake (optional, defaults to min stake)
+              <Label htmlFor="min-investment-amount" className="text-slate-300">
+                Minimum Investment Amount (wei) *
               </Label>
               <Input
-                id="organizer-stake"
-                value={organizerStake}
+                id="min-investment-amount"
+                value={minInvestmentAmount}
                 onChange={(e) => {
-                  setOrganizerStake(e.target.value);
-                  if (fieldErrors.organizerStake) {
+                  setMinInvestmentAmount(e.target.value);
+                  if (fieldErrors.minInvestmentAmount) {
                     setFieldErrors((prev) => {
                       const next = { ...prev };
-                      delete next.organizerStake;
+                      delete next.minInvestmentAmount;
                       return next;
                     });
                   }
                 }}
-                placeholder="1000000000000000000"
+                placeholder="100000000000000000"
                 className={`mt-1.5 bg-slate-800 text-white ${
-                  fieldErrors.organizerStake
-                    ? 'border-red-500 focus-visible:ring-red-500'
-                    : 'border-slate-700'
+                  fieldErrors.minInvestmentAmount
+                    ? "border-red-500 focus-visible:ring-red-500"
+                    : "border-slate-700"
                 }`}
-                disabled={!investmentEnabled}
               />
-              {fieldErrors.organizerStake && (
+              {fieldErrors.minInvestmentAmount && (
                 <p className="mt-1 text-sm text-red-400">
-                  {fieldErrors.organizerStake}
+                  {fieldErrors.minInvestmentAmount}
                 </p>
               )}
             </div>
-          </div>
+          )}
 
-          <p className="text-xs text-slate-500">
-            Funding fields are stored as integer strings in wei. This value is
-            the event creator's required locked stake, not the donor minimum.
-          </p>
+          {investmentEnabled && (
+            <div>
+              <Label htmlFor="funding-deadline-at" className="text-slate-300">
+                Funding Deadline At *
+              </Label>
+              <Input
+                id="funding-deadline-at"
+                type="datetime-local"
+                value={fundingDeadlineAt}
+                onChange={(e) => {
+                  setFundingDeadlineAt(e.target.value);
+                  setFieldErrors((prev) => {
+                    const next = { ...prev };
+                    delete next.fundingDeadlineAt;
+                    delete next.ticketingStartAt;
+                    return next;
+                  });
+                }}
+                className={getInputClass(
+                  !!fieldErrors.fundingDeadlineAt ||
+                    !!fieldErrors.ticketingStartAt,
+                )}
+              />
+              {fieldErrors.fundingDeadlineAt && (
+                <p className="mt-1 text-sm text-red-400">
+                  {fieldErrors.fundingDeadlineAt}
+                </p>
+              )}
+            </div>
+          )}
+
+          {investmentEnabled && (
+            <div className="mt-2">
+              <AlertBox variant="muted" title="Funding deadline requirement">
+                Funding deadline must be set and must fall between the current time and the event start time.
+              </AlertBox>
+            </div>
+          )}
+
+          <div className="mt-3">
+            <AlertBox variant="muted" title="Numeric values">
+              Enter ticket tier prices, funding goal, and minimum investment amounts as integer wei values (no decimals).
+            </AlertBox>
+          </div>
         </CardContent>
       </Card>
 
@@ -888,9 +1246,28 @@ export const CreateEvent: React.FC = () => {
           onClick={handleSubmit}
           className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white px-8 disabled:opacity-50"
         >
-          {submitting ? 'Submitting...' : 'Submit for Admin Review'}
+          {submitting ? "Submitting..." : "Submit"}
         </Button>
       </div>
+      <Loading
+        visible={submitting}
+        message={fakeSubmitEnabled ? fakeStepMessage || "Creating event..." : "Creating event..."}
+      >
+        {fakeSubmitEnabled && (
+          <div className="w-full text-left">
+            <p className="text-xs text-slate-400 mb-2">Tx: <span className="font-mono text-sm text-white break-all">{fakeTxHash}</span></p>
+            <div className="space-y-1">
+              <p className="text-sm text-slate-300 font-medium">{fakeStepMessage}</p>
+              <div className="h-2 bg-slate-800 rounded overflow-hidden mt-2">
+                <div
+                  className="bg-purple-400 h-2 rounded"
+                  style={{ width: `${Math.min(100, (fakeStepIndex + 1) * 16)}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+      </Loading>
     </div>
   );
 };

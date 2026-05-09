@@ -1,9 +1,10 @@
 import { defineConfig, type Plugin } from 'vite'
-import path from 'path'
-import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
 import { nodePolyfills } from 'vite-plugin-node-polyfills'
+import path from 'path'
 import type { Plugin as EsbuildPlugin } from 'esbuild'
+
 
 /**
  * Root cause of "process2.nextTick is not a function":
@@ -24,9 +25,7 @@ import type { Plugin as EsbuildPlugin } from 'esbuild'
  * 3. The esbuild plugin redirects ws-embed's readable-stream → top-level v3
  *    which is already covered by the process/browser inject
  */
-
 const topLevelReadableStream = path.resolve(__dirname, 'node_modules/readable-stream')
-
 /** esbuild plugin: redirect ws-embed's nested readable-stream → top-level v3 */
 const redirectReadableStreamEsbuild: EsbuildPlugin = {
   name: 'redirect-readable-stream',
@@ -39,7 +38,6 @@ const redirectReadableStreamEsbuild: EsbuildPlugin = {
     })
   },
 }
-
 /**
  * Vite plugin that appends our esbuild redirect plugin into optimizeDeps
  * AFTER all other plugins (including nodePolyfills) have run their config hooks.
@@ -75,9 +73,7 @@ export default defineConfig({
 
   define: {
     global: 'globalThis',
-    'process.env.NODE_ENV': JSON.stringify('development'),
-    'process.version': JSON.stringify('v18.0.0'),
-    'process.browser': 'true',
+    'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV || 'production'),
   },
 
   resolve: {

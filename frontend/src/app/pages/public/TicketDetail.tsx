@@ -15,21 +15,23 @@ import {
   AlertCircle,
   CheckCircle2,
   Copy,
-  TrendingUp,
   FileText,
+  Loader2,
+  Sparkles,
 } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent } from "../../components/ui/card";
 import { Badge } from "../../components/ui/badge";
 import { ImageWithFallback } from "../../components/figma/ImageWithFallback";
 import { useAuth } from "../../contexts/AuthContext";
-import { ethers } from "ethers";
+import { useLoading } from "../../components/ui/loadingContext";
 import { useWeb3Auth } from "@web3auth/modal/react";
 import {
   listingService,
   type ApiEvent,
   type ApiListing,
   type ApiTicket,
+  type BuyListingProgressStage,
 } from "../../services/listings.service";
 import { logger } from "../../lib/logger";
 
@@ -52,6 +54,68 @@ const formatTicketType = (type?: string) => {
   return type.charAt(0).toUpperCase() + type.slice(1);
 };
 
+type BuyUiStage =
+  | "idle"
+  | "preparing"
+  | "awaitingWallet"
+  | "waitingChain"
+  | "syncingBackend";
+
+const BUY_STAGE_MESSAGE: Record<Exclude<BuyUiStage, "idle">, string> = {
+  preparing: "Preparing purchase transaction...",
+  awaitingWallet: "Waiting for wallet confirmation...",
+  waitingChain: "Transaction submitted. Waiting on-chain confirmation...",
+  syncingBackend: "Syncing purchase state with backend...",
+};
+
+const WEI_PER_ETH = 1_000_000_000_000_000_000n;
+
+const parseWei = (value?: string | number | bigint) => {
+  try {
+    return BigInt(String(value ?? "0"));
+  } catch {
+    return 0n;
+  }
+};
+
+const formatWei = (value?: string | number | bigint) => {
+  try {
+    return BigInt(String(value ?? "0")).toLocaleString();
+  } catch {
+    return "0";
+  }
+};
+
+const formatEthApprox = (value?: string | number | bigint, decimals = 6) => {
+  const wei = parseWei(value);
+  const whole = wei / WEI_PER_ETH;
+  const fraction = wei % WEI_PER_ETH;
+
+  if (fraction === 0n) {
+    return whole.toString();
+  }
+
+  const rawFraction = fraction.toString().padStart(18, "0");
+  const trimmedFraction = rawFraction.slice(0, decimals).replace(/0+$/, "");
+
+  return trimmedFraction ? `${whole.toString()}.${trimmedFraction}` : whole.toString();
+};
+
+const getListingStatusLabel = (status?: string) => {
+  switch (status) {
+    case "active":
+      return "Active Listing";
+    case "sold":
+      return "Sold";
+    case "cancelled":
+      return "Cancelled";
+    case "expired":
+      return "Expired";
+    default:
+      return "Listing";
+  }
+};
+
 export const TicketDetail: React.FC = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -63,6 +127,8 @@ export const TicketDetail: React.FC = () => {
   const [listing, setListing] = React.useState<ApiListing | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [buying, setBuying] = React.useState(false);
+  const [buyStage, setBuyStage] = React.useState<BuyUiStage>("idle");
+  const [activeTxHash, setActiveTxHash] = React.useState<string | null>(null);
   const [showBuyConfirm, setShowBuyConfirm] = React.useState(false);
   const [buyPopup, setBuyPopup] = React.useState<{
     type: "success" | "error";
@@ -74,7 +140,7 @@ export const TicketDetail: React.FC = () => {
 
     const timeoutId = window.setTimeout(() => {
       setBuyPopup(null);
-    }, 3000);
+    }, 7000);
 
     return () => {
       window.clearTimeout(timeoutId);
@@ -88,17 +154,20 @@ export const TicketDetail: React.FC = () => {
   React.useEffect(() => {
     const fetchData = async () => {
       try {
+        showLoading("Loading listing...");
         const res = await listingService.getById(id!);
         setListing(res);
       } catch (err) {
         logger.error("ticket-detail", "Failed to load ticket detail", err);
       } finally {
         setLoading(false);
+        hideLoading();
       }
     };
 
     fetchData();
   }, [id]);
+  const { show: showLoading, hide: hideLoading } = useLoading();
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center text-white">
@@ -137,12 +206,6 @@ export const TicketDetail: React.FC = () => {
     );
   }
 
-  const parseEth = (value?: string | number) => {
-    if (!value) return 0;
-
-    return Number(ethers.formatEther(value.toString()));
-  };
-
   const shortenAddress = (address?: string) => {
     if (!address) return "Unknown";
     if (address.length <= 14) return address;
@@ -168,24 +231,28 @@ export const TicketDetail: React.FC = () => {
     return `${days} day${days > 1 ? "s" : ""} ago`;
   };
 
-  const listingPrice = parseEth(listing.price);
-  const maxPrice = parseEth(listing.maxPrice);
-  const originalPrice = parseEth(ticket?.originalPrice);
-  const belowMaxPct =
-    maxPrice > 0
-      ? Math.max(0, ((maxPrice - listingPrice) / maxPrice) * 100)
-      : 0;
+  const listingPriceWei = parseWei(listing.price);
+  const maxPriceWei = parseWei(listing.maxPrice);
+  const originalPriceWei = parseWei(ticket?.originalPrice);
+  const remainingCapWei =
+    maxPriceWei > listingPriceWei ? maxPriceWei - listingPriceWei : 0n;
   const marketDiffLabel =
-    maxPrice > 0
-      ? `${belowMaxPct.toFixed(1)}% ${listingPrice <= maxPrice ? "below" : "above"} max resale price`
-      : "Price based on live listing data";
+    maxPriceWei > 0n
+      ? listingPriceWei <= maxPriceWei
+        ? `${formatWei(remainingCapWei)} wei remaining before hitting the resale cap`
+        : `${formatWei(listingPriceWei - maxPriceWei)} wei above resale cap`
+      : "Live listing price from marketplace";
   const eventDate = event?.startDate ? new Date(event.startDate) : null;
   const listedAtDate = listing.listedAt ? new Date(listing.listedAt) : null;
   const expiresAtDate = listing.expiresAt ? new Date(listing.expiresAt) : null;
   const transferCount = ticket?.transferHistory?.length ?? 0;
+  const listingStatusLabel = getListingStatusLabel(listing.status);
   const txExplorerUrl = listing.txHash
-    ? `https://etherscan.io/tx/${listing.txHash}`
+    ? `https://sepolia.etherscan.io/tx/${listing.txHash}`
     : "#";
+  const activeTxExplorerUrl = activeTxHash
+    ? `https://sepolia.etherscan.io/tx/${activeTxHash}`
+    : null;
 
   // Gallery images
 
@@ -241,11 +308,22 @@ export const TicketDetail: React.FC = () => {
     }
 
     setBuying(true);
+    setBuyStage("preparing");
+    setActiveTxHash(null);
     try {
       const result = await listingService.buy(
         provider,
         listing._id,
         user.walletAddress,
+        (stage: BuyListingProgressStage, txHash?: string) => {
+          if (txHash) setActiveTxHash(txHash);
+          if (stage === "preparing_intent") setBuyStage("preparing");
+          if (stage === "awaiting_wallet_confirmation")
+            setBuyStage("awaitingWallet");
+          if (stage === "waiting_onchain_confirmation")
+            setBuyStage("waitingChain");
+          if (stage === "syncing_backend") setBuyStage("syncingBackend");
+        },
       );
       showListingPopup("success", `Purchase successful. Tx: ${result.txHash}`);
 
@@ -259,6 +337,7 @@ export const TicketDetail: React.FC = () => {
       );
     } finally {
       setBuying(false);
+      setBuyStage("idle");
     }
   };
 
@@ -274,6 +353,35 @@ export const TicketDetail: React.FC = () => {
             }`}
           >
             {buyPopup.message}
+          </div>
+        </div>
+      )}
+
+      {buying && buyStage !== "idle" && (
+        <div className="fixed inset-0 z-[70] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-xl border border-slate-700 bg-slate-900 p-5">
+            <div className="flex items-start gap-3">
+              <Loader2 className="w-5 h-5 mt-0.5 text-cyan-300 animate-spin" />
+              <div className="flex-1">
+                <h3 className="text-white font-semibold mb-1">
+                  Processing Purchase
+                </h3>
+                <p className="text-sm text-slate-300">
+                  {BUY_STAGE_MESSAGE[buyStage]}
+                </p>
+                {activeTxHash && activeTxExplorerUrl ? (
+                  <a
+                    href={activeTxExplorerUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-2 text-xs text-cyan-300 hover:text-cyan-200 mt-3"
+                  >
+                    View transaction on Sepolia
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                ) : null}
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -350,13 +458,20 @@ export const TicketDetail: React.FC = () => {
           <div className="space-y-6">
             {/* Title & Category */}
             <div>
-              <Badge className="bg-purple-600/10 text-purple-400 border-purple-500/20 mb-3">
-                {event?.contractEventId || event?.status || listing.status}
-              </Badge>
+              <div className="mb-3 flex flex-wrap gap-2">
+                <Badge className="bg-purple-600/10 text-purple-400 border-purple-500/20">
+                  {event?.contractEventId || event?.status || "On-chain event"}
+                </Badge>
+                <Badge className="bg-cyan-500/10 text-cyan-300 border-cyan-400/20">
+                  {listingStatusLabel}
+                </Badge>
+              </div>
               <h1 className="text-3xl md:text-4xl font-bold text-white mb-2">
                 {event?.title || `Ticket ${listing.tokenId}`}
               </h1>
-              <p className="text-slate-400">Verified event on EventChain</p>
+              <p className="text-slate-400">
+                Marketplace purchase for ticket #{ticket?.tokenId || listing.tokenId}
+              </p>
             </div>
 
             {/* Ticket Type */}
@@ -374,22 +489,55 @@ export const TicketDetail: React.FC = () => {
               </CardContent>
             </Card>
 
-            {/* Price */}
-            <Card className="bg-slate-900 border-slate-800">
-              <CardContent className="p-5">
-                <p className="text-sm text-slate-500 mb-2">Current Price</p>
-                <div className="flex items-baseline gap-2 mb-3">
-                  <span className="text-4xl font-bold text-purple-400">
-                    {listingPrice}
-                  </span>
-                  <span className="text-xl text-slate-400">ETH</span>
-                  <span className="text-sm text-slate-500 ml-2">
-                    (≈ ${(Number(listingPrice) * 2400).toFixed(2)} USD)
-                  </span>
+            {/* Purchase Summary */}
+            <Card className="overflow-hidden border-slate-800 bg-slate-900">
+              <div className="border-b border-slate-800 bg-gradient-to-r from-amber-500/10 via-purple-500/10 to-cyan-500/10 px-5 py-4">
+                <div className="flex items-center gap-2 text-sm font-medium text-amber-300">
+                  <Sparkles className="h-4 w-4" />
+                  Purchase Summary
                 </div>
-                <div className="flex items-center gap-2 text-sm text-green-400">
-                  <TrendingUp className="w-4 h-4" />
-                  <span>{marketDiffLabel}</span>
+              </div>
+              <CardContent className="p-0">
+                <div className="px-5 py-5">
+                  <p className="mb-2 text-sm text-slate-400">Current Listing Price</p>
+                  <div className="flex flex-wrap items-end gap-3">
+                    <span className="text-4xl font-bold text-white">
+                      {formatWei(listingPriceWei)}
+                    </span>
+                    <span className="text-lg text-purple-300">wei</span>
+                  </div>
+                  <p className="mt-2 text-sm text-slate-500">
+                    Approx. {formatEthApprox(listingPriceWei)} ETH on-chain
+                  </p>
+                </div>
+                <div className="grid gap-px bg-slate-800 sm:grid-cols-3">
+                  <div className="bg-slate-900 px-5 py-4">
+                    <p className="mb-1 text-xs uppercase tracking-[0.2em] text-slate-500">
+                      Original Mint
+                    </p>
+                    <p className="text-lg font-semibold text-white">
+                      {formatWei(originalPriceWei)} wei
+                    </p>
+                  </div>
+                  <div className="bg-slate-900 px-5 py-4">
+                    <p className="mb-1 text-xs uppercase tracking-[0.2em] text-slate-500">
+                      Resale Cap
+                    </p>
+                    <p className="text-lg font-semibold text-white">
+                      {formatWei(maxPriceWei)} wei
+                    </p>
+                  </div>
+                  <div className="bg-slate-900 px-5 py-4">
+                    <p className="mb-1 text-xs uppercase tracking-[0.2em] text-slate-500">
+                      Cap Headroom
+                    </p>
+                    <p className="text-lg font-semibold text-emerald-300">
+                      {formatWei(remainingCapWei)} wei
+                    </p>
+                  </div>
+                </div>
+                <div className="border-t border-slate-800 px-5 py-4 text-sm text-emerald-300">
+                  {marketDiffLabel}
                 </div>
               </CardContent>
             </Card>
@@ -500,30 +648,77 @@ export const TicketDetail: React.FC = () => {
               </CardContent>
             </Card>
 
-            {/* Action Buttons */}
-            <div className="space-y-3">
-              {user?.role === "public" ? (
-                <Button
-                  className="w-full h-12 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white text-base font-semibold"
-                  onClick={handleBuyNow}
-                  disabled={buying}
-                >
-                  <Wallet className="w-5 h-5 mr-2" />
-                  Connect Wallet to Buy
-                </Button>
-              ) : (
-                <Button
-                  className="w-full h-12 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white text-base font-semibold"
-                  onClick={handleBuyNow}
-                  disabled={buying}
-                >
-                  <ShoppingCart className="w-5 h-5 mr-2" />
-                  {buying
-                    ? "Processing purchase..."
-                    : `Buy Now for ${listingPrice.toFixed(4)} ETH`}
-                </Button>
-              )}
-            </div>
+            {/* Purchase Action */}
+            <Card className="border-slate-800 bg-slate-900/90">
+              <CardContent className="space-y-4 p-5">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="mb-1 text-sm text-slate-500">Ready to buy</p>
+                    <p className="text-lg font-semibold text-white">
+                      Ticket #{ticket?.tokenId || listing.tokenId} for {formatWei(listingPriceWei)} wei
+                    </p>
+                  </div>
+                  <Badge className="bg-emerald-500/10 text-emerald-300 border-emerald-400/20">
+                    {listingStatusLabel}
+                  </Badge>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-4">
+                    <p className="mb-2 text-xs uppercase tracking-[0.18em] text-slate-500">
+                      Wallet
+                    </p>
+                    <p className="text-sm text-slate-300">
+                      {user?.walletAddress
+                        ? shortenAddress(user.walletAddress)
+                        : "Connect wallet to continue"}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-4">
+                    <p className="mb-2 text-xs uppercase tracking-[0.18em] text-slate-500">
+                      Settlement
+                    </p>
+                    <p className="text-sm text-slate-300">
+                      Ownership transfers after the transaction is confirmed on-chain.
+                    </p>
+                  </div>
+                </div>
+
+                {!user?.walletAddress ? (
+                  <Button
+                    className="w-full h-12 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white text-base font-semibold"
+                    onClick={handleBuyNow}
+                    disabled={buying}
+                  >
+                    <Wallet className="w-5 h-5 mr-2" />
+                    Connect Wallet to Buy
+                  </Button>
+                ) : (
+                  <Button
+                    className="w-full h-12 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white text-base font-semibold"
+                    onClick={handleBuyNow}
+                    disabled={buying}
+                  >
+                    <ShoppingCart className="w-5 h-5 mr-2" />
+                    {buying
+                      ? "Processing purchase..."
+                      : `Buy Now for ${formatWei(listingPriceWei)} wei`}
+                  </Button>
+                )}
+
+                <div className="grid gap-3 text-xs text-slate-400 sm:grid-cols-3">
+                  <div className="rounded-lg border border-slate-800 px-3 py-2">
+                    1. Review ticket and price
+                  </div>
+                  <div className="rounded-lg border border-slate-800 px-3 py-2">
+                    2. Confirm in wallet
+                  </div>
+                  <div className="rounded-lg border border-slate-800 px-3 py-2">
+                    3. Wait for chain sync
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
 
             {/* Security Notice */}
             <Card className="bg-blue-900/10 border-blue-500/20">
@@ -650,7 +845,7 @@ export const TicketDetail: React.FC = () => {
                   <div className="grid sm:grid-cols-2 gap-4">
                     <div>
                       <p className="text-xs text-slate-500 mb-1">
-                        Contract Address
+                        Listing Tx Hash
                       </p>
                       <div className="flex items-center gap-2">
                         <code className="text-sm text-purple-400 font-mono">
@@ -722,8 +917,7 @@ export const TicketDetail: React.FC = () => {
                         Transferable
                       </p>
                       <p className="text-xs text-slate-400">
-                        This ticket can be resold or transferred to another
-                        wallet
+                        This ticket can be transferred on-chain after a successful marketplace settlement.
                       </p>
                     </div>
                   </div>
@@ -731,11 +925,10 @@ export const TicketDetail: React.FC = () => {
                     <CheckCircle2 className="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" />
                     <div>
                       <p className="text-sm text-white font-medium">
-                        5% Royalty Fee
+                        Resale Cap Enforced
                       </p>
                       <p className="text-xs text-slate-400">
-                        Organizer receives 5% of resale price to support the
-                        event
+                        This listing cannot exceed {formatWei(maxPriceWei)} wei based on the original mint price.
                       </p>
                     </div>
                   </div>
@@ -743,11 +936,10 @@ export const TicketDetail: React.FC = () => {
                     <CheckCircle2 className="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" />
                     <div>
                       <p className="text-sm text-white font-medium">
-                        No Price Cap
+                        Buyer Receives NFT
                       </p>
                       <p className="text-xs text-slate-400">
-                        Tickets can be resold at any price determined by market
-                        demand
+                        Ownership updates to the buyer wallet after the purchase transaction is confirmed.
                       </p>
                     </div>
                   </div>
@@ -755,11 +947,10 @@ export const TicketDetail: React.FC = () => {
                     <AlertCircle className="w-5 h-5 text-orange-400 flex-shrink-0 mt-0.5" />
                     <div>
                       <p className="text-sm text-white font-medium">
-                        Event Entry Deadline
+                        Listing Availability
                       </p>
                       <p className="text-xs text-slate-400">
-                        Ticket must be in your wallet 24 hours before event to
-                        guarantee entry
+                        Purchase succeeds only while the listing remains active and unsold.
                       </p>
                     </div>
                   </div>
@@ -794,11 +985,11 @@ export const TicketDetail: React.FC = () => {
               </CardContent>
             </Card>
 
-            {/* Price History */}
+            {/* Listing Snapshot */}
             <Card className="bg-slate-900 border-slate-800">
               <CardContent className="p-6">
                 <h3 className="text-lg font-bold text-white mb-4">
-                  Price History
+                  Listing Snapshot
                 </h3>
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
@@ -806,25 +997,36 @@ export const TicketDetail: React.FC = () => {
                       Original Price
                     </span>
                     <span className="text-sm text-white font-medium">
-                      {originalPrice > 0
-                        ? `${originalPrice.toFixed(4)} ETH`
+                      {originalPriceWei > 0n
+                        ? `${formatWei(originalPriceWei)} wei`
                         : "N/A"}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-sm text-slate-400">Max Price</span>
+                    <span className="text-sm text-slate-400">Resale Cap</span>
                     <span className="text-sm text-white font-medium">
-                      {maxPrice > 0 ? `${maxPrice.toFixed(4)} ETH` : "N/A"}
+                      {maxPriceWei > 0n ? `${formatWei(maxPriceWei)} wei` : "N/A"}
                     </span>
                   </div>
-                  <div className="flex items-center justify-between"></div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-slate-400">Listed At</span>
+                    <span className="text-sm text-white font-medium">
+                      {listedAtDate?.toLocaleString() || "N/A"}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-slate-400">Expires At</span>
+                    <span className="text-sm text-white font-medium">
+                      {expiresAtDate?.toLocaleString() || "No expiry"}
+                    </span>
+                  </div>
                   <div className="pt-3 border-t border-slate-800">
                     <div className="flex items-center justify-between">
                       <span className="text-sm text-slate-400">
                         Current Listing
                       </span>
                       <span className="text-sm text-purple-400 font-bold">
-                        {listingPrice.toFixed(4)} ETH
+                        {formatWei(listingPriceWei)} wei
                       </span>
                     </div>
                   </div>
@@ -832,43 +1034,29 @@ export const TicketDetail: React.FC = () => {
               </CardContent>
             </Card>
 
-            {/* Trading Activity */}
+            {/* Purchase Flow */}
             <Card className="bg-slate-900 border-slate-800">
               <CardContent className="p-6">
                 <h3 className="text-lg font-bold text-white mb-4">
-                  Trading Activity
+                  Purchase Flow
                 </h3>
                 <div className="space-y-3">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-slate-400">24h Volume</span>
-                    <span className="text-white font-medium">
-                      {(listingPrice * Math.max(1, transferCount)).toFixed(4)}{" "}
-                      ETH
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-slate-400">7d Volume</span>
-                    <span className="text-white font-medium">
-                      {(
-                        listingPrice *
-                        Math.max(1, transferCount) *
-                        1.5
-                      ).toFixed(4)}{" "}
-                      ETH
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-slate-400">Total Sales</span>
-                    <span className="text-white font-medium">
-                      {transferCount}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-slate-400">Owners</span>
-                    <span className="text-white font-medium">
-                      {Math.max(1, transferCount + 1)}
-                    </span>
-                  </div>
+                  {[
+                    "Backend prepares a buy intent for the active listing.",
+                    "Buyer confirms the purchase transaction in wallet.",
+                    "Marketplace contract transfers the NFT ownership.",
+                    "Backend syncs listing status and ticket owner after the tx is mined.",
+                  ].map((step, index) => (
+                    <div
+                      key={step}
+                      className="flex items-start gap-3 rounded-xl border border-slate-800 bg-slate-950/70 p-3"
+                    >
+                      <div className="flex h-6 w-6 items-center justify-center rounded-full bg-purple-500/15 text-xs font-semibold text-purple-300">
+                        {index + 1}
+                      </div>
+                      <p className="text-sm text-slate-300">{step}</p>
+                    </div>
+                  ))}
                 </div>
               </CardContent>
             </Card>
@@ -912,7 +1100,7 @@ export const TicketDetail: React.FC = () => {
                         </p>
 
                         <p className="text-sm text-purple-400 font-bold">
-                          {item.price} ETH
+                          {formatWei(item.price)} wei
                         </p>
                       </div>
                     </Link>
@@ -929,13 +1117,30 @@ export const TicketDetail: React.FC = () => {
           <div className="bg-slate-900 p-6 rounded-xl border border-slate-700 w-[360px]">
             <h3 className="text-white mb-2 font-semibold">Confirm Purchase</h3>
             <p className="text-slate-300 text-sm mb-4">
-              Do you want to purchase ticket{" "}
+              You are about to buy ticket{" "}
               <span className="font-semibold">#{listing.tokenId}</span> for{" "}
               <span className="font-semibold">
-                {listingPrice.toFixed(4)} ETH
+                {formatWei(listingPriceWei)} wei
               </span>
-              ?
+              .
             </p>
+
+            <div className="mb-4 rounded-lg border border-slate-800 bg-slate-950/80 p-3 text-sm">
+              <div className="flex items-center justify-between text-slate-400">
+                <span>Event</span>
+                <span className="text-white">{event?.title || "Untitled event"}</span>
+              </div>
+              <div className="mt-2 flex items-center justify-between text-slate-400">
+                <span>Ticket type</span>
+                <span className="text-white">
+                  {formatTicketType(ticket?.ticketType)}
+                </span>
+              </div>
+              <div className="mt-2 flex items-center justify-between text-slate-400">
+                <span>Seller</span>
+                <span className="text-white">{shortenAddress(listing.seller)}</span>
+              </div>
+            </div>
 
             <div className="flex gap-2">
               <Button

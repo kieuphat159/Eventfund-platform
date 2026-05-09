@@ -1,5 +1,6 @@
-const { expect } = require("chai");
-const { ethers } = require("hardhat");
+import { expect } from "chai";
+import pkg from "hardhat";
+const { ethers } = pkg;
 
 describe("Event Funding & Ticketing System", function () {
   let Fund, Ticket, Marketplace;
@@ -37,10 +38,8 @@ describe("Event Funding & Ticketing System", function () {
 
     // 5. Setup Roles
     const ORGANIZER_ROLE = await ticket.ORGANIZER_ROLE();
-    const VERIFIER_ROLE = await ticket.VERIFIER_ROLE();
     await ticket.grantRole(ORGANIZER_ROLE, organizer.address);
     await ticket.grantRole(ORGANIZER_ROLE, await fund.getAddress()); // Cho phép Fund mint vé
-    await ticket.grantRole(VERIFIER_ROLE, verifier.address);
   });
 
   describe("Full Cycle Test", function () {
@@ -84,6 +83,7 @@ describe("Event Funding & Ticketing System", function () {
       expect(await ticket.ownerOf(1)).to.equal(donator.address);
 
       // --- BƯỚC 6: USAGE (Sử dụng vé) ---
+      await ticket.connect(admin).addEventVerifier(eventId, verifier.address);
       await ticket.connect(verifier).markAsUsed(1);
 
       // --- BƯỚC 7: RELEASE REVENUE (Chia tiền) ---
@@ -159,24 +159,39 @@ describe("Event Funding & Ticketing System", function () {
 
       expect(balAfter + gasUsed).to.equal(balBefore + ethers.parseEther("1"));
     });
-    it("Should allow user to refund ticket and get money back", async function () {
-      // 1. Giả lập Event đã hoàn thành nhưng Organizer bị lỗi nên Admin bật Refund
-      await fund.connect(admin).refundTickets(1);
+    it("Should refund both investor and ticket buyer when ticket sales cancellation happens", async function () {
+      const deadline = Math.floor(Date.now() / 1000) + 86400;
 
-      // 2. Nạp thêm tiền vào refundPool (nếu cần, ví dụ từ Penalty)
-      // Hoặc đảm bảo ticketPrice đã nằm trong Fund từ bước purchaseTicket
+      await fund.connect(organizer).createEvent(
+        FUNDING_GOAL,
+        deadline,
+        STAKE_AMOUNT,
+        2000,
+        TICKET_PRICE,
+        MAX_TICKETS,
+        1,
+        { value: STAKE_AMOUNT },
+      );
 
-      const balBefore = await ethers.provider.getBalance(donator.address);
+      const eventId = 1;
+      await fund.connect(donator).contribute(eventId, { value: FUNDING_GOAL });
+      await fund.connect(organizer).finalizeFunding(eventId);
+      await fund.connect(organizer).startTicketing(eventId, 0, 1);
+      await ticket.connect(buyer).purchaseTicket(1, { value: TICKET_PRICE });
 
-      // 3. Donator (người đang giữ vé #1) gọi refund
-      await ticket.connect(donator).requestRefund(1);
+      await fund.connect(organizer).cancelEvent(eventId, 2);
 
-      const balAfter = await ethers.provider.getBalance(donator.address);
+      await expect(
+        fund.connect(donator).claimContributionRefund(eventId),
+      ).to.changeEtherBalance(donator, FUNDING_GOAL);
 
-      // 4. Kiểm tra vé đã bị đốt chưa
-      await expect(ticket.ownerOf(1)).to.be.reverted;
-      // 5. Kiểm tra tiền đã về ví chưa
-      expect(balAfter).to.be.gt(balBefore);
+      const buyerBalBefore = await ethers.provider.getBalance(buyer.address);
+      const txRefund = await ticket.connect(buyer).claimRefund(1);
+      const receiptRefund = await txRefund.wait();
+      const gasUsed = receiptRefund.gasUsed * receiptRefund.gasPrice;
+      const buyerBalAfter = await ethers.provider.getBalance(buyer.address);
+
+      expect(buyerBalAfter + gasUsed).to.equal(buyerBalBefore + TICKET_PRICE);
     });
   });
 });

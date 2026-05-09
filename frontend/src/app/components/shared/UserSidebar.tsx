@@ -47,12 +47,16 @@ export const UserSidebar: React.FC<SidebarProps> = ({
     { icon: QrCode, label: "Event Check-In", path: "/app/verifier/dashboard" },
   ];
 
+  const verifierBaseNavItems = userNavItems.filter(
+    (item) => item.path !== "/app/tickets/my-tickets",
+  );
+
   const allNavItems =
     user?.role === "verifier"
       ? [
-          ...userNavItems.slice(0, 2),
+          ...verifierBaseNavItems.slice(0, 2),
           ...verifierNavItems,
-          ...userNavItems.slice(2),
+          ...verifierBaseNavItems.slice(2),
         ]
       : userNavItems;
 

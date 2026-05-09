@@ -17,6 +17,8 @@ import {
 import ticketEventRepo from "../../../repositories/ticketEvent.repo.js";
 import ticketStatsRepo from "../../../repositories/ticketStats.repo.js";
 import chainLogRepo from "../../../repositories/chainLog.repo.js";
+import * as ticketRepo from "../../../repositories/ticket.repo.js";
+import * as eventRepo from "../../../repositories/event.repo.js";
 
 const CONTRACT_NAME = "Ticket";
 const PROCESSOR_NAME = "TicketProcessor";
@@ -33,6 +35,16 @@ function lowerAddress(value) {
   if (!value) return undefined;
   return String(value).toLowerCase();
 }
+
+function mapChainTicketType(value) {
+  const normalized = Number(value);
+  if (normalized === 1) return "vip";
+  if (normalized === 2) return "early_bird";
+  if (normalized === 3) return "etc";
+  return "standard";
+}
+
+const FUND_CONTRACT_ADDRESS = lowerAddress(process.env.FUND_ADDRESS);
 
 /**
  * Hỗ trợ đọc arg theo cả 2 kiểu: named hoặc positional
@@ -143,6 +155,64 @@ function mapChainLogToTicketEventDoc(chainLog, contractAddressLower) {
   }
 }
 
+async function syncMintedTicketsFromLogs(logs) {
+  const mintedLogs = (logs || []).filter((log) => log.eventName === "TicketMintedBatch");
+  if (mintedLogs.length === 0) return;
+
+  const blockTimestampCache = new Map();
+
+  for (const log of mintedLogs) {
+    const args = log.args || {};
+    const contractEventId = toStringId(getArg(args, "eventId", 1));
+    const tokenIdsRaw = getArg(args, "ticketIds", 2);
+
+    if (!contractEventId || !Array.isArray(tokenIdsRaw) || tokenIdsRaw.length === 0) {
+      continue;
+    }
+
+    const eventDoc = await eventRepo.findByContractEventId(
+      contractEventId,
+      FUND_CONTRACT_ADDRESS,
+    );
+    if (!eventDoc?._id) {
+      continue;
+    }
+
+    const owner = lowerAddress(getArg(args, "to", 0));
+    const originalPrice = toStringId(getArg(args, "price", 3)) || "0";
+    const ticketType = mapChainTicketType(getArg(args, "ticketType", 4));
+    const txHash = lowerAddress(log.transactionHash);
+
+    let mintedAt;
+    const cacheKey = Number(log.blockNumber);
+    if (Number.isFinite(cacheKey)) {
+      if (!blockTimestampCache.has(cacheKey)) {
+        const block = await provider.getBlock(cacheKey);
+        blockTimestampCache.set(
+          cacheKey,
+          block?.timestamp ? new Date(Number(block.timestamp) * 1000) : undefined,
+        );
+      }
+      mintedAt = blockTimestampCache.get(cacheKey);
+    }
+
+    for (const tokenIdRaw of tokenIdsRaw) {
+      const tokenId = toStringId(tokenIdRaw);
+      if (!tokenId) continue;
+
+      await ticketRepo.upsertMintedFromChain({
+        tokenId,
+        eventId: eventDoc._id,
+        currentOwner: owner,
+        originalPrice,
+        ticketType,
+        mintedAt,
+        mintTxHash: txHash,
+      });
+    }
+  }
+}
+
 // -------------------------
 // MAIN PROCESSOR
 // -------------------------
@@ -211,6 +281,7 @@ export async function processTicketLogsOnce() {
 
     if (docs.length > 0) {
       await ticketEventRepo.insertMany(docs);
+      await syncMintedTicketsFromLogs(logs);
     }
 
     const affectedEventIds = [...new Set([...preDeleteEventIds, ...postInsertEventIds])];

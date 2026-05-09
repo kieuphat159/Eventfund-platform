@@ -12,7 +12,26 @@ import { getTicket, provider } from '../blockchain/index.js';
 const ONCHAIN_TICKET_STATUS = {
   MINTED: 0n,
   SOLD: 1n,
+  USED: 2n,
+  EXPIRED: 3n,
+  REFUNDED: 4n,
 };
+
+function mapChainTicketTypeToDb(ticketTypeValue) {
+  const value = Number(ticketTypeValue);
+  if (value === 1) return 'vip';
+  if (value === 2) return 'early_bird';
+  if (value === 3) return 'etc';
+  return 'standard';
+}
+
+function mapOnchainStatusToDbStatus(chainStatus) {
+  if (chainStatus === ONCHAIN_TICKET_STATUS.SOLD) return 'sold';
+  if (chainStatus === ONCHAIN_TICKET_STATUS.USED) return 'used';
+  if (chainStatus === ONCHAIN_TICKET_STATUS.EXPIRED) return 'expired';
+  if (chainStatus === ONCHAIN_TICKET_STATUS.REFUNDED) return 'refunded';
+  return null;
+}
 
 function normalizeTxHash(txHash) {
   return txHash?.toLowerCase();
@@ -23,10 +42,53 @@ function toTokenIdString(value) {
   return typeof value === 'bigint' ? value.toString() : String(value);
 }
 
+function normalizeWalletAddress(value) {
+  return value ? String(value).toLowerCase() : '';
+}
+
+async function getOnChainTicketSnapshot(tokenId, event = null) {
+  const ticketContract = getTicket();
+  const chainTokenId = BigInt(tokenId);
+
+  const [owner, chainStatus, chainEventId] = await Promise.all([
+    ticketContract.ownerOf(chainTokenId),
+    ticketContract.getTicketStatus(chainTokenId),
+    ticketContract.getEventId(chainTokenId),
+  ]);
+
+  if (
+    event?.contractEventId &&
+    String(chainEventId) !== String(event.contractEventId)
+  ) {
+    throw new BadRequestError('Ticket does not belong to this on-chain event');
+  }
+
+  return {
+    owner: normalizeWalletAddress(owner),
+    status: chainStatus,
+    eventId: String(chainEventId),
+  };
+}
+
 function validateTransactionHash(txHash) {
   if (!txHash || !ethers.isHexString(txHash, 32)) {
     throw new BadRequestError('Invalid transaction hash');
   }
+}
+
+const TX_RECEIPT_WAIT_TIMEOUT_MS = Number(process.env.TX_RECEIPT_WAIT_TIMEOUT_MS || 120000);
+
+async function getMinedReceipt(txHash) {
+  let receipt = await provider.getTransactionReceipt(txHash);
+  if (receipt) return receipt;
+
+  try {
+    receipt = await provider.waitForTransaction(txHash, 1, TX_RECEIPT_WAIT_TIMEOUT_MS);
+  } catch {
+    receipt = null;
+  }
+
+  return receipt || null;
 }
 
 async function parseTicketEventsFromReceipt(receipt) {
@@ -88,6 +150,52 @@ async function findMintedTicketByEventId(eventId, repos = {}) {
   return result?.docs?.[0] || null;
 }
 
+async function hydrateMintedTicketFromChain(event, repos = {}) {
+  const ticketRepository = repos.ticketRepo || ticketRepo;
+  const ticketContract = getTicket();
+
+  if (!event?.contractEventId) {
+    return null;
+  }
+
+  const chainEventId = BigInt(event.contractEventId);
+  const tokenIds = await ticketContract.getEventTokenIds(chainEventId);
+
+  for (const tokenIdValue of tokenIds || []) {
+    const tokenId = toTokenIdString(tokenIdValue);
+    if (!tokenId) continue;
+
+    const chainTokenId = BigInt(tokenId);
+    const [status, price] = await Promise.all([
+      ticketContract.getTicketStatus(chainTokenId),
+      ticketContract.getTicketPrice(chainTokenId),
+    ]);
+
+    if (status !== ONCHAIN_TICKET_STATUS.MINTED) {
+      continue;
+    }
+
+    const [owner, ticketInfo] = await Promise.all([
+      ticketContract.ownerOf(chainTokenId),
+      ticketContract.getTicketInfo(chainTokenId),
+    ]);
+
+    const upserted = await ticketRepository.upsertMintedFromChain({
+      tokenId,
+      eventId: event._id,
+      currentOwner: owner,
+      originalPrice: price.toString(),
+      ticketType: mapChainTicketTypeToDb(ticketInfo?.ticketType),
+    });
+
+    if (upserted) {
+      return upserted;
+    }
+  }
+
+  return null;
+}
+
 /**
  * Build a primary-sale purchase intent for wallet signing
  */
@@ -105,6 +213,7 @@ export async function createPurchaseIntent(payload = {}, buyerWallet, repos = {}
   }
 
   let selectedTicket = null;
+  let event = null;
 
   if (tokenId) {
     selectedTicket = await ticketRepository.findByTokenId(String(tokenId), { lean: true });
@@ -112,7 +221,16 @@ export async function createPurchaseIntent(payload = {}, buyerWallet, repos = {}
     if (!mongoose.isValidObjectId(eventId)) {
       throw new BadRequestError('Invalid event id');
     }
+
+    event = await eventRepository.findById(eventId);
+    if (!event) {
+      throw new NotFoundError('Event not found');
+    }
+
     selectedTicket = await findMintedTicketByEventId(eventId, repos);
+    if (!selectedTicket) {
+      selectedTicket = await hydrateMintedTicketFromChain(event, repos);
+    }
   }
 
   if (!selectedTicket) {
@@ -123,26 +241,52 @@ export async function createPurchaseIntent(payload = {}, buyerWallet, repos = {}
     throw new BadRequestError('Ticket does not belong to this event');
   }
 
-  const event = await eventRepository.findById(selectedTicket.eventId);
   if (!event) {
-    throw new NotFoundError('Event not found');
+    event = await eventRepository.findById(selectedTicket.eventId);
+    if (!event) {
+      throw new NotFoundError('Event not found');
+    }
   }
 
   ensureEventOpenForTicketing(event);
 
   const ticketContract = getTicket();
-  const chainTokenId = BigInt(selectedTicket.tokenId);
-
-  const [chainStatus, chainPrice, contractAddress, network] = await Promise.all([
+  let chainTokenId = BigInt(selectedTicket.tokenId);
+  let [chainStatus, chainPrice] = await Promise.all([
     ticketContract.getTicketStatus(chainTokenId),
     ticketContract.getTicketPrice(chainTokenId),
+  ]);
+
+  if (chainStatus !== ONCHAIN_TICKET_STATUS.MINTED && !tokenId) {
+    const dbStatus = mapOnchainStatusToDbStatus(chainStatus);
+    if (dbStatus) {
+      await ticketRepository.updateStatus(selectedTicket.tokenId, dbStatus);
+    }
+
+    const refreshedTicket = await hydrateMintedTicketFromChain(event, repos);
+    if (!refreshedTicket) {
+      throw new NotFoundError('No available minted ticket found');
+    }
+
+    selectedTicket = refreshedTicket;
+    chainTokenId = BigInt(selectedTicket.tokenId);
+    [chainStatus, chainPrice] = await Promise.all([
+      ticketContract.getTicketStatus(chainTokenId),
+      ticketContract.getTicketPrice(chainTokenId),
+    ]);
+  }
+
+  if (chainStatus !== ONCHAIN_TICKET_STATUS.MINTED) {
+    if (!tokenId) {
+      throw new NotFoundError('No available minted ticket found');
+    }
+    throw new BadRequestError('Ticket is no longer available for primary purchase');
+  }
+
+  const [contractAddress, network] = await Promise.all([
     ticketContract.getAddress(),
     provider.getNetwork(),
   ]);
-
-  if (chainStatus !== ONCHAIN_TICKET_STATUS.MINTED) {
-    throw new BadRequestError('Ticket is no longer available for primary purchase');
-  }
 
   const data = ticketContract.interface.encodeFunctionData('purchaseTicket', [chainTokenId]);
 
@@ -171,9 +315,9 @@ export async function confirmPurchaseTransaction(payload = {}, repos = {}) {
 
   validateTransactionHash(txHash);
 
-  const receipt = await provider.getTransactionReceipt(txHash);
+  const receipt = await getMinedReceipt(txHash);
   if (!receipt) {
-    throw new BadRequestError('Transaction not mined yet');
+    throw new BadRequestError('Transaction not mined yet. Please wait a moment and retry.');
   }
   if (Number(receipt.status) !== 1) {
     throw new BadRequestError('Transaction failed on-chain');
@@ -279,11 +423,22 @@ export async function createUseTicketIntent(tokenId, verifierWallet, repos = {})
   const ticketContract = getTicket();
   const chainTokenId = BigInt(ticket.tokenId);
 
-  const [chainStatus, contractAddress, network] = await Promise.all([
+  if (!event.contractEventId) {
+    throw new BadRequestError('Event is not configured for on-chain check-in');
+  }
+
+  const chainEventId = BigInt(event.contractEventId);
+
+  const [chainStatus, isVerifierOnChain, contractAddress, network] = await Promise.all([
     ticketContract.getTicketStatus(chainTokenId),
+    ticketContract.isEventVerifier(chainEventId, verifierWallet),
     ticketContract.getAddress(),
     provider.getNetwork(),
   ]);
+
+  if (!isVerifierOnChain) {
+    throw new ForbiddenError('Verifier wallet is not authorized on-chain for this event');
+  }
 
   if (chainStatus !== ONCHAIN_TICKET_STATUS.SOLD) {
     throw new BadRequestError('Ticket is not in sold state on-chain');
@@ -315,9 +470,9 @@ export async function confirmUseTicketTransaction(payload = {}, repos = {}) {
 
   validateTransactionHash(txHash);
 
-  const receipt = await provider.getTransactionReceipt(txHash);
+  const receipt = await getMinedReceipt(txHash);
   if (!receipt) {
-    throw new BadRequestError('Transaction not mined yet');
+    throw new BadRequestError('Transaction not mined yet. Please wait a moment and retry.');
   }
   if (Number(receipt.status) !== 1) {
     throw new BadRequestError('Transaction failed on-chain');
@@ -510,6 +665,12 @@ export async function markTicketAsUsed(tokenId, verifierWallet, repos = {}) {
     throw new BadRequestError('Current time must be within event dates');
   }
 
+  if (event.contractEventId) {
+    throw new BadRequestError(
+      'This event requires on-chain check-in. Use the use-intent and confirm flow instead.',
+    );
+  }
+
   const usageData = {
     usedAt: now,
     verifiedBy: verifierWallet.toLowerCase(),
@@ -529,6 +690,39 @@ export async function markTicketAsUsed(tokenId, verifierWallet, repos = {}) {
  */
 export async function getTicketStats(eventId, repos = {}) {
   const ticketRepository = repos.ticketRepo || ticketRepo;
+  const eventRepository = repos.eventRepo || eventRepo;
+
+  if (!mongoose.isValidObjectId(eventId)) {
+    throw new BadRequestError('Invalid event id');
+  }
+
+  const event = await eventRepository.findById(eventId);
+  if (!event) {
+    throw new NotFoundError('Event not found');
+  }
+
+  if (event.contractEventId) {
+    try {
+      const ticketContract = getTicket();
+      const chainEventId = BigInt(event.contractEventId);
+      const chainInfo = await ticketContract.getEventTicketInfo(chainEventId);
+
+      const totalTickets = Number(chainInfo.totalMinted || 0n);
+      const soldTickets = Number(chainInfo.totalSold || 0n);
+      const usedTickets = Number(chainInfo.totalUsed || 0n);
+      const availableTickets = Math.max(totalTickets - soldTickets, 0);
+
+      return {
+        totalTickets,
+        soldTickets,
+        usedTickets,
+        mintedTickets: totalTickets,
+        availableTickets,
+      };
+    } catch {
+      // Fallback to DB read-model when on-chain call fails.
+    }
+  }
 
   const eventObjectId = new mongoose.Types.ObjectId(eventId);
   const stats = await ticketRepository.getTicketStatsByEvent(eventObjectId);
@@ -538,14 +732,147 @@ export async function getTicketStats(eventId, repos = {}) {
     soldTickets: stats.sold || 0,
     usedTickets: stats.used || 0,
     mintedTickets: stats.minted || 0,
-    availableTickets: stats.minted || 0,
+    availableTickets: Math.max((stats.minted || 0) - (stats.sold || 0), 0),
+  };
+}
+
+export async function createRefundIntent(tokenId, buyerWallet, repos = {}) {
+  const ticketRepository = repos.ticketRepo || ticketRepo;
+  const eventRepository = repos.eventRepo || eventRepo;
+
+  if (!buyerWallet) {
+    throw new BadRequestError('Buyer wallet address is required');
+  }
+
+  const ticket = await ticketRepository.findByTokenId(tokenId, { lean: true });
+  if (!ticket) {
+    throw new NotFoundError('Ticket not found');
+  }
+
+  if (ticket.status !== 'sold') {
+    throw new BadRequestError('Ticket must be sold before refund claim');
+  }
+
+  if (ticket.currentOwner?.toLowerCase() !== buyerWallet.toLowerCase()) {
+    throw new ForbiddenError('Only the current ticket owner can claim refund');
+  }
+
+  const event = await eventRepository.findById(ticket.eventId);
+  if (!event) {
+    throw new NotFoundError('Event not found');
+  }
+
+  if (event.status !== 'cancelled' && event.status !== 'failed') {
+    throw new BadRequestError('Ticket refund is only available for cancelled or failed events');
+  }
+
+  const ticketContract = getTicket();
+  const chainTokenId = BigInt(ticket.tokenId);
+  const [chainStatus, contractAddress, network] = await Promise.all([
+    ticketContract.getTicketStatus(chainTokenId),
+    ticketContract.getAddress(),
+    provider.getNetwork(),
+  ]);
+
+  if (chainStatus !== ONCHAIN_TICKET_STATUS.SOLD) {
+    throw new BadRequestError('Ticket is not refundable on-chain');
+  }
+
+  const data = ticketContract.interface.encodeFunctionData('claimRefund', [chainTokenId]);
+
+  return {
+    tokenId: ticket.tokenId,
+    eventId: String(ticket.eventId),
+    buyer: buyerWallet.toLowerCase(),
+    refundAmount: String(ticket.originalPrice || '0'),
+    transaction: {
+      to: contractAddress,
+      data,
+      value: '0',
+      chainId: network.chainId.toString(),
+      functionName: 'claimRefund',
+    },
+  };
+}
+
+export async function confirmRefundTransaction(payload = {}, repos = {}) {
+  const ticketRepository = repos.ticketRepo || ticketRepo;
+
+  const { txHash, tokenId, buyerWallet } = payload;
+
+  validateTransactionHash(txHash);
+
+  const receipt = await getMinedReceipt(txHash);
+  if (!receipt) {
+    throw new BadRequestError('Transaction not mined yet. Please wait a moment and retry.');
+  }
+  if (Number(receipt.status) !== 1) {
+    throw new BadRequestError('Transaction failed on-chain');
+  }
+
+  const parsedEvents = await parseTicketEventsFromReceipt(receipt);
+  const refundEvents = parsedEvents.filter((event) => event?.name === 'TicketRefunded');
+
+  let matchedEvent = null;
+
+  if (tokenId) {
+    matchedEvent = refundEvents.find((event) => {
+      const eventTokenId = toTokenIdString(event.args?.tokenId);
+      return eventTokenId === String(tokenId);
+    });
+  } else {
+    [matchedEvent] = refundEvents;
+  }
+
+  if (!matchedEvent) {
+    throw new BadRequestError('TicketRefunded event not found in transaction receipt');
+  }
+
+  const refundedTokenId = toTokenIdString(matchedEvent.args?.tokenId);
+  const buyerFromChain = String(matchedEvent.args?.owner || '').toLowerCase();
+
+  if (buyerWallet && buyerFromChain !== buyerWallet.toLowerCase()) {
+    throw new BadRequestError('Buyer wallet does not match on-chain refund event');
+  }
+
+  const existingTicket = await ticketRepository.findByTokenId(refundedTokenId, { lean: true });
+  if (!existingTicket) {
+    throw new NotFoundError('Ticket not found in database');
+  }
+
+  if (existingTicket.status === 'refunded') {
+    return {
+      synced: false,
+      alreadySynced: true,
+      txHash: normalizeTxHash(txHash),
+      ticket: existingTicket,
+    };
+  }
+
+  const refundedAt = receipt.blockNumber
+    ? new Date(Number((await provider.getBlock(receipt.blockNumber)).timestamp) * 1000)
+    : new Date();
+
+  const updatedTicket = await ticketRepository.markAsRefundedFromChain(
+    refundedTokenId,
+    {
+      refundedAt,
+      refundedTxHash: normalizeTxHash(txHash),
+    },
+  );
+
+  return {
+    synced: true,
+    alreadySynced: false,
+    txHash: normalizeTxHash(txHash),
+    ticket: updatedTicket,
   };
 }
 
 /**
  * Verify ticket ownership and return ticket details
  */
-export async function verifyTicket(tokenId, walletAddress, verifierWallet, repos = {}) {
+export async function verifyTicket(tokenId, eventId, walletAddress, verifierWallet, repos = {}) {
   const ticketRepository = repos.ticketRepo || ticketRepo;
   const eventRepository = repos.eventRepo || eventRepo;
 
@@ -553,6 +880,10 @@ export async function verifyTicket(tokenId, walletAddress, verifierWallet, repos
 
   if (!ticket) {
     throw new NotFoundError('Ticket not found');
+  }
+
+  if (eventId && String(ticket.eventId) !== String(eventId)) {
+    throw new BadRequestError('Ticket does not belong to this event');
   }
 
   const event = await eventRepository.findById(ticket.eventId);
@@ -571,10 +902,26 @@ export async function verifyTicket(tokenId, walletAddress, verifierWallet, repos
     throw new BadRequestError('Current time must be within event dates');
   }
 
-  const isOwner = ticket.currentOwner.toLowerCase() === walletAddress.toLowerCase();
+  let resolvedOwner = normalizeWalletAddress(ticket.currentOwner);
+
+  if (event.contractEventId) {
+    const chainSnapshot = await getOnChainTicketSnapshot(ticket.tokenId, event);
+
+    if (chainSnapshot.status !== ONCHAIN_TICKET_STATUS.SOLD) {
+      throw new BadRequestError('Ticket is not in sold state on-chain');
+    }
+
+    resolvedOwner = chainSnapshot.owner;
+  }
+
+  const normalizedWallet = normalizeWalletAddress(walletAddress);
+  const isOwner = normalizedWallet
+    ? resolvedOwner === normalizedWallet
+    : !!resolvedOwner;
 
   return {
     isOwner,
+    ownerWallet: resolvedOwner,
     ticket,
   };
 }

@@ -10,7 +10,6 @@ import {
   validateMultipleImages,
 } from "../middlewares/image.middleware.js";
 
-
 const router = express.Router();
 const controller = new EventsController();
 
@@ -183,6 +182,26 @@ router.post(
   validate({ body: eventSchemas.createEvent }),
   controller.createEvent,
 );
+
+router.post(
+  "/create-intent",
+  authenticate,
+  requireEventCreator,
+  uploadEventImages,
+  validateMultipleImages,
+  validate({ body: eventSchemas.createEventIntent }),
+  controller.createEventIntent,
+);
+
+router.post(
+  "/create/confirm",
+  authenticate,
+  requireEventCreator,
+  validate({ body: eventSchemas.confirmCreateEvent }),
+  controller.confirmCreateEventTransaction,
+);
+
+router.get("/blockchain-config", controller.getBlockchainConfig);
 
 /**
  * @swagger
@@ -360,10 +379,37 @@ router.delete(
  *         description: Server error
  */
 router.post(
+  "/:id/invest-intent",
+  authenticate,
+  validate({ body: eventSchemas.investEvent }),
+  controller.createInvestmentIntent,
+);
+
+router.post(
+  "/:id/invest/confirm",
+  authenticate,
+  validate({ body: eventSchemas.confirmInvestEvent }),
+  controller.confirmInvestmentTransaction,
+);
+
+router.post(
   "/:id/invest",
   authenticate,
   validate({ body: eventSchemas.investEvent }),
   controller.investInEvent,
+);
+
+router.post(
+  "/:id/refund-intent",
+  authenticate,
+  controller.createContributionRefundIntent,
+);
+
+router.post(
+  "/:id/refund/confirm",
+  authenticate,
+  validate({ body: eventSchemas.confirmContributionRefund }),
+  controller.confirmContributionRefundTransaction,
 );
 
 /**
@@ -437,7 +483,62 @@ router.post(
   "/:id/assign-verifier",
   authenticate,
   requireAdmin,
-  controller.assignVerifier
+  controller.assignVerifier,
+);
+
+router.post(
+  "/:id/assign-verifier/onchain",
+  authenticate,
+  requireAdmin,
+  controller.assignVerifierOnChain,
+);
+
+/**
+ * @swagger
+ * /events/{id}/mark-completed:
+ *   post:
+ *     summary: Mark event as completed when ticket usage threshold is met
+ *     tags: [Events]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Event ID
+ *         example: "507f1f77bcf86cd799439011"
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               txHash:
+ *                 type: string
+ *                 description: Optional transaction hash if triggered on-chain separately
+ *                 example: "0x123abc..."
+ *     responses:
+ *       200:
+ *         description: Event marked as completed successfully
+ *       400:
+ *         description: Validation error or event not in ticketing status or threshold not met
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Not authorized (organizer required)
+ *       404:
+ *         description: Event not found
+ *       500:
+ *         description: Server error
+ */
+router.post(
+  "/:id/mark-completed",
+  authenticate,
+  requireEventCreator,
+  validate({ body: eventSchemas.markEventCompleted }),
+  controller.markEventAsCompleted,
 );
 
 export default router;

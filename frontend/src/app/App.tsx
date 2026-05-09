@@ -4,6 +4,8 @@ import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { PublicLayout } from "./layouts/PublicLayout";
 import { UserLayout } from "./layouts/UserLayout";
 import { AdminLayout } from "./layouts/AdminLayout";
+import { LoadingProvider } from "./components/ui/loadingContext";
+
 
 // Public Pages
 import { Home } from "./pages/public/Home";
@@ -25,6 +27,8 @@ import { InvestmentDetail } from "./pages/user/InvestmentDetail";
 import { Wallet } from "./pages/user/Wallet";
 import { Profile } from "./pages/user/Profile";
 import { Settings } from "./pages/user/Settings";
+import { DepositSuccess } from "./pages/user/DepositSuccess";
+import { DepositFailed } from "./pages/user/DepositFailed";
 
 // Verifier Pages
 import { VerifierDashboard } from "./pages/verifier/VerifierDashboard";
@@ -197,6 +201,8 @@ const AppRoutes: React.FC = () => {
         <Route path="investments" element={<MyInvestments />} />
         <Route path="investments/:id" element={<InvestmentDetail />} />
         <Route path="wallet" element={<Wallet />} />
+        <Route path="deposit/success" element={<DepositSuccess />} />
+        <Route path="deposit/failed" element={<DepositFailed />} />
         <Route path="account/profile" element={<Profile />} />
         <Route path="account/settings" element={<Settings />} />
       </Route>
@@ -244,7 +250,9 @@ const AppRoutes: React.FC = () => {
 const App: React.FC = () => {
   return (
     <AuthProvider>
-      <AppRoutes />
+      <LoadingProvider>
+        <AppRoutes />
+      </LoadingProvider>
     </AuthProvider>
   );
 };

@@ -16,9 +16,19 @@ import { Input } from "../../components/ui/input";
 import { StatusBadge } from "../../components/StatusBadge";
 import { ImageWithFallback } from "../../components/figma/ImageWithFallback";
 import { useAuth } from "../../contexts/AuthContext";
+import { useLoading } from "../../components/ui/loadingContext";
 import { getEventById, type EventItem } from "../../services/events.service";
-import { investInEvent } from "../../services/investment.service";
-import { purchaseTicket } from "../../services/tickets.service";
+import {
+  investInEventOnChain,
+  type Eip1193Provider,
+} from "../../services/investment.service";
+import {
+  getTicketStats,
+  getTickets,
+  purchaseTicket,
+  type ApiTicket,
+  type EventTicketStats,
+} from "../../services/tickets.service";
 import { useWeb3Auth } from "@web3auth/modal/react";
 import { calculatePercentage, formatIntegerWithUnit } from "../../lib/utils";
 
@@ -26,6 +36,7 @@ export const EventDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const { connectWallet, user } = useAuth();
   const { web3Auth } = useWeb3Auth();
+  const { show: showLoading, hide: hideLoading } = useLoading();
   const [event, setEvent] = useState<EventItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -38,6 +49,9 @@ export const EventDetail: React.FC = () => {
     type: "success" | "error";
     message: string;
   } | null>(null);
+  const [ticketStats, setTicketStats] = useState<EventTicketStats | null>(null);
+  const [eventTickets, setEventTickets] = useState<ApiTicket[]>([]);
+  const [loadingTickets, setLoadingTickets] = useState(false);
   const [purchaseConfirmTier, setPurchaseConfirmTier] = useState<string | null>(
     null,
   );
@@ -47,7 +61,7 @@ export const EventDetail: React.FC = () => {
 
     const timeoutId = window.setTimeout(() => {
       setBuyPopup(null);
-    }, 3000);
+    }, 10000);
 
     return () => {
       window.clearTimeout(timeoutId);
@@ -58,6 +72,29 @@ export const EventDetail: React.FC = () => {
     setBuyPopup({ type, message });
   };
 
+  const loadTicketData = async (targetEventId: string) => {
+    setLoadingTickets(true);
+    try {
+      const [stats, tickets] = await Promise.all([
+        getTicketStats(targetEventId),
+        getTickets({
+          eventId: targetEventId,
+          page: 1,
+          limit: 50,
+          sort: "-createdAt",
+        }),
+      ]);
+
+      setTicketStats(stats);
+      setEventTickets(tickets.docs || []);
+    } catch {
+      setTicketStats(null);
+      setEventTickets([]);
+    } finally {
+      setLoadingTickets(false);
+    }
+  };
+
   useEffect(() => {
     const fetchEvent = async () => {
       if (!id) return;
@@ -65,12 +102,20 @@ export const EventDetail: React.FC = () => {
       try {
         setLoading(true);
         setError("");
+        showLoading("Loading event...");
         const data = await getEventById(id);
         setEvent(data);
+        if (data?._id && (data.status === "ticketing" || data.status === "ongoing")) {
+          await loadTicketData(data._id);
+        } else {
+          setTicketStats(null);
+          setEventTickets([]);
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load event");
       } finally {
         setLoading(false);
+        hideLoading();
       }
     };
 
@@ -86,12 +131,20 @@ export const EventDetail: React.FC = () => {
   }, [event]);
 
   const eventId = event?._id || event?.id || "";
+  const availableTickets = ticketStats?.availableTickets ?? null;
+  const trackedTickets = ticketStats?.totalTickets ?? totalTickets;
+  const ticketingOpen = event?.status === "ticketing" || event?.status === "ongoing";
   const fundingProgress = Math.min(
     calculatePercentage(event?.currentFunding, event?.fundingGoal, 1),
     100,
   );
+  const investmentMode =
+    event?.investmentEnabled === false ? "Self-funded" : "Investment-enabled";
   const isInvestable =
     event?.status === "funding" && String(event?.fundingGoal || "0") !== "0";
+  const isTicketPurchasable =
+    event?.status === "ticketing" || event?.status === "ongoing";
+  const minInvestmentAmount = String(event?.minInvestmentAmount || "0");
 
   const coverImage = event?.imageUrls?.[0] || "";
   const eventDate = event?.startDate ? new Date(event.startDate) : null;
@@ -122,8 +175,16 @@ export const EventDetail: React.FC = () => {
     });
   };
 
+  const getTicketHolderLabel = (ticket: ApiTicket) => {
+    if (ticket.status === "minted") {
+      return "Organizer inventory";
+    }
+
+    return ticket.currentOwner || "-";
+  };
+
   const handleInvest = async () => {
-    if (!user?.walletAddress) {
+    if (!user?.walletAddress && !user?.smartAccountAddress) {
       await connectWallet();
       return;
     }
@@ -137,13 +198,36 @@ export const EventDetail: React.FC = () => {
       return;
     }
 
+    if (
+      /^[0-9]+$/.test(minInvestmentAmount) &&
+      minInvestmentAmount !== "0" &&
+      BigInt(investmentAmount.trim()) < BigInt(minInvestmentAmount)
+    ) {
+      setInvestError(
+        `Contribution amount must be at least ${minInvestmentAmount} wei.`,
+      );
+      return;
+    }
+
     setInvestError("");
     setInvestSuccess("");
     setInvesting(true);
 
     try {
-      await investInEvent(eventId, investmentAmount.trim());
-      setInvestSuccess("Contribution recorded. Refreshing event data...");
+      const provider = web3Auth?.provider as Eip1193Provider | undefined;
+      if (!provider?.request) {
+        throw new Error(
+          "Wallet provider is not ready. Please reconnect wallet and try again.",
+        );
+      }
+
+      const result = await investInEventOnChain(
+        provider,
+        eventId,
+        investmentAmount.trim(),
+        user.walletAddress || user.smartAccountAddress,
+      );
+      setInvestSuccess(`Investment successful`);
       const refreshedEvent = await getEventById(eventId);
       setEvent(refreshedEvent);
     } catch (err) {
@@ -196,10 +280,11 @@ export const EventDetail: React.FC = () => {
         { eventId: event._id },
         user.walletAddress,
       );
-      showBuyPopup("success", `Purchase successful. Tx: ${result.txHash}`);
+      showBuyPopup("success", "Ticket purchase successful");
 
       const refreshedEvent = await getEventById(event._id);
       setEvent(refreshedEvent);
+      await loadTicketData(event._id);
     } catch (err) {
       showBuyPopup(
         "error",
@@ -212,6 +297,14 @@ export const EventDetail: React.FC = () => {
   };
 
   const handlePurchaseClick = async (tierName?: string) => {
+    if (!isTicketPurchasable) {
+      showBuyPopup(
+        "error",
+        "Ticket sales are not open for this event yet.",
+      );
+      return;
+    }
+
     if (!user?.walletAddress) {
       try {
         await connectWallet();
@@ -231,7 +324,7 @@ export const EventDetail: React.FC = () => {
     setPurchaseConfirmTier(tierName || "this ticket");
   };
 
-  if (loading) return <div className="p-8 text-white">Loading event...</div>;
+  
   if (error) return <div className="p-8 text-red-400">{error}</div>;
   if (!event) return <div className="p-8 text-white">Event not found</div>;
 
@@ -276,7 +369,11 @@ export const EventDetail: React.FC = () => {
               <div className="mb-4 flex flex-wrap items-center gap-3">
                 <StatusBadge status={event.status || "draft"} />
                 <span className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-300">
-                  {totalTickets} total tickets
+                  {availableTickets ?? totalTickets} available /{" "}
+                  {trackedTickets} tracked
+                </span>
+                <span className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-300">
+                  Investment Mode: {investmentMode}
                 </span>
               </div>
 
@@ -327,39 +424,42 @@ export const EventDetail: React.FC = () => {
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
-                <div className="flex items-center justify-between text-sm text-slate-300 mb-2">
-                  <span className="inline-flex items-center gap-2">
-                    <Gauge className="w-4 h-4 text-cyan-300" />
-                    Funding progress
-                  </span>
-                  <span className="font-medium">
-                    {fundingProgress.toFixed(1)}%
-                  </span>
+              {event?.investmentEnabled !== false ? (
+                <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
+                  <div className="flex items-center justify-between text-sm text-slate-300 mb-2">
+                    <span className="inline-flex items-center gap-2">
+                      <Gauge className="w-4 h-4 text-cyan-300" />
+                      Funding progress
+                    </span>
+                    <span className="font-medium">
+                      {fundingProgress.toFixed(1)}%
+                    </span>
+                  </div>
+                  <div className="h-2 rounded-full bg-slate-800 overflow-hidden mb-3">
+                    <div
+                      className="h-full bg-gradient-to-r from-cyan-400 via-emerald-400 to-amber-300"
+                      style={{ width: `${fundingProgress}%` }}
+                    />
+                  </div>
+                  <div className="grid sm:grid-cols-2 gap-2 text-xs text-slate-400">
+                    <span>
+                      Raised: {" "}
+                      {formatIntegerWithUnit(event?.currentFunding, "wei")}
+                    </span>
+                    <span>
+                      Goal: {formatIntegerWithUnit(event?.fundingGoal, "wei")}
+                    </span>
+                    <span>
+                      Min stake: {" "}
+                      {formatIntegerWithUnit(event?.minStakeRequired, "wei")}
+                    </span>
+                    {fundingDeadline ? (
+                      <span>Deadline: {formatDate(fundingDeadline)}</span>
+                    ) : null}
+                    <span>Investment Mode: {investmentMode}</span>
+                  </div>
                 </div>
-                <div className="h-2 rounded-full bg-slate-800 overflow-hidden mb-3">
-                  <div
-                    className="h-full bg-gradient-to-r from-cyan-400 via-emerald-400 to-amber-300"
-                    style={{ width: `${fundingProgress}%` }}
-                  />
-                </div>
-                <div className="grid sm:grid-cols-2 gap-2 text-xs text-slate-400">
-                  <span>
-                    Raised:{" "}
-                    {formatIntegerWithUnit(event?.currentFunding, "wei")}
-                  </span>
-                  <span>
-                    Goal: {formatIntegerWithUnit(event?.fundingGoal, "wei")}
-                  </span>
-                  <span>
-                    Min stake:{" "}
-                    {formatIntegerWithUnit(event?.minStakeRequired, "wei")}
-                  </span>
-                  {fundingDeadline ? (
-                    <span>Deadline: {formatDate(fundingDeadline)}</span>
-                  ) : null}
-                </div>
-              </div>
+              ) : null}
             </div>
           </div>
         </div>
@@ -386,10 +486,12 @@ export const EventDetail: React.FC = () => {
 
                     <div className="mb-4">
                       <p className="text-3xl font-bold text-white">
-                        {tier.price ?? 0} ETH
+                        {tier.price ?? 0} wei
                       </p>
                       <p className="text-sm text-slate-400 mt-1">
-                        {tier.totalSupply || 0} available
+                        {availableTickets !== null
+                          ? `${availableTickets} remaining (overall)`
+                          : `${tier.totalSupply || 0} configured`}
                       </p>
                     </div>
 
@@ -405,8 +507,19 @@ export const EventDetail: React.FC = () => {
                     <Button
                       onClick={() => handlePurchaseClick(tier.name)}
                       className="w-full bg-cyan-600 hover:bg-cyan-500 text-white"
+                      disabled={
+                        buying || availableTickets === 0 || !isTicketPurchasable
+                      }
                     >
-                      {user?.walletAddress ? "Buy Ticket" : "Connect Wallet"}
+                      {!isTicketPurchasable
+                        ? "Sales Not Open"
+                        : availableTickets === 0
+                        ? "Sold Out"
+                        : buying
+                          ? "Processing..."
+                          : user?.walletAddress
+                            ? "Buy Ticket"
+                            : "Connect Wallet"}
                     </Button>
                   </div>
                 ))}
@@ -417,7 +530,8 @@ export const EventDetail: React.FC = () => {
           </CardContent>
         </Card>
 
-        <Card className="overflow-hidden border-emerald-500/30 bg-gradient-to-r from-emerald-900/20 via-cyan-900/15 to-amber-900/20">
+
+        <Card className="overflow-hidden border-emerald-500/30 bg-gradient-to-r from-emerald-900/20 via-cyan-900/15 to-amber-900/20 mt-2">
           <CardContent className="p-6">
             <div className="flex flex-col gap-4">
               <div className="flex items-start space-x-4">
@@ -447,7 +561,7 @@ export const EventDetail: React.FC = () => {
                     onChange={(e) =>
                       setInvestmentAmount(e.target.value.replace(/[^0-9]/g, ""))
                     }
-                    className="w-full border-slate-700 bg-slate-900"
+                    className="w-full border-slate-700 bg-slate-900 text-white"
                     placeholder="1000000000000000000"
                   />
 
@@ -467,6 +581,9 @@ export const EventDetail: React.FC = () => {
                   <p className="text-xs text-slate-500 mt-2">
                     Organizer stake is configured separately. This input is for
                     donator contribution only.
+                    {minInvestmentAmount !== "0"
+                      ? ` Minimum investment: ${formatIntegerWithUnit(minInvestmentAmount, "wei")}.`
+                      : ""}
                   </p>
                 </div>
 
