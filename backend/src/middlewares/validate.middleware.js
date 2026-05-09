@@ -1,5 +1,37 @@
 import { BadRequestError } from '../utils/customErrors.js';
 
+function normalizeMultipartValue(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeMultipartValue(item));
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entryValue]) => [
+        key,
+        normalizeMultipartValue(entryValue),
+      ])
+    );
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    const looksLikeJson =
+      (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+      (trimmed.startsWith('[') && trimmed.endsWith(']'));
+
+    if (looksLikeJson) {
+      try {
+        return JSON.parse(trimmed);
+      } catch {
+        return value;
+      }
+    }
+  }
+
+  return value;
+}
+
 /**
  * Validate request data against Joi schemas
  * Validates req.body, req.params, and req.query dynamically
@@ -15,14 +47,15 @@ export function validate(schema) {
 
     validationTargets.forEach((target) => {
       if (schema[target]) {
-        const { error, value } = schema[target].validate(req[target], {
+        const rawValue = target === 'body' ? normalizeMultipartValue(req[target]) : req[target];
+        const { error: normalizedError, value: normalizedValue } = schema[target].validate(rawValue, {
           abortEarly: false,
           stripUnknown: true,
         });
 
-        if (error) {
+        if (normalizedError) {
           // Gom mảng lỗi
-          error.details.forEach((detail) => {
+          normalizedError.details.forEach((detail) => {
             errors.push({
               field: detail.path.join('.'),
               message: detail.message.replace(/"/g, ''), // Gọt bỏ dấu ngoặc kép Joi tự sinh ra cho đẹp
@@ -31,7 +64,7 @@ export function validate(schema) {
           });
         } else {
           // Lưu dữ liệu đã được làm sạch
-          validated[target] = value;
+          validated[target] = normalizedValue;
         }
       }
     });

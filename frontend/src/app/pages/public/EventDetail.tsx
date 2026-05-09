@@ -55,6 +55,7 @@ export const EventDetail: React.FC = () => {
   const [purchaseConfirmTier, setPurchaseConfirmTier] = useState<string | null>(
     null,
   );
+  const [selectedImageIndex, setSelectedImageIndex] = useState(0);
 
   useEffect(() => {
     if (!buyPopup) return;
@@ -122,6 +123,10 @@ export const EventDetail: React.FC = () => {
     fetchEvent();
   }, [id]);
 
+  useEffect(() => {
+    setSelectedImageIndex(0);
+  }, [event?._id]);
+
   const totalTickets = useMemo(() => {
     if (typeof event?.totalTickets === "number") return event.totalTickets;
     return (event?.ticketTiers || []).reduce(
@@ -147,6 +152,12 @@ export const EventDetail: React.FC = () => {
   const minInvestmentAmount = String(event?.minInvestmentAmount || "0");
 
   const coverImage = event?.imageUrls?.[0] || "";
+  const galleryImages = useMemo(() => {
+    const images = event?.imageUrls?.filter(Boolean) || [];
+    return images.length > 0 ? images : coverImage ? [coverImage] : [];
+  }, [event?.imageUrls, coverImage]);
+  const selectedGalleryImage =
+    galleryImages[selectedImageIndex] || galleryImages[0] || "";
   const eventDate = event?.startDate ? new Date(event.startDate) : null;
   const fundingDeadline = event?.fundingDeadline
     ? new Date(event.fundingDeadline)
@@ -358,7 +369,42 @@ export const EventDetail: React.FC = () => {
               />
             </div>
 
-            <div>
+            {galleryImages.length > 1 && (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+                {galleryImages.map((imageUrl, index) => {
+                  const active = index === selectedImageIndex;
+                  return (
+                    <button
+                      key={`${imageUrl}-${index}`}
+                      type="button"
+                      onClick={() => setSelectedImageIndex(index)}
+                      className={`group relative overflow-hidden rounded-2xl border transition-all duration-200 ${
+                        active
+                          ? "border-cyan-400 ring-2 ring-cyan-400/30 ring-offset-0"
+                          : "border-slate-800 hover:border-slate-600"
+                      }`}
+                    >
+                      <ImageWithFallback
+                        src={imageUrl}
+                        alt={`${event.title || "Event"} gallery ${index + 1}`}
+                        className="h-28 w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+                      />
+                      <div
+                        className={`absolute inset-0 bg-gradient-to-t from-slate-950/55 via-transparent to-transparent transition-opacity ${
+                          active ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                        }`}
+                      />
+                      <div className="absolute left-2 top-2 rounded-full bg-slate-950/75 px-2 py-0.5 text-[11px] font-medium text-white backdrop-blur">
+                        {index + 1}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div>
               <div className="mb-4 flex flex-wrap items-center gap-3">
                 <StatusBadge status={event.status || "draft"} />
                 <span className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-300">
@@ -453,7 +499,6 @@ export const EventDetail: React.FC = () => {
                   </div>
                 </div>
               ) : null}
-            </div>
           </div>
         </div>
 

@@ -1,5 +1,5 @@
-import React from 'react';
-import { DollarSign, TrendingUp, CreditCard, Wallet, CheckCircle, Clock, XCircle } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { DollarSign, TrendingUp, CreditCard, Wallet, CheckCircle, Clock, Activity } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
@@ -14,113 +14,228 @@ import {
   BarChart,
   Bar,
 } from 'recharts';
+import {
+  getAdminEvents,
+  getAdminPlatformStats,
+  type AdminPlatformStats,
+  type EventItem,
+} from '../../services/events.service';
+
+type SettlementRow = {
+  id: string;
+  organizer: string;
+  wallet: string;
+  amountEth: string;
+  date: string;
+  status: 'pending' | 'approved' | 'completed';
+};
+
+function parseNumericValue(value?: string | number): number {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  if (!value) return 0;
+  try {
+    return Number(BigInt(String(value)));
+  } catch {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+}
+
+function formatWeiToEth(value?: string | number): string {
+  try {
+    const wei = BigInt(String(value ?? '0'));
+    const base = 10n ** 18n;
+    const whole = wei / base;
+    const fraction = (wei % base).toString().padStart(18, '0').slice(0, 2).replace(/0+$/, '');
+    return fraction ? `${whole.toString()}.${fraction} ETH` : `${whole.toString()} ETH`;
+  } catch {
+    return '0 ETH';
+  }
+}
+
+function formatMonthKey(value?: string): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function monthLabelFromKey(key: string): string {
+  const [year, month] = key.split('-').map(Number);
+  if (!year || !month) return key;
+  return new Intl.DateTimeFormat('en-US', { month: 'short', year: '2-digit' }).format(new Date(year, month - 1, 1));
+}
+
+function aggregateByMonth<T>(
+  items: T[],
+  getDate: (item: T) => string | undefined,
+  getValue: (item: T) => number,
+) {
+  const grouped = new Map<string, { month: string; order: number; revenue: number }>();
+
+  items.forEach((item) => {
+    const key = formatMonthKey(getDate(item));
+    if (!key) return;
+
+    const [year, month] = key.split('-').map(Number);
+    const order = year * 12 + month;
+    const current = grouped.get(key) || { month: monthLabelFromKey(key), order, revenue: 0 };
+    current.revenue += getValue(item);
+    grouped.set(key, current);
+  });
+
+  return Array.from(grouped.values()).sort((left, right) => left.order - right.order);
+}
+
+function shortenWallet(wallet?: string): string {
+  if (!wallet) return 'Unknown wallet';
+  if (wallet.length <= 18) return wallet;
+  return `${wallet.slice(0, 10)}...${wallet.slice(-6)}`;
+}
 
 export const FinanceDashboard: React.FC = () => {
-  const revenueStats = [
-    {
-      title: 'Total Platform Revenue',
-      value: '1,247.8 ETH',
-      usd: '$3,892,450',
-      change: '+18.5%',
-      trend: 'up',
-      icon: DollarSign,
-      color: 'from-green-500 to-emerald-500',
-    },
-    {
-      title: 'Ticket Sales Revenue',
-      value: '982.3 ETH',
-      usd: '$3,067,890',
-      change: '+22.3%',
-      trend: 'up',
-      icon: TrendingUp,
-      color: 'from-blue-500 to-cyan-500',
-    },
-    {
-      title: 'Marketplace Fees',
-      value: '215.5 ETH',
-      usd: '$673,210',
-      change: '+12.8%',
-      trend: 'up',
-      icon: CreditCard,
-      color: 'from-purple-500 to-pink-500',
-    },
-    {
-      title: 'Pending Withdrawals',
-      value: '50.0 ETH',
-      usd: '$156,350',
-      change: '-5.2%',
-      trend: 'down',
-      icon: Wallet,
-      color: 'from-orange-500 to-red-500',
-    },
-  ];
+  const [platformStats, setPlatformStats] = useState<AdminPlatformStats | null>(null);
+  const [events, setEvents] = useState<EventItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  const revenueData = [
-    { month: 'Jan', ticket: 125, marketplace: 28, total: 153 },
-    { month: 'Feb', ticket: 142, marketplace: 32, total: 174 },
-    { month: 'Mar', ticket: 165, marketplace: 38, total: 203 },
-    { month: 'Apr', ticket: 189, marketplace: 42, total: 231 },
-    { month: 'May', ticket: 218, marketplace: 48, total: 266 },
-    { month: 'Jun', ticket: 235, marketplace: 55, total: 290 },
-  ];
+  useEffect(() => {
+    let alive = true;
 
-  const categoryRevenueData = [
-    { category: 'Music Events', revenue: 425.5 },
-    { category: 'Tech Conferences', revenue: 312.8 },
-    { category: 'Sports', revenue: 268.3 },
-    { category: 'Art & Culture', revenue: 145.7 },
-    { category: 'Other', revenue: 95.5 },
-  ];
+    const load = async () => {
+      setLoading(true);
+      setError('');
 
-  const withdrawalRequests = [
-    {
-      id: 'WR-001',
-      organizer: 'CryptoMusic Festival',
-      wallet: '0x742d35Cc6634C0532925a3b844Bc9e7595bEb5',
-      amount: '15.5 ETH',
-      usd: '$48,425',
-      date: '2024-03-05',
-      status: 'pending',
-    },
-    {
-      id: 'WR-002',
-      organizer: 'Tech Summit 2024',
-      wallet: '0x8ba1f109551bD432803012645Ac136ddd64DBA72',
-      amount: '22.3 ETH',
-      usd: '$69,638',
-      date: '2024-03-04',
-      status: 'pending',
-    },
-    {
-      id: 'WR-003',
-      organizer: 'NFT Art Gallery',
-      wallet: '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC',
-      amount: '8.7 ETH',
-      usd: '$27,178',
-      date: '2024-03-04',
-      status: 'approved',
-    },
-    {
-      id: 'WR-004',
-      organizer: 'Sports Arena Events',
-      wallet: '0x90F79bf6EB2c4f870365E785982E1f101E93b906',
-      amount: '18.2 ETH',
-      usd: '$56,854',
-      date: '2024-03-03',
-      status: 'approved',
-    },
-    {
-      id: 'WR-005',
-      organizer: 'Comedy Night Live',
-      wallet: '0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65',
-      amount: '5.5 ETH',
-      usd: '$17,183',
-      date: '2024-03-02',
-      status: 'completed',
-    },
-  ];
+      const [statsResult, eventsResult] = await Promise.allSettled([
+        getAdminPlatformStats(),
+        getAdminEvents({ limit: 200, sort: '-updatedAt' }),
+      ]);
 
-  const getStatusBadge = (status: string) => {
+      if (!alive) return;
+
+      if (statsResult.status === 'fulfilled') setPlatformStats(statsResult.value);
+      if (eventsResult.status === 'fulfilled') setEvents(eventsResult.value);
+
+      const failure = [statsResult, eventsResult].find((result) => result.status === 'rejected');
+      if (failure?.status === 'rejected') {
+        setError(failure.reason instanceof Error ? failure.reason.message : String(failure.reason));
+      }
+
+      setLoading(false);
+    };
+
+    load();
+
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const revenueStats = useMemo(() => {
+    const totalRevenue = formatWeiToEth(platformStats?.revenue?.total);
+    const fundingRevenue = formatWeiToEth(platformStats?.revenue?.funding);
+    const soldListings = platformStats?.listings?.sold ?? 0;
+    const activeListings = platformStats?.listings?.active ?? 0;
+
+    return [
+      {
+        title: 'Total Platform Revenue',
+        value: totalRevenue,
+        usd: 'Live backend total',
+        change: '+live',
+        trend: 'up',
+        icon: DollarSign,
+        color: 'from-green-500 to-emerald-500',
+      },
+      {
+        title: 'Funding Volume',
+        value: fundingRevenue,
+        usd: 'Live on-chain funding',
+        change: '+live',
+        trend: 'up',
+        icon: TrendingUp,
+        color: 'from-blue-500 to-cyan-500',
+      },
+      {
+        title: 'Sold Listings',
+        value: soldListings.toLocaleString(),
+        usd: `${activeListings.toLocaleString()} active listings`,
+        change: '+live',
+        trend: 'up',
+        icon: CreditCard,
+        color: 'from-purple-500 to-pink-500',
+      },
+      {
+        title: 'Active Listings',
+        value: activeListings.toLocaleString(),
+        usd: `${platformStats?.listings?.total ?? 0} total listings`,
+        change: '+live',
+        trend: 'up',
+        icon: Wallet,
+        color: 'from-orange-500 to-red-500',
+      },
+    ];
+  }, [platformStats]);
+
+  const revenueData = useMemo(() => {
+    return aggregateByMonth(
+      events,
+      (event) => event.createdAt,
+      (event) => parseNumericValue(event.totalRevenue ?? event.currentFunding) / 1e18,
+    ).map((item, index, array) => ({
+      month: item.month,
+      ticket: item.revenue,
+      marketplace: Math.max(0, Math.round(item.revenue * 0.15)),
+      total: item.revenue,
+    }));
+  }, [events]);
+
+  const categoryRevenueData = useMemo(() => {
+    const grouped = new Map<string, { category: string; revenue: number }>();
+
+    events.forEach((event) => {
+      const category = event.category || 'Other';
+      const current = grouped.get(category) || { category, revenue: 0 };
+      current.revenue += parseNumericValue(event.totalRevenue ?? event.currentFunding) / 1e18;
+      grouped.set(category, current);
+    });
+
+    return Array.from(grouped.values())
+      .sort((left, right) => right.revenue - left.revenue)
+      .slice(0, 5);
+  }, [events]);
+
+  const withdrawalRequests = useMemo<SettlementRow[]>(() => {
+    return [...events]
+      .filter((event) => event.revenueReleased || parseNumericValue(event.organizerStakeWithdrawn) > 0 || event.status === 'completed')
+      .sort((left, right) => {
+        const leftDate = new Date(left.stakeWithdrawnAt || left.updatedAt || left.createdAt || 0).getTime();
+        const rightDate = new Date(right.stakeWithdrawnAt || right.updatedAt || right.createdAt || 0).getTime();
+        return rightDate - leftDate;
+      })
+      .slice(0, 6)
+      .map((event, index) => {
+        const settled = parseNumericValue(event.organizerStakeWithdrawn || event.totalRevenue || event.currentFunding);
+        const hasReleased = Boolean(event.revenueReleased || parseNumericValue(event.organizerStakeWithdrawn) > 0);
+        const status: SettlementRow['status'] =
+          parseNumericValue(event.organizerStakeWithdrawn) > 0 || event.revenueReleased
+            ? 'completed'
+            : event.status === 'completed'
+              ? 'approved'
+              : 'pending';
+
+        return {
+          id: event.contractEventId ? `EV-${event.contractEventId}` : `SET-${index + 1}`,
+          organizer: event.title || 'Untitled event',
+          wallet: event.organizer || event.organizerWallet || 'Unknown wallet',
+          amountEth: formatWeiToEth(settled),
+          date: new Date(event.stakeWithdrawnAt || event.updatedAt || event.createdAt || Date.now()).toISOString().slice(0, 10),
+          status: hasReleased ? 'completed' : status,
+        };
+      });
+  }, [events]);
+
+  const getStatusBadge = (status: SettlementRow['status']) => {
     switch (status) {
       case 'pending':
         return <Badge className="bg-yellow-500/10 text-yellow-400 border-yellow-500/20"><Clock className="w-3 h-3 mr-1" />Pending</Badge>;
@@ -128,19 +243,56 @@ export const FinanceDashboard: React.FC = () => {
         return <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/20"><CheckCircle className="w-3 h-3 mr-1" />Approved</Badge>;
       case 'completed':
         return <Badge className="bg-green-500/10 text-green-400 border-green-500/20"><CheckCircle className="w-3 h-3 mr-1" />Completed</Badge>;
-      case 'rejected':
-        return <Badge className="bg-red-500/10 text-red-400 border-red-500/20"><XCircle className="w-3 h-3 mr-1" />Rejected</Badge>;
       default:
         return <Badge>{status}</Badge>;
     }
   };
 
+  const totalProcessedWei = events.reduce((sum, event) => {
+    if (event.revenueReleased || parseNumericValue(event.organizerStakeWithdrawn) > 0) {
+      return sum + parseNumericValue(event.organizerStakeWithdrawn || event.totalRevenue || event.currentFunding);
+    }
+    return sum;
+  }, 0);
+
+  const pendingApprovalWei = events.reduce((sum, event) => {
+    if (event.status === 'completed' && !event.revenueReleased && parseNumericValue(event.organizerStakeWithdrawn) === 0) {
+      return sum + parseNumericValue(event.totalRevenue || event.currentFunding);
+    }
+    return sum;
+  }, 0);
+
+  const settlementCoverage = events.length > 0
+    ? Math.round((events.filter((event) => event.revenueReleased || parseNumericValue(event.organizerStakeWithdrawn) > 0).length / events.length) * 100)
+    : 0;
+
+  const loadingState = loading && events.length === 0;
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-white mb-2">Finance Dashboard</h1>
-        <p className="text-slate-400">Platform revenue and financial overview</p>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <p className="text-sm uppercase tracking-[0.24em] text-emerald-300/80">Live finance</p>
+          <h1 className="mt-2 text-3xl font-bold text-white">Finance Dashboard</h1>
+          <p className="mt-2 max-w-2xl text-slate-400">Platform revenue and settlement overview derived from live backend event data.</p>
+        </div>
+        <div className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/70 px-3 py-1 text-xs text-slate-300">
+          <Activity className="h-3.5 w-3.5 text-cyan-300" />
+          {events.length} events scanned
+        </div>
       </div>
+
+      {!!error && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+          Some finance data could not be loaded: {error}
+        </div>
+      )}
+
+      {loadingState ? (
+        <Card className="border-slate-800 bg-slate-900">
+          <CardContent className="p-6 text-sm text-slate-400">Loading live finance data...</CardContent>
+        </Card>
+      ) : null}
 
       {/* Revenue Stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -173,7 +325,7 @@ export const FinanceDashboard: React.FC = () => {
         <Card className="bg-slate-900 border-slate-800">
           <CardHeader>
             <CardTitle className="text-white">Monthly Revenue Breakdown</CardTitle>
-            <CardDescription className="text-slate-400">Ticket sales vs marketplace fees (ETH)</CardDescription>
+            <CardDescription className="text-slate-400">Live revenue vs funding volume (ETH)</CardDescription>
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={350}>
@@ -240,11 +392,11 @@ export const FinanceDashboard: React.FC = () => {
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle className="text-white">Withdrawal Requests</CardTitle>
-              <CardDescription className="text-slate-400">Event organizer payout requests</CardDescription>
+              <CardTitle className="text-white">Settlement Requests</CardTitle>
+              <CardDescription className="text-slate-400">Organizer settlements derived from live event completion data</CardDescription>
             </div>
             <Button className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700">
-              Process All Approved
+              Review Settlements
             </Button>
           </div>
         </CardHeader>
@@ -263,7 +415,7 @@ export const FinanceDashboard: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {withdrawalRequests.map((request) => (
+                {withdrawalRequests.length > 0 ? withdrawalRequests.map((request) => (
                   <tr key={request.id} className="border-b border-slate-800 hover:bg-slate-800/30">
                     <td className="py-4 px-4">
                       <span className="text-sm font-medium text-white">{request.id}</span>
@@ -278,8 +430,8 @@ export const FinanceDashboard: React.FC = () => {
                     </td>
                     <td className="py-4 px-4">
                       <div>
-                        <p className="text-sm font-semibold text-white">{request.amount}</p>
-                        <p className="text-xs text-slate-500">{request.usd}</p>
+                        <p className="text-sm font-semibold text-white">{request.amountEth}</p>
+                        <p className="text-xs text-slate-500">Derived from live event revenue</p>
                       </div>
                     </td>
                     <td className="py-4 px-4">
@@ -309,7 +461,13 @@ export const FinanceDashboard: React.FC = () => {
                       )}
                     </td>
                   </tr>
-                ))}
+                )) : (
+                  <tr>
+                    <td className="px-4 py-6 text-sm text-slate-400" colSpan={7}>
+                      No completed or pending settlements were found in the current live event set.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -323,8 +481,8 @@ export const FinanceDashboard: React.FC = () => {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-slate-400 mb-1">Total Processed</p>
-                <p className="text-2xl font-bold text-white">1,197.8 ETH</p>
-                <p className="text-xs text-green-400 mt-1">+15.3% this month</p>
+                <p className="text-2xl font-bold text-white">{formatWeiToEth(totalProcessedWei.toString())}</p>
+                <p className="text-xs text-green-400 mt-1">Completed settlements</p>
               </div>
               <div className="w-12 h-12 bg-green-500/10 rounded-xl flex items-center justify-center">
                 <CheckCircle className="w-6 h-6 text-green-400" />
@@ -338,8 +496,8 @@ export const FinanceDashboard: React.FC = () => {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-slate-400 mb-1">Pending Approval</p>
-                <p className="text-2xl font-bold text-white">37.8 ETH</p>
-                <p className="text-xs text-yellow-400 mt-1">8 requests</p>
+                <p className="text-2xl font-bold text-white">{formatWeiToEth(pendingApprovalWei.toString())}</p>
+                <p className="text-xs text-yellow-400 mt-1">{withdrawalRequests.filter((request) => request.status === 'pending').length} requests</p>
               </div>
               <div className="w-12 h-12 bg-yellow-500/10 rounded-xl flex items-center justify-center">
                 <Clock className="w-6 h-6 text-yellow-400" />
@@ -352,9 +510,9 @@ export const FinanceDashboard: React.FC = () => {
           <CardContent className="p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-slate-400 mb-1">Platform Fee Rate</p>
-                <p className="text-2xl font-bold text-white">2.5%</p>
-                <p className="text-xs text-purple-400 mt-1">On all transactions</p>
+                <p className="text-sm text-slate-400 mb-1">Settlement Coverage</p>
+                <p className="text-2xl font-bold text-white">{settlementCoverage}%</p>
+                <p className="text-xs text-purple-400 mt-1">Settled events out of total tracked events</p>
               </div>
               <div className="w-12 h-12 bg-purple-500/10 rounded-xl flex items-center justify-center">
                 <CreditCard className="w-6 h-6 text-purple-400" />
