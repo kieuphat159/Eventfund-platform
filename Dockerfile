@@ -31,6 +31,9 @@ WORKDIR /app
 # Copy root package.json (needed for local dep resolution)
 COPY --chown=appuser:appgroup package.json ./
 
+# Copy backend package manifest so npm commands work at runtime
+COPY --chown=appuser:appgroup backend/package.json backend/package-lock.json ./backend/
+
 # Copy backend source
 COPY --chown=appuser:appgroup backend/src ./backend/src
 
