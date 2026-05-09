@@ -37,9 +37,6 @@ COPY --chown=appuser:appgroup backend/package.json backend/package-lock.json ./b
 # Copy backend source
 COPY --chown=appuser:appgroup backend/src ./backend/src
 
-# Copy contract artifacts so runtime ABI loading matches the deployed contracts
-COPY --chown=appuser:appgroup contracts/artifacts ./contracts/artifacts
-
 # Copy installed node_modules from deps stage
 COPY --from=deps --chown=appuser:appgroup /app/backend/node_modules ./backend/node_modules
 
