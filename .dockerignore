@@ -51,13 +51,11 @@
 # Project specific
 .kiro/
 frontend/
-contracts/
 backend/keys/
 backend/docs/
 backend/backend-srctree.txt
 backend/package.json.patch
 
 # Docker
-**/Dockerfile*
 **/docker-compose*.yml
 **/.dockerignore

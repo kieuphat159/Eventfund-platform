@@ -11,10 +11,9 @@ COPY package.json ./
 # Copy backend package manifest
 COPY backend/package.json backend/package-lock.json ./backend/
 
-# Install production deps with cache mount for faster builds
+# Install production deps
 WORKDIR /app/backend
-RUN --mount=type=cache,target=/root/.npm \
-    npm ci --omit=dev --ignore-scripts
+RUN npm ci --omit=dev --ignore-scripts
 
 WORKDIR /app
 
@@ -31,6 +30,9 @@ WORKDIR /app
 
 # Copy root package.json (needed for local dep resolution)
 COPY --chown=appuser:appgroup package.json ./
+
+# Copy backend package manifest so npm commands work at runtime
+COPY --chown=appuser:appgroup backend/package.json backend/package-lock.json ./backend/
 
 # Copy backend source
 COPY --chown=appuser:appgroup backend/src ./backend/src

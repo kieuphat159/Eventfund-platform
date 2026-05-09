@@ -8,31 +8,47 @@ const __dirname = path.dirname(__filename);
 // Always load backend/.env (not dependent on the process working directory).
 dotenv.config({ path: path.resolve(__dirname, "../../.env") });
 
+function normalizeNodeEnv(value) {
+  return String(value || "DEV").trim().toUpperCase();
+}
+
+function isProdEnv(nodeEnv) {
+  return ["PROD", "PRODUCTION"].includes(nodeEnv);
+}
+
+function isDevEnv(nodeEnv) {
+  return ["DEV", "DEVELOPMENT"].includes(nodeEnv);
+}
+
 /**
  * Validate required environment variables at startup
  * Throws error if any required variable is missing
  */
 function validateEnv() {
-  const nodeEnv = String(process.env.NODE_ENV || "DEV").toUpperCase();
+  const nodeEnv = normalizeNodeEnv(process.env.NODE_ENV);
   const required = [
     'PORT',
     'NODE_ENV',
   ];
 
-  if (nodeEnv === "PROD") {
+  if (isProdEnv(nodeEnv)) {
     required.push("MONGO_PROD_URI");
   } else {
     required.push("MONGO_DEV_URI");
   }
 
-  // Check for Cloudinary variables based on current environment
-  const hasCloudinary = nodeEnv === 'PROD'
-    ? (process.env.CLOUDINARY_PROD_NAME && process.env.CLOUDINARY_PROD_KEY && process.env.CLOUDINARY_PROD_SECRET)
-    : (process.env.CLOUDINARY_DEV_NAME && process.env.CLOUDINARY_DEV_KEY && process.env.CLOUDINARY_DEV_SECRET);
+  // Check for Cloudinary variables (either generic or environment-specific)
+  const hasCloudinary =
+    (process.env.CLOUDINARY_NAME && process.env.CLOUDINARY_KEY && process.env.CLOUDINARY_SECRET) ||
+    (process.env.CLOUDINARY_DEV_NAME && process.env.CLOUDINARY_DEV_KEY && process.env.CLOUDINARY_DEV_SECRET) ||
+    (process.env.CLOUDINARY_PROD_NAME && process.env.CLOUDINARY_PROD_KEY && process.env.CLOUDINARY_PROD_SECRET);
 
   if (!hasCloudinary) {
-    const prefix = nodeEnv === 'PROD' ? 'CLOUDINARY_PROD' : 'CLOUDINARY_DEV';
-    required.push(`${prefix}_NAME`, `${prefix}_KEY`, `${prefix}_SECRET`);
+    if (isProdEnv(nodeEnv)) {
+      required.push('CLOUDINARY_PROD_NAME', 'CLOUDINARY_PROD_KEY', 'CLOUDINARY_PROD_SECRET');
+    } else {
+      required.push('CLOUDINARY_DEV_NAME', 'CLOUDINARY_DEV_KEY', 'CLOUDINARY_DEV_SECRET');
+    }
   }
 
   const missing = required.filter(key => !process.env[key]);
@@ -45,8 +61,8 @@ function validateEnv() {
   }
 
   // Validate NODE_ENV value
-  const validEnvs = ['DEV', 'PROD', 'TEST', 'Dev', 'Prod', 'Test'];
-  if (!validEnvs.includes(nodeEnv) && !validEnvs.map(e => e.toLowerCase()).includes(nodeEnv.toLowerCase())) {
+  const validEnvs = ['DEV', 'DEVELOPMENT', 'PROD', 'PRODUCTION', 'TEST'];
+  if (!validEnvs.includes(nodeEnv)) {
     throw new Error(
       `Invalid NODE_ENV value: ${nodeEnv}\n` +
       `Must be one of: ${validEnvs.join(', ')}`
@@ -62,13 +78,13 @@ function validateEnv() {
 export const config = {
   // Server
   port: process.env.PORT || 4000,
-  nodeEnv: process.env.NODE_ENV?.toUpperCase() || 'DEV',
-  isDev: process.env.NODE_ENV?.toUpperCase() === 'DEV',
-  isProd: process.env.NODE_ENV?.toUpperCase() === 'PROD',
-  isTest: process.env.NODE_ENV?.toUpperCase() === 'TEST',
+  nodeEnv: normalizeNodeEnv(process.env.NODE_ENV),
+  isDev: isDevEnv(normalizeNodeEnv(process.env.NODE_ENV)),
+  isProd: isProdEnv(normalizeNodeEnv(process.env.NODE_ENV)),
+  isTest: normalizeNodeEnv(process.env.NODE_ENV) === 'TEST',
 
   // Database
-  mongoUri: process.env.NODE_ENV?.toUpperCase() === 'PROD'
+  mongoUri: isProdEnv(normalizeNodeEnv(process.env.NODE_ENV))
     ? process.env.MONGO_PROD_URI
     : process.env.MONGO_DEV_URI,
 
@@ -112,15 +128,18 @@ export const config = {
 
   // Cloudinary - select credentials based on NODE_ENV
   cloudinary: {
-    name: process.env.NODE_ENV?.toUpperCase() === 'PROD'
-      ? process.env.CLOUDINARY_PROD_NAME
-      : process.env.CLOUDINARY_DEV_NAME,
-    key: process.env.NODE_ENV?.toUpperCase() === 'PROD'
-      ? process.env.CLOUDINARY_PROD_KEY
-      : process.env.CLOUDINARY_DEV_KEY,
-    secret: process.env.NODE_ENV?.toUpperCase() === 'PROD'
-      ? process.env.CLOUDINARY_PROD_SECRET
-      : process.env.CLOUDINARY_DEV_SECRET,
+    name: process.env.CLOUDINARY_NAME ||
+          (isProdEnv(normalizeNodeEnv(process.env.NODE_ENV))
+            ? process.env.CLOUDINARY_PROD_NAME
+            : process.env.CLOUDINARY_DEV_NAME),
+    key: process.env.CLOUDINARY_KEY ||
+         (isProdEnv(normalizeNodeEnv(process.env.NODE_ENV))
+           ? process.env.CLOUDINARY_PROD_KEY
+           : process.env.CLOUDINARY_DEV_KEY),
+    secret: process.env.CLOUDINARY_SECRET ||
+            (isProdEnv(normalizeNodeEnv(process.env.NODE_ENV))
+              ? process.env.CLOUDINARY_PROD_SECRET
+              : process.env.CLOUDINARY_DEV_SECRET)
   },
 
   // CORS
@@ -164,7 +183,7 @@ export const config = {
   },
 
   // Environment alias
-  env: process.env.NODE_ENV?.toUpperCase() || 'DEV',
+  env: normalizeNodeEnv(process.env.NODE_ENV),
 };
 
 // Validate environment on module load
