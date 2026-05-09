@@ -51,7 +51,6 @@
 # Project specific
 .kiro/
 frontend/
-contracts/
 backend/keys/
 backend/docs/
 backend/backend-srctree.txt
