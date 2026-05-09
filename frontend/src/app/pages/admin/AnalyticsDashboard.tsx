@@ -382,7 +382,7 @@ export const AnalyticsDashboard: React.FC = () => {
               />
               <Line key="users-line" type="monotone" dataKey="users" stroke="#3b82f6" strokeWidth={2} dot={{ fill: '#3b82f6', r: 4 }} name="Users" />
               <Line key="events-line" type="monotone" dataKey="events" stroke="#8b5cf6" strokeWidth={2} dot={{ fill: '#8b5cf6', r: 4 }} name="Events" />
-              <Line key="tickets-line" type="monotone" dataKey="tickets" stroke="#10b981" strokeWidth={2} dot={{ fill: '#10b981', r: 4 }} name="Tickets Sold" />
+              <Line key="tickets-line" type="monotone" dataKey="tickets" stroke="#10b981" strokeWidth={2} dot={{ fill: '#10b981', r: 4 }} name="Tickets (/100)" />
             </LineChart>
           </ResponsiveContainer>
         </CardContent>
@@ -558,7 +558,7 @@ export const AnalyticsDashboard: React.FC = () => {
                 }}
               />
               <Bar key="events-bar" dataKey="events" fill="#3b82f6" radius={[8, 8, 0, 0]} name="Events" />
-              <Bar key="tickets-bar" dataKey="tickets" fill="#8b5cf6" radius={[8, 8, 0, 0]} name="Tickets Sold" />
+              <Bar key="tickets-bar" dataKey="tickets" fill="#8b5cf6" radius={[8, 8, 0, 0]} name="Tickets (/10)" />
               <Bar key="revenue-bar" dataKey="revenue" fill="#10b981" radius={[8, 8, 0, 0]} name="Revenue (ETH)" />
             </BarChart>
           </ResponsiveContainer>

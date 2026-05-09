@@ -34,6 +34,7 @@ import {
   type ApiTicket,
   type BuyListingProgressStage,
 } from "../../services/listings.service";
+import { logger } from "../../lib/logger";
 
 type ListingEvent = ApiEvent & {
   venue?: {
@@ -158,7 +159,7 @@ export const TicketDetail: React.FC = () => {
         const res = await listingService.getById(id!);
         setListing(res);
       } catch (err) {
-        console.error(err);
+        logger.error("ticket-detail", "Failed to load ticket detail", err);
       } finally {
         setLoading(false);
         hideLoading();

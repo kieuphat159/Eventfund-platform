@@ -38,17 +38,15 @@ export const PublicUserHeader: React.FC = () => {
     <header className="sticky top-0 z-50 bg-slate-950/80 backdrop-blur-lg border-b border-slate-800">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
-          {/* Logo */}
-          <Link to="/" className="flex items-center space-x-2">
+          <Link to="/" className="flex min-w-0 items-center space-x-2">
             <div className="w-8 h-8 bg-gradient-to-br from-purple-500 to-blue-500 rounded-lg flex items-center justify-center">
               <Wallet className="w-5 h-5 text-white" />
             </div>
-            <span className="text-xl font-bold bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">
+            <span className="truncate text-lg font-bold bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent sm:text-xl">
               EventChain
             </span>
           </Link>
 
-          {/* Desktop Navigation - Always visible */}
           <nav className="hidden md:flex items-center space-x-6">
             {navLinks.map((link) => {
               const isActive = isActiveLink(link.path);
@@ -71,12 +69,12 @@ export const PublicUserHeader: React.FC = () => {
             })}
           </nav>
 
-          {/* Wallet Connection / User Menu */}
-          <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-2 sm:space-x-4">
             {isPublic ? (
               <Button
                 onClick={connectWallet}
                 disabled={isLoading}
+                className="hidden sm:inline-flex"
               >
                 <Wallet className="w-4 h-4 mr-2" />
                 {isLoading ? 'Connecting...' : 'Connect Wallet'}
@@ -90,9 +88,10 @@ export const PublicUserHeader: React.FC = () => {
                   >
                     <div className="flex items-center space-x-2">
                       <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                      <span className="text-sm text-slate-300">
+                      <span className="hidden text-sm text-slate-300 sm:inline">
                         {user?.walletAddress?.slice(0, 6)}...{user?.walletAddress?.slice(-4)}
                       </span>
+                      <span className="text-sm text-slate-300 sm:hidden">Wallet</span>
                     </div>
                   </Button>
                 </DropdownMenuTrigger>
@@ -122,10 +121,22 @@ export const PublicUserHeader: React.FC = () => {
               </DropdownMenu>
             )}
 
-            {/* Mobile Menu Button - Always visible */}
+            {isPublic && (
+              <Button
+                onClick={connectWallet}
+                disabled={isLoading}
+                size="icon"
+                className="sm:hidden"
+                aria-label="Connect wallet"
+              >
+                <Wallet className="w-4 h-4" />
+              </Button>
+            )}
+
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="md:hidden text-slate-300 hover:text-white"
+              className="rounded-lg p-2 text-slate-300 transition-colors hover:bg-slate-800 hover:text-white md:hidden"
+              aria-label="Toggle menu"
             >
               {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
             </button>
@@ -133,7 +144,6 @@ export const PublicUserHeader: React.FC = () => {
         </div>
       </div>
 
-      {/* Mobile Menu - Always available */}
       {mobileMenuOpen && (
         <div className="md:hidden bg-slate-900 border-t border-slate-800">
           <nav className="px-4 py-4 space-y-2">

@@ -1,6 +1,5 @@
-import { api } from "../lib/api";
-import { createPublicClient, encodeFunctionData, http } from "viem";
-import { sepolia } from "viem/chains";
+import { api } from '../lib/api';
+import { logger } from '../lib/logger';
 
 export interface EventVenue {
   address?: string;
@@ -550,7 +549,7 @@ export async function createEvent(
     );
     return response.data || null;
   } catch (error) {
-    console.debug("createEvent failed:", error);
+    logger.error('events', 'Create event failed', error);
     throw error;
   }
 }

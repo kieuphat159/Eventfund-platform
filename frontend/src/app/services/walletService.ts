@@ -1,5 +1,6 @@
 import { createWalletClient, custom } from "viem";
 import { sepolia } from "viem/chains";
+import { logger } from "../lib/logger";
 
 /**
  * Decode a JWT payload without verifying the signature.
@@ -76,6 +77,11 @@ export async function getWalletAddresses(
 
   if (!smartAccountAddress) throw new Error("Failed to get Smart Account address.");
   if (!eoaAddress) throw new Error("Failed to get EOA address.");
+
+  logger.debug("wallet", "Resolved wallet addresses", {
+    smartAccountAddress,
+    eoaAddress,
+  });
 
   return { smartAccountAddress, eoaAddress };
 }

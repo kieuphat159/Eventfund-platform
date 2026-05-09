@@ -33,6 +33,7 @@ import {
   subtractIntegerValues,
 } from "../../lib/utils";
 import { StatusBadge } from "../../components/StatusBadge";
+import { logger } from "../../lib/logger";
 
 export const MyInvestments: React.FC = () => {
   const { user, connectWallet } = useAuth();
@@ -49,7 +50,7 @@ export const MyInvestments: React.FC = () => {
         const shares = await getInvestments();
         setInvestments(shares);
       } catch (error) {
-        console.error("Failed to load investments:", error);
+        logger.error("investments", "Failed to load investments", error);
       } finally {
         setLoading(false);
         hideLoading();

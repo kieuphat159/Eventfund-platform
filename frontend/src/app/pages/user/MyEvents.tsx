@@ -157,7 +157,7 @@ export const MyEvents: React.FC = () => {
     if (!eventId) return;
 
     const ok = window.confirm(
-      `Are you sure you want to delete the event "${event.title || "Untitled event"}"?\n\nOnly delete drafts because the backend currently restricts deletion to drafts.`,
+      `Delete "${event.title || "Untitled event"}"?\n\nOnly draft events should be deleted because the backend currently limits deletion to draft records.`,
     );
     if (!ok) return;
 
@@ -168,9 +168,7 @@ export const MyEvents: React.FC = () => {
       setEvents((prev) => prev.filter((e) => (e._id || e.id) !== eventId));
     } catch (err: any) {
       alert(
-        err?.response?.data?.message ||
-          err?.message ||
-          "Failed to delete event",
+        err?.response?.data?.message || err?.message || "Failed to delete event",
       );
     } finally {
       setDeletingId("");

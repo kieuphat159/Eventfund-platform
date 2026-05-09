@@ -1,4 +1,5 @@
 import { api } from "../lib/api";
+import { logger } from "../lib/logger";
 
 export interface UserProfile {
   walletAddress: string;
@@ -106,7 +107,7 @@ export const userService = {
           : "N/A",
       };
     } catch (error) {
-      console.error("Error fetching stats:", error);
+      logger.error("user", "Failed to fetch dashboard stats", error);
       return {
         eventsCreated: 0,
         ticketsOwned: 0,

@@ -27,8 +27,8 @@ import {
   listTicketOnchain,
 } from "@/app/services/listings.service";
 import { QRCodeCanvas } from "qrcode.react";
-import { useWeb3Auth } from "@web3auth/modal/react";
-import { resolveTransactionProvider } from "../../services/providerService";
+import { ethers, formatEther } from "ethers";
+import { logger } from "../../lib/logger";
 
 const ETH_ADDRESS_REGEX = /^0x[a-fA-F0-9]{40}$/;
 
@@ -147,9 +147,24 @@ export const MyTickets: React.FC = () => {
   const totalValue = useMemo(() => {
     return tickets.reduce(
       (sum, ticket) => sum + BigInt(ticket.originalPrice || "0"),
-      0n, // 0n là khởi tạo kiểu BigInt
+      0n,
     );
   }, [tickets]);
+
+  const formatEth = (wei: string | bigint | number) => {
+    if (!wei || wei === "0" || wei === "0x0") return "0";
+
+    try {
+      const ethString = formatEther(wei.toString());
+
+      return parseFloat(ethString)
+        .toFixed(3)
+        .replace(/\.?0+$/, "");
+    } catch (error) {
+      logger.debug("tickets", "Failed to format ticket value", error);
+      return "0";
+    }
+  };
 
   const downloadTicketQR = (ticket: ApiTicket) => {
     const canvasId = getTicketQrCanvasId(ticket);
@@ -201,72 +216,6 @@ export const MyTickets: React.FC = () => {
 
     return null;
   };
-
-  const formatWei = (wei: string | bigint | number) => {
-    try {
-      return BigInt(String(wei || "0")).toLocaleString();
-    } catch {
-      return "0";
-    }
-  };
-
-  const walletProvider = resolveTransactionProvider(web3Auth?.provider);
-
-  const refreshTickets = async () => {
-    if (!walletAddress || !ETH_ADDRESS_REGEX.test(walletAddress)) {
-      return;
-    }
-
-    const data = await getUserTickets(walletAddress);
-    setTickets(data);
-  };
-
-  const handleClaimRefund = async (ticket: ApiTicket) => {
-    try {
-      if (!user?.walletAddress) {
-        await connectWallet();
-        showListingPopup(
-          "success",
-          "Wallet connected. Please click Claim Refund again to continue.",
-        );
-        return;
-      }
-
-      if (!walletProvider?.request) {
-        throw new Error(
-          "Wallet provider is not ready. Please reconnect wallet and try again.",
-        );
-      }
-
-      setRefundingTokenId(ticket.tokenId);
-      const result = await claimTicketRefundOnChain(
-        walletProvider,
-        ticket.tokenId,
-        user.walletAddress,
-      );
-
-      setTickets((prev) =>
-        prev.map((item) =>
-          item.tokenId === ticket.tokenId
-            ? result.confirmation?.ticket || { ...item, status: "refunded" }
-            : item,
-        ),
-      );
-      await refreshTickets();
-      showListingPopup(
-        "success",
-        `Refund claimed successfully. Tx: ${result.txHash}`,
-      );
-    } catch (error) {
-      showListingPopup(
-        "error",
-        error instanceof Error ? error.message : "Refund claim failed",
-      );
-    } finally {
-      setRefundingTokenId(null);
-    }
-  };
-
   return (
     <div className="space-y-6">
       {listingPopup && (

@@ -4,6 +4,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { useLoading } from "../../components/ui/loadingContext";
 import { Button } from "../../components/ui/button";
 import { useNavigate } from "react-router-dom";
+import { logger } from "../../lib/logger";
 
 export const LoginPage: React.FC = () => {
   const { connectWallet, isLoading, error, user } = useAuth();
@@ -31,9 +32,7 @@ export const LoginPage: React.FC = () => {
       showLoading("Connecting...");
       await connectWallet();
     } catch (err) {
-      console.error("Login failed:", err);
-    } finally {
-      hideLoading();
+      logger.error("auth", "Wallet login failed", err);
     }
   };
 

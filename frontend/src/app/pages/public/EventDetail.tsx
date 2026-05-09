@@ -349,47 +349,24 @@ export const EventDetail: React.FC = () => {
       )}
 
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="grid lg:grid-cols-[1.15fr_0.85fr] gap-8 mb-8">
-          <div className="space-y-4">
-            <div className="relative overflow-hidden rounded-3xl border border-slate-800 bg-slate-900/80 shadow-2xl shadow-cyan-950/20">
-              {selectedGalleryImage ? (
-                <ImageWithFallback
-                  src={selectedGalleryImage}
-                  alt={event.title || "Event image"}
-                  className="h-[420px] w-full object-cover"
-                />
-              ) : (
-                <div className="flex h-[420px] w-full items-center justify-center bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.18),_transparent_35%),linear-gradient(135deg,_rgba(15,23,42,0.98),_rgba(2,6,23,0.98))]">
-                  <div className="max-w-sm px-8 text-center">
-                    <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl border border-slate-700 bg-slate-900/80">
-                      <MapPin className="h-8 w-8 text-cyan-300" />
-                    </div>
-                    <p className="text-lg font-semibold text-white">
-                      No event images yet
-                    </p>
-                    <p className="mt-2 text-sm leading-6 text-slate-400">
-                      The organizer has not uploaded a gallery image for this event.
-                    </p>
-                  </div>
-                </div>
-              )}
+        <div className="mb-8 grid gap-8 xl:grid-cols-[1.2fr_1fr]">
+          <div className="overflow-hidden rounded-3xl border border-slate-800 bg-slate-900/60 shadow-2xl shadow-cyan-950/20">
+            <div className="aspect-[16/10] sm:aspect-video">
+              <ImageWithFallback
+                src={coverImage}
+                alt={event.title || "Event image"}
+                className="h-full w-full object-cover"
+              />
+            </div>
+          </div>
 
-              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-slate-950/90 via-slate-950/40 to-transparent p-4">
-                <div className="flex items-end justify-between gap-4">
-                  <div>
-                    <p className="text-xs uppercase tracking-[0.2em] text-cyan-200/80">
-                      Event Gallery
-                    </p>
-                    <h2 className="mt-1 text-2xl font-semibold text-white">
-                      {event.title || "Untitled event"}
-                    </h2>
-                  </div>
-                  <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-200 backdrop-blur">
-                    {galleryImages.length} image
-                    {galleryImages.length === 1 ? "" : "s"}
-                  </div>
-                </div>
-              </div>
+          <div className="relative grid gap-8">
+            <div className="aspect-video rounded-2xl overflow-hidden border border-slate-800">
+              <ImageWithFallback
+                src={coverImage}
+                alt={event.title || "Event image"}
+                className="w-full h-full object-cover"
+              />
             </div>
 
             {galleryImages.length > 1 && (
@@ -684,9 +661,9 @@ export const EventDetail: React.FC = () => {
           <div className="bg-slate-900 p-6 rounded-xl border border-slate-700 w-[340px]">
             <h3 className="text-white mb-2 font-semibold">Confirm Purchase</h3>
             <p className="text-slate-300 text-sm mb-4">
-              Are you sure you want to purchase the{" "}
+              Do you want to purchase{" "}
               <span className="font-semibold">{purchaseConfirmTier}</span>{" "}
-              ticket?
+              now?
             </p>
 
             <div className="flex gap-2">

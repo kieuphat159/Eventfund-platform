@@ -1,4 +1,5 @@
-import type { Web3AuthContextConfig } from "@web3auth/modal/react";
+import type { Web3AuthContextConfig } from '@web3auth/modal/react';
+import { logger } from './lib/logger';
 
 const clientId = import.meta.env.VITE_WEB3AUTH_CLIENT_ID as string;
 const web3AuthNetwork = (import.meta.env.VITE_WEB3AUTH_NETWORK ??
@@ -64,23 +65,10 @@ function resolveBundlerUrl(url?: string, apiKey?: string): string | undefined {
 const resolvedBundlerUrl = resolveBundlerUrl(bundlerUrl, pimlicoApiKey);
 
 if (!clientId) {
-  console.warn(
-    "[Web3Auth] VITE_WEB3AUTH_CLIENT_ID is not set. Social login will not work.",
-  );
+  logger.warn('web3auth', 'VITE_WEB3AUTH_CLIENT_ID is not set. Social login will not work.');
 }
-if (!resolvedBundlerUrl) {
-  console.warn(
-    "[Web3Auth] VITE_BUNDLER_URL is not set. Smart Account transactions will not work.",
-  );
-}
-if (
-  bundlerUrl?.includes("api.pimlico.io") &&
-  !/[?&]apikey=/.test(bundlerUrl) &&
-  !pimlicoApiKey
-) {
-  console.warn(
-    "[Web3Auth] Pimlico bundler URL is missing API key. Set VITE_PIMLICO_API_KEY or include ?apikey=... in VITE_BUNDLER_URL to avoid 401 Unauthorized.",
-  );
+if (!bundlerUrl) {
+  logger.warn('web3auth', 'VITE_BUNDLER_URL is not set. Smart Account transactions will not work.');
 }
 
 export const web3AuthConfig: Web3AuthContextConfig = {
