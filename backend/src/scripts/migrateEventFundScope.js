@@ -80,7 +80,7 @@ async function resolveFundContractAddress(eventDoc) {
 
 async function main() {
   const mongoUri =
-    process.env.MONGO_DEV_URI || process.env.MONGO_URI || process.env.MONGO_PROD_URI;
+    process.env.MONGO_PROD_URI || process.env.MONGO_URI || process.env.MONGO_PROD_URI;
 
   if (!mongoUri) {
     throw new Error("Missing MongoDB URI in backend/.env");

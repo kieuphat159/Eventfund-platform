@@ -13,20 +13,26 @@ dotenv.config({ path: path.resolve(__dirname, "../../.env") });
  * Throws error if any required variable is missing
  */
 function validateEnv() {
+  const nodeEnv = String(process.env.NODE_ENV || "DEV").toUpperCase();
   const required = [
     'PORT',
     'NODE_ENV',
-    'MONGO_DEV_URI'
   ];
 
-  // Check for Cloudinary variables (either generic or environment-specific)
-  const hasCloudinary =
-    (process.env.CLOUDINARY_NAME && process.env.CLOUDINARY_KEY && process.env.CLOUDINARY_SECRET) ||
-    (process.env.CLOUDINARY_DEV_NAME && process.env.CLOUDINARY_DEV_KEY && process.env.CLOUDINARY_DEV_SECRET) ||
-    (process.env.CLOUDINARY_PROD_NAME && process.env.CLOUDINARY_PROD_KEY && process.env.CLOUDINARY_PROD_SECRET);
+  if (nodeEnv === "PROD") {
+    required.push("MONGO_PROD_URI");
+  } else {
+    required.push("MONGO_DEV_URI");
+  }
+
+  // Check for Cloudinary variables based on current environment
+  const hasCloudinary = nodeEnv === 'PROD'
+    ? (process.env.CLOUDINARY_PROD_NAME && process.env.CLOUDINARY_PROD_KEY && process.env.CLOUDINARY_PROD_SECRET)
+    : (process.env.CLOUDINARY_DEV_NAME && process.env.CLOUDINARY_DEV_KEY && process.env.CLOUDINARY_DEV_SECRET);
 
   if (!hasCloudinary) {
-    required.push('CLOUDINARY_NAME', 'CLOUDINARY_KEY', 'CLOUDINARY_SECRET');
+    const prefix = nodeEnv === 'PROD' ? 'CLOUDINARY_PROD' : 'CLOUDINARY_DEV';
+    required.push(`${prefix}_NAME`, `${prefix}_KEY`, `${prefix}_SECRET`);
   }
 
   const missing = required.filter(key => !process.env[key]);
@@ -40,7 +46,6 @@ function validateEnv() {
 
   // Validate NODE_ENV value
   const validEnvs = ['DEV', 'PROD', 'TEST', 'Dev', 'Prod', 'Test'];
-  const nodeEnv = process.env.NODE_ENV || 'DEV';
   if (!validEnvs.includes(nodeEnv) && !validEnvs.map(e => e.toLowerCase()).includes(nodeEnv.toLowerCase())) {
     throw new Error(
       `Invalid NODE_ENV value: ${nodeEnv}\n` +
@@ -82,33 +87,40 @@ export const config = {
 
   // Rate Limiting
   rateLimit: {
-    windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 900000, // 15 minutes
-    maxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
-    authMaxRequests: parseInt(process.env.AUTH_RATE_LIMIT_MAX) || 5
+    windowMs: Number.parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 900000, // 15 minutes
+    maxRequests: Number.parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
+    authMaxRequests: Number.parseInt(process.env.AUTH_RATE_LIMIT_MAX) || 5
   },
 
-  // Redis
+  // Redis Cloud
   redis: {
-    url: process.env.REDIS_URL || 'redis://localhost:6379'
+    host: process.env.REDIS_HOST,
+    port: Number.parseInt(process.env.REDIS_PORT) || 6379,
+    password: process.env.REDIS_PASSWORD,
+    tls: process.env.REDIS_TLS === 'true' ? {} : undefined,
+    // Cache TTLs (in seconds)
+    ttl: {
+      user: Number.parseInt(process.env.REDIS_TTL_USER) || 1800, // 30 minutes
+      event: Number.parseInt(process.env.REDIS_TTL_EVENT) || 600, // 10 minutes
+      eventStats: Number.parseInt(process.env.REDIS_TTL_EVENT_STATS) || 180, // 3 minutes
+      blockchainConfig: Number.parseInt(process.env.REDIS_TTL_BLOCKCHAIN_CONFIG) || 86400, // 24 hours
+    }
   },
 
   // Logging
   logLevel: process.env.LOG_LEVEL || 'info',
 
-  // Cloudinary - support both generic and environment-specific variables
+  // Cloudinary - select credentials based on NODE_ENV
   cloudinary: {
-    name: process.env.CLOUDINARY_NAME ||
-          (process.env.NODE_ENV?.toUpperCase() === 'PROD'
-            ? process.env.CLOUDINARY_PROD_NAME
-            : process.env.CLOUDINARY_DEV_NAME),
-    key: process.env.CLOUDINARY_KEY ||
-         (process.env.NODE_ENV?.toUpperCase() === 'PROD'
-           ? process.env.CLOUDINARY_PROD_KEY
-           : process.env.CLOUDINARY_DEV_KEY),
-    secret: process.env.CLOUDINARY_SECRET ||
-            (process.env.NODE_ENV?.toUpperCase() === 'PROD'
-              ? process.env.CLOUDINARY_PROD_SECRET
-              : process.env.CLOUDINARY_DEV_SECRET)
+    name: process.env.NODE_ENV?.toUpperCase() === 'PROD'
+      ? process.env.CLOUDINARY_PROD_NAME
+      : process.env.CLOUDINARY_DEV_NAME,
+    key: process.env.NODE_ENV?.toUpperCase() === 'PROD'
+      ? process.env.CLOUDINARY_PROD_KEY
+      : process.env.CLOUDINARY_DEV_KEY,
+    secret: process.env.NODE_ENV?.toUpperCase() === 'PROD'
+      ? process.env.CLOUDINARY_PROD_SECRET
+      : process.env.CLOUDINARY_DEV_SECRET,
   },
 
   // CORS
@@ -136,9 +148,9 @@ export const config = {
 
   // Deposits
   deposits: {
-    minVND: parseInt(process.env.MIN_DEPOSIT_VND) || 100000,
-    maxVND: parseInt(process.env.MAX_DEPOSIT_VND) || 50000000,
-    expiryMinutes: parseInt(process.env.DEPOSIT_ORDER_EXPIRY_MINUTES) || 15,
+    minVND: Number.parseInt(process.env.MIN_DEPOSIT_VND) || 100000,
+    maxVND: Number.parseInt(process.env.MAX_DEPOSIT_VND) || 50000000,
+    expiryMinutes: Number.parseInt(process.env.DEPOSIT_ORDER_EXPIRY_MINUTES) || 15,
   },
 
   // Exchange Rate APIs
@@ -146,9 +158,9 @@ export const config = {
     // CoinMarketCap API key (optional, for fallback)
     coinmarketcapApiKey: process.env.COINMARKETCAP_API_KEY,
     // Cache TTL in milliseconds
-    cacheTTL: parseInt(process.env.EXCHANGE_RATE_CACHE_TTL) || 5 * 60 * 1000, // 5 minutes
+    cacheTTL: Number.parseInt(process.env.EXCHANGE_RATE_CACHE_TTL) || 5 * 60 * 1000, // 5 minutes
     // Fallback max age in milliseconds
-    fallbackMaxAge: parseInt(process.env.EXCHANGE_RATE_FALLBACK_MAX_AGE) || 24 * 60 * 60 * 1000, // 24 hours
+    fallbackMaxAge: Number.parseInt(process.env.EXCHANGE_RATE_FALLBACK_MAX_AGE) || 24 * 60 * 60 * 1000, // 24 hours
   },
 
   // Environment alias
