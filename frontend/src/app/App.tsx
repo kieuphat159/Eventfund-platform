@@ -13,6 +13,9 @@ import { Explore } from "./pages/public/Explore";
 import { Marketplace } from "./pages/public/Marketplace";
 import { EventDetail } from "./pages/public/EventDetail";
 import { About } from "./pages/public/About";
+import { FAQ } from "./pages/public/FAQ";
+import { Terms } from "./pages/public/Terms";
+import { Privacy } from "./pages/public/Privacy";
 import { TicketDetail } from "./pages/public/TicketDetail";
 import { LoginPage } from "./pages/public/LoginPage";
 
@@ -220,18 +223,9 @@ const AppRoutes: React.FC = () => {
         <Route path="about" element={<About />} />
         <Route path="login" element={<LoginRedirect />} />
 
-        <Route
-          path="faq"
-          element={<div className="p-20 text-white">FAQ Page</div>}
-        />
-        <Route
-          path="terms"
-          element={<div className="p-20 text-white">Terms Page</div>}
-        />
-        <Route
-          path="privacy"
-          element={<div className="p-20 text-white">Privacy Page</div>}
-        />
+        <Route path="faq" element={<FAQ />} />
+        <Route path="terms" element={<Terms />} />
+        <Route path="privacy" element={<Privacy />} />
       </Route>
 
       <Route

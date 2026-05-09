@@ -1,58 +1,207 @@
-import React from 'react';
-import { AlertTriangle, Shield, Ban, CheckCircle } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from "react";
+import { AlertTriangle, Shield, Ban, CheckCircle, Search, Activity, BadgeAlert } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
+import {
+  getAdminEvents,
+  getAdminPlatformStats,
+  getAdminSystemHealth,
+  type AdminPlatformStats,
+  type AdminSystemHealth,
+  type EventItem,
+} from '../../services/events.service';
+
+type FraudAlert = {
+  id: string;
+  type: string;
+  severity: 'high' | 'medium';
+  user: string;
+  description: string;
+  time: string;
+  status: string;
+  amountWei: string;
+  createdAt: number;
+};
+
+function parseNumericValue(value?: string | number): bigint {
+  if (typeof value === 'number') return BigInt(Math.max(0, Math.floor(value)));
+  if (!value) return 0n;
+  try {
+    return BigInt(String(value));
+  } catch {
+    return 0n;
+  }
+}
+
+function formatWeiToEth(value?: string | number): string {
+  try {
+    const wei = parseNumericValue(value);
+    const base = 10n ** 18n;
+    const whole = wei / base;
+    const fraction = (wei % base).toString().padStart(18, '0').slice(0, 2).replace(/0+$/, '');
+    return fraction ? `${whole.toString()}.${fraction} ETH` : `${whole.toString()} ETH`;
+  } catch {
+    return '0 ETH';
+  }
+}
+
+function formatRelativeTime(value?: string): string {
+  if (!value) return 'recently';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'recently';
+  const diffMinutes = Math.max(1, Math.floor((Date.now() - date.getTime()) / 60000));
+  if (diffMinutes < 60) return `${diffMinutes} minute${diffMinutes === 1 ? '' : 's'} ago`;
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours} hour${diffHours === 1 ? '' : 's'} ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays} day${diffDays === 1 ? '' : 's'} ago`;
+}
+
+function shortenWallet(wallet?: string): string {
+  if (!wallet) return 'Unknown wallet';
+  if (wallet.length <= 18) return wallet;
+  return `${wallet.slice(0, 10)}...${wallet.slice(-8)}`;
+}
 
 export const FraudMonitoring: React.FC = () => {
+  const [platformStats, setPlatformStats] = useState<AdminPlatformStats | null>(null);
+  const [events, setEvents] = useState<EventItem[]>([]);
+  const [systemHealth, setSystemHealth] = useState<AdminSystemHealth | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let alive = true;
+
+    const load = async () => {
+      setLoading(true);
+      setError('');
+
+      const [statsResult, eventsResult, healthResult] = await Promise.allSettled([
+        getAdminPlatformStats(),
+        getAdminEvents({ limit: 200, sort: '-updatedAt' }),
+        getAdminSystemHealth(),
+      ]);
+
+      if (!alive) return;
+
+      if (statsResult.status === 'fulfilled') setPlatformStats(statsResult.value);
+      if (eventsResult.status === 'fulfilled') setEvents(eventsResult.value);
+      if (healthResult.status === 'fulfilled') setSystemHealth(healthResult.value);
+
+      const failure = [statsResult, eventsResult, healthResult].find(
+        (result) => result.status === 'rejected',
+      );
+
+      if (failure?.status === 'rejected') {
+        setError(failure.reason instanceof Error ? failure.reason.message : String(failure.reason));
+      }
+
+      setLoading(false);
+    };
+
+    load();
+
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const fraudAlerts = useMemo<FraudAlert[]>(() => {
+    const baseAlerts = events
+      .filter((event) => {
+        const penalty = parseNumericValue(event.totalPenaltyAmount);
+        return penalty > 0n || event.status === 'cancelled' || event.status === 'failed';
+      })
+      .map((event) => {
+        const penalty = parseNumericValue(event.totalPenaltyAmount);
+        const severity: 'high' | 'medium' =
+          event.status === 'failed' || penalty > 0n ? 'high' : 'medium';
+        const type = penalty > 0n
+          ? 'Penalty Applied'
+          : event.status === 'failed'
+            ? 'Failed Event'
+            : 'Cancelled Event';
+        const description = penalty > 0n
+          ? `Penalty of ${formatWeiToEth(event.totalPenaltyAmount)} recorded for ${event.title || 'unnamed event'}`
+          : event.status === 'failed'
+            ? `Event ${event.title || 'unnamed event'} reached failed state during on-chain processing`
+            : `Event ${event.title || 'unnamed event'} was cancelled before completion`;
+        const createdAt = new Date(event.lastPenaltyAt || event.updatedAt || event.createdAt || Date.now()).getTime();
+
+        return {
+          id: event._id || event.id || `${event.title || 'event'}-${createdAt}`,
+          type,
+          severity,
+          user: event.organizer || event.organizerWallet || 'Unknown organizer',
+          description,
+          time: formatRelativeTime(event.lastPenaltyAt || event.updatedAt || event.createdAt),
+          status: event.status || 'unknown',
+          amountWei: String(event.totalPenaltyAmount || event.organizerStakeWithdrawn || '0'),
+          createdAt,
+        };
+      });
+
+    return baseAlerts
+      .sort((left, right) => right.createdAt - left.createdAt)
+      .slice(0, 5);
+  }, [events]);
+
+  const blockedTransactions = useMemo(() => {
+    return fraudAlerts.slice(0, 5).map((alert) => ({
+      wallet: alert.user,
+      reason: `${alert.type} · ${alert.status}`,
+      amount: formatWeiToEth(alert.amountWei),
+      time: alert.time,
+    }));
+  }, [fraudAlerts]);
+
+  const activeAlerts = fraudAlerts.length;
+  const resolvedToday = fraudAlerts.filter((alert) => {
+    const age = Date.now() - alert.createdAt;
+    return age >= 0 && age <= 24 * 60 * 60 * 1000 && alert.status !== 'failed';
+  }).length;
+  const detectionRate = activeAlerts > 0 ? Math.max(0, Math.min(100, Math.round((resolvedToday / activeAlerts) * 100))) : 100;
+
   const stats = [
-    { label: 'Active Alerts', value: '3', icon: AlertTriangle, color: 'from-red-500 to-orange-500' },
-    { label: 'Resolved Today', value: '12', icon: CheckCircle, color: 'from-green-500 to-emerald-500' },
-    { label: 'Blocked Transactions', value: '8', icon: Ban, color: 'from-purple-500 to-pink-500' },
-    { label: 'Detection Rate', value: '98.5%', icon: Shield, color: 'from-blue-500 to-cyan-500' },
+    { label: 'Active Alerts', value: activeAlerts.toLocaleString(), icon: AlertTriangle, color: 'from-red-500 to-orange-500' },
+    { label: 'Resolved Today', value: resolvedToday.toLocaleString(), icon: CheckCircle, color: 'from-green-500 to-emerald-500' },
+    { label: 'Blocked Transactions', value: blockedTransactions.length.toLocaleString(), icon: Ban, color: 'from-purple-500 to-pink-500' },
+    { label: 'Detection Rate', value: `${detectionRate}%`, icon: Shield, color: 'from-blue-500 to-cyan-500' },
   ];
 
-  const alerts = [
-    {
-      id: '1',
-      type: 'Suspicious Activity',
-      severity: 'high',
-      user: '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb5',
-      description: 'Multiple ticket purchases from same wallet in short timeframe',
-      time: '10 minutes ago',
-      status: 'pending',
-    },
-    {
-      id: '2',
-      type: 'Price Manipulation',
-      severity: 'medium',
-      user: '0x8ba1f109551bD432803012645Ac136ddd64DBA72',
-      description: 'Unusual pricing pattern detected on marketplace',
-      time: '1 hour ago',
-      status: 'investigating',
-    },
-    {
-      id: '3',
-      type: 'Fake Event',
-      severity: 'high',
-      user: '0xDC25EF3F5B8A186998338A2aDA83795FBA2D695E',
-      description: 'Event details match known scam patterns',
-      time: '3 hours ago',
-      status: 'pending',
-    },
-  ];
-
-  const blockedTransactions = [
-    { wallet: '0x1111...2222', reason: 'Blacklisted address', amount: '5.0 ETH', time: '15 min ago' },
-    { wallet: '0x3333...4444', reason: 'Suspected bot activity', amount: '12.5 ETH', time: '45 min ago' },
-    { wallet: '0x5555...6666', reason: 'Failed verification', amount: '2.3 ETH', time: '2 hours ago' },
-  ];
+  const healthLabel = systemHealth?.database?.connected === true ? 'Connected' : systemHealth?.database?.status || 'Unknown';
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-white mb-2">Fraud Monitoring</h1>
-        <p className="text-slate-400">Real-time fraud detection and prevention</p>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <p className="text-sm uppercase tracking-[0.24em] text-red-300/80">Live risk signals</p>
+          <h1 className="mt-2 text-3xl font-bold text-white">Fraud Monitoring</h1>
+          <p className="mt-2 text-slate-400">Real-time risk events derived from live event and penalty data.</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-300">
+          <span className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/70 px-3 py-1">
+            <Activity className="h-3.5 w-3.5 text-cyan-300" />
+            Database {healthLabel}
+          </span>
+          <span className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-slate-900/70 px-3 py-1 text-slate-400">
+            {events.length} live events scanned
+          </span>
+        </div>
       </div>
+
+      {!!error && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+          Some fraud data could not be loaded: {error}
+        </div>
+      )}
+
+      {loading && events.length === 0 ? (
+        <Card className="border-slate-800 bg-slate-900">
+          <CardContent className="p-6 text-sm text-slate-400">Loading live risk events...</CardContent>
+        </Card>
+      ) : null}
 
       {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -77,11 +226,11 @@ export const FraudMonitoring: React.FC = () => {
       <Card className="bg-slate-900 border-slate-800">
         <CardHeader>
           <CardTitle className="text-white">Active Fraud Alerts</CardTitle>
-          <CardDescription className="text-slate-400">Suspicious activities requiring attention</CardDescription>
+          <CardDescription className="text-slate-400">Cancelled, failed, or penalized events requiring attention</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            {alerts.map((alert) => (
+            {fraudAlerts.length > 0 ? fraudAlerts.map((alert) => (
               <div
                 key={alert.id}
                 className={`p-4 rounded-lg border ${
@@ -116,7 +265,7 @@ export const FraudMonitoring: React.FC = () => {
                   <div className="text-sm">
                     <span className="text-slate-500">User: </span>
                     <code className="text-slate-300 bg-slate-800 px-2 py-1 rounded">
-                      {alert.user.slice(0, 10)}...{alert.user.slice(-8)}
+                      {shortenWallet(alert.user)}
                     </code>
                     <span className="text-slate-500 ml-4">{alert.time}</span>
                   </div>
@@ -130,7 +279,11 @@ export const FraudMonitoring: React.FC = () => {
                   </div>
                 </div>
               </div>
-            ))}
+            )) : (
+              <div className="rounded-2xl border border-dashed border-slate-800 bg-slate-950/40 p-6 text-sm text-slate-400">
+                No fraud alerts detected from the current event set.
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -139,7 +292,7 @@ export const FraudMonitoring: React.FC = () => {
       <Card className="bg-slate-900 border-slate-800">
         <CardHeader>
           <CardTitle className="text-white">Blocked Transactions</CardTitle>
-          <CardDescription className="text-slate-400">Recently prevented fraudulent activities</CardDescription>
+          <CardDescription className="text-slate-400">Penalty-related event records derived from live backend data</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto">
@@ -153,7 +306,7 @@ export const FraudMonitoring: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {blockedTransactions.map((tx, index) => (
+                {blockedTransactions.length > 0 ? blockedTransactions.map((tx, index) => (
                   <tr key={index} className="border-b border-slate-800/50 hover:bg-slate-800/30">
                     <td className="py-4 px-4">
                       <code className="text-sm text-slate-300 bg-slate-800 px-2 py-1 rounded">{tx.wallet}</code>
@@ -162,7 +315,13 @@ export const FraudMonitoring: React.FC = () => {
                     <td className="py-4 px-4 text-sm text-white">{tx.amount}</td>
                     <td className="py-4 px-4 text-sm text-slate-500 text-right">{tx.time}</td>
                   </tr>
-                ))}
+                )) : (
+                  <tr>
+                    <td className="px-4 py-6 text-sm text-slate-400" colSpan={4}>
+                      No blocked transactions were derived from live penalty data.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>

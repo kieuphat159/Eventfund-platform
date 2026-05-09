@@ -1,5 +1,37 @@
 import asyncHandler from "../utils/asyncHandler.js";
 import * as eventsService from "../services/events/events.service.js";
+import UploadService from "../services/upload/upload.service.js";
+
+let uploadServiceInstance = null;
+
+function getUploadService() {
+  if (!uploadServiceInstance) {
+    uploadServiceInstance = new UploadService();
+  }
+
+  return uploadServiceInstance;
+}
+
+async function attachEventImageUrls(req, eventData) {
+  const files = Array.isArray(req.files) ? req.files : [];
+
+  if (files.length === 0) {
+    return eventData;
+  }
+
+  const uploadService = getUploadService();
+  const uploadContext =
+    req.user?.walletAddress || req.user?._id || `event-${Date.now()}`;
+  const uploadResult = await uploadService.uploadEventImages(
+    files,
+    String(uploadContext),
+  );
+
+  return {
+    ...eventData,
+    imageUrls: uploadResult.imageUrls,
+  };
+}
 
 /**
  * EventsController - Handles event management endpoints
@@ -23,7 +55,8 @@ class EventsController {
    */
   createEvent = asyncHandler(async (req, res) => {
     const eventData = req.validated?.body || req.body;
-    const event = await this.eventsService.createEvent(eventData, req.user);
+    const eventWithImages = await attachEventImageUrls(req, eventData);
+    const event = await this.eventsService.createEvent(eventWithImages, req.user);
 
     res.status(201).json({
       success: true,
@@ -37,8 +70,9 @@ class EventsController {
    */
   createEventIntent = asyncHandler(async (req, res) => {
     const eventData = req.validated?.body || req.body;
+    const eventWithImages = await attachEventImageUrls(req, eventData);
     const intent = await this.eventsService.createCreateEventIntent(
-      eventData,
+      eventWithImages,
       req.user,
     );
 
