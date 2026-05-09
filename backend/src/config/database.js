@@ -8,7 +8,7 @@ export const connectDB = async () => {
     const nodeEnv = String(process.env.NODE_ENV || "DEV").toUpperCase();
     const mongoURI = nodeEnv === "PROD"
       ? process.env.MONGO_PROD_URI
-      : process.env.MONGO_DEV_URI || process.env.MONGO_PROD_URI;
+      : process.env.MONGO_DEV_URI;
 
     if (!mongoURI) {
       throw new Error("❌ MongoDB URI is not defined in .env");
