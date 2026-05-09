@@ -133,15 +133,15 @@ class UploadService {
    * Supports dev/prod environment separation
    */
   configureCloudinary() {
-    const nodeEnv = process.env.NODE_ENV?.toUpperCase();
+    const nodeEnv = String(process.env.NODE_ENV || "DEV").trim().toUpperCase();
 
     // Choose credentials based on environment
     let cloudName, apiKey, apiSecret;
 
-    if ((nodeEnv === 'DEV' || nodeEnv === 'DEVELOPMENT') && process.env.CLOUDINARY_PROD_NAM) {
-      cloudName = process.env.CLOUDINARY_PROD_NAM;
-      apiKey = process.env.CLOUDINARY_PROD_KEY;
-      apiSecret = process.env.CLOUDINARY_PROD_SECRET;
+    if ((nodeEnv === 'DEV' || nodeEnv === 'DEVELOPMENT') && process.env.CLOUDINARY_DEV_NAME) {
+      cloudName = process.env.CLOUDINARY_DEV_NAME;
+      apiKey = process.env.CLOUDINARY_DEV_KEY;
+      apiSecret = process.env.CLOUDINARY_DEV_SECRET;
     } else if ((nodeEnv === 'PROD' || nodeEnv === 'PRODUCTION') && process.env.CLOUDINARY_PROD_NAME) {
       cloudName = process.env.CLOUDINARY_PROD_NAME;
       apiKey = process.env.CLOUDINARY_PROD_KEY;

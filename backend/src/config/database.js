@@ -3,12 +3,20 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
+function normalizeNodeEnv(value) {
+  return String(value || "DEV").trim().toUpperCase();
+}
+
+function isProdEnv(nodeEnv) {
+  return ["PROD", "PRODUCTION"].includes(nodeEnv);
+}
+
 export const connectDB = async () => {
   try {
-    const nodeEnv = String(process.env.NODE_ENV || "DEV").toUpperCase();
-    const mongoURI = nodeEnv === "PROD"
+    const nodeEnv = normalizeNodeEnv(process.env.NODE_ENV);
+    const mongoURI = isProdEnv(nodeEnv)
       ? process.env.MONGO_PROD_URI
-      : process.env.MONGO_DEV_URI || process.env.MONGO_PROD_URI;
+      : process.env.MONGO_DEV_URI;
 
     if (!mongoURI) {
       throw new Error("❌ MongoDB URI is not defined in .env");
