@@ -88,10 +88,11 @@ class AuthController {
    * POST /api/auth/verify
    */
   verifySignature = asyncHandler(async (req, res) => {
-    const { message, signature } = req.validated.body;
+    const { message, signature, smartAccountAddress } = req.validated.body;
     const result = await this.authService.verifyAndAuthenticate(
       message,
       signature,
+      smartAccountAddress,
     );
 
     res.status(200).json({

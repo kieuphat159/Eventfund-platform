@@ -20,7 +20,6 @@ import { useLoading } from "../../components/ui/loadingContext";
 import { getEventById, type EventItem } from "../../services/events.service";
 import {
   investInEventOnChain,
-  type Eip1193Provider,
 } from "../../services/investment.service";
 import {
   getTicketStats,
@@ -30,6 +29,7 @@ import {
   type EventTicketStats,
 } from "../../services/tickets.service";
 import { useWeb3Auth } from "@web3auth/modal/react";
+import { resolveTransactionProvider } from "../../services/providerService";
 import { calculatePercentage, formatIntegerWithUnit } from "../../lib/utils";
 
 export const EventDetail: React.FC = () => {
@@ -214,7 +214,7 @@ export const EventDetail: React.FC = () => {
     setInvesting(true);
 
     try {
-      const provider = web3Auth?.provider as Eip1193Provider | undefined;
+      const provider = resolveTransactionProvider(web3Auth?.provider);
       if (!provider?.request) {
         throw new Error(
           "Wallet provider is not ready. Please reconnect wallet and try again.",
@@ -256,14 +256,7 @@ export const EventDetail: React.FC = () => {
       return;
     }
 
-    const provider = web3Auth?.provider as
-      | {
-          request: (args: {
-            method: string;
-            params?: unknown[];
-          }) => Promise<unknown>;
-        }
-      | undefined;
+    const provider = resolveTransactionProvider(web3Auth?.provider);
 
     if (!provider?.request) {
       showBuyPopup(
@@ -324,7 +317,7 @@ export const EventDetail: React.FC = () => {
     setPurchaseConfirmTier(tierName || "this ticket");
   };
 
-  
+
   if (error) return <div className="p-8 text-red-400">{error}</div>;
   if (!event) return <div className="p-8 text-white">Event not found</div>;
 
