@@ -37,6 +37,7 @@ import {
   type EventStatus,
 } from "../../services/events.service";
 import { getTickets, type ApiTicket } from "../../services/tickets.service";
+import { resolveTransactionProvider } from "../../services/providerService";
 import { useAuth } from "../../contexts/AuthContext";
 import { useLoading } from "../../components/ui/loadingContext";
 
@@ -198,14 +199,7 @@ export const MyEvents: React.FC = () => {
       }
 
       const updated = await cancelEventWithWalletFallback(
-        web3Auth.provider as
-          | {
-              request: (args: {
-                method: string;
-                params?: unknown[];
-              }) => Promise<unknown>;
-            }
-          | undefined,
+        resolveTransactionProvider(web3Auth?.provider),
         eventId,
         { status: "cancelled" },
         user?.walletAddress,

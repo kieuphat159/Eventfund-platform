@@ -15,8 +15,17 @@ import { Textarea } from "../../components/ui/textarea";
 import { Label } from "../../components/ui/label";
 import Loading from "../../components/ui/loading";
 import { createEventOnChain } from "../../services/events.service";
+import { resolveTransactionProvider } from "../../services/providerService";
 import { useAuth } from "../../contexts/AuthContext";
 import { cn } from "@/app/lib/utils";
+
+const MAX_EVENT_IMAGES = 10;
+const ACCEPTED_IMAGE_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+]);
 
 type TicketTierForm = {
   name: string;
@@ -35,6 +44,7 @@ const createEmptyTier = (): TicketTierForm => ({
 export const CreateEvent: React.FC = () => {
   const navigate = useNavigate();
   const submitInFlightRef = useRef(false);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
   const { web3Auth } = useWeb3Auth();
   const { user, connectWallet } = useAuth();
 
@@ -57,6 +67,8 @@ export const CreateEvent: React.FC = () => {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [eventImages, setEventImages] = useState<File[]>([]);
+  const [eventImagePreviews, setEventImagePreviews] = useState<string[]>([]);
 
   // Fake submit/loading helpers for long on-chain create flows (always enabled in dev)
   const [fakeSubmitEnabled, setFakeSubmitEnabled] = useState(true);
@@ -86,6 +98,8 @@ export const CreateEvent: React.FC = () => {
     setMinInvestmentAmount("");
     setInvestmentEnabled(true);
     setTicketTiers([{ name: "General", price: "", supply: "" }]);
+    setEventImages([]);
+    setEventImagePreviews([]);
     setFieldErrors({});
     setError("");
     setSuccess("");
@@ -149,6 +163,75 @@ export const CreateEvent: React.FC = () => {
     });
   };
 
+  const clearImageSelection = () => {
+    setEventImages([]);
+    setEventImagePreviews([]);
+    if (imageInputRef.current) {
+      imageInputRef.current.value = "";
+    }
+    setFieldErrors((prev) => {
+      const next = { ...prev };
+      delete next.imageFiles;
+      return next;
+    });
+  };
+
+  const handleImageSelection = (files: FileList | null) => {
+    if (!files || files.length === 0) {
+      return;
+    }
+
+    const selectedFiles = Array.from(files);
+    const invalidFiles = selectedFiles.filter(
+      (file) => !ACCEPTED_IMAGE_TYPES.has(file.type),
+    );
+    if (invalidFiles.length > 0) {
+      setFieldErrors((prev) => ({
+        ...prev,
+        imageFiles: "Only JPG, PNG, GIF, and WebP images are supported.",
+      }));
+      return;
+    }
+
+    const mergedFiles = [...eventImages];
+    selectedFiles.forEach((file) => {
+      const isDuplicate = mergedFiles.some(
+        (current) =>
+          current.name === file.name &&
+          current.size === file.size &&
+          current.lastModified === file.lastModified,
+      );
+
+      if (!isDuplicate && mergedFiles.length < MAX_EVENT_IMAGES) {
+        mergedFiles.push(file);
+      }
+    });
+
+    if (mergedFiles.length === 0) {
+      return;
+    }
+
+    setEventImages(mergedFiles);
+    setFieldErrors((prev) => {
+      const next = { ...prev };
+      delete next.imageFiles;
+      return next;
+    });
+
+    if (imageInputRef.current) {
+      imageInputRef.current.value = "";
+    }
+  };
+
+  const removeImageAtIndex = (index: number) => {
+    setEventImages((prev) => prev.filter((_, currentIndex) => currentIndex !== index));
+    setFieldErrors((prev) => {
+      const next = { ...prev };
+      delete next.imageFiles;
+      return next;
+    });
+  };
+
   // Calculate total ticket value (price in wei)
   const calculateTotalTicketValue = () => {
     return ticketTiers.reduce((total, tier) => {
@@ -181,6 +264,15 @@ export const CreateEvent: React.FC = () => {
   useEffect(() => {
     setMinStakeRequired(calculateCreationFeeWei());
   }, [ticketTiers]);
+
+  useEffect(() => {
+    const previewUrls = eventImages.map((file) => URL.createObjectURL(file));
+    setEventImagePreviews(previewUrls);
+
+    return () => {
+      previewUrls.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [eventImages]);
 
   const buildStartDate = () => {
     return parseOptionalDateTime(startAt);
@@ -495,23 +587,10 @@ export const CreateEvent: React.FC = () => {
           address: location.trim() || "TBA",
         },
         ticketTiers: normalizedTiers,
+        imageFiles: eventImages,
       };
 
-      const provider = web3Auth?.provider as
-        | {
-            request: (args: {
-              method: string;
-              params?: unknown[];
-            }) => Promise<unknown>;
-          }
-        | undefined;
-
-      if (!provider?.request) {
-        setError(
-          "Wallet provider is not ready. Please reconnect wallet and try again.",
-        );
-        return;
-      }
+      const provider = resolveTransactionProvider(web3Auth?.provider);
 
       const created = await createEventOnChain(
         provider!,
@@ -896,15 +975,94 @@ export const CreateEvent: React.FC = () => {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="border-2 border-dashed border-slate-700 rounded-lg p-12 text-center opacity-90">
-            <Upload className="w-12 h-12 text-fuchsia-300 mx-auto mb-4" />
-            <p className="text-white mb-2">
-              Image upload is not connected yet.
-            </p>
-            <p className="text-sm text-slate-400">
-              The backend already supports image upload, but this form is not
-              sending FormData yet.
-            </p>
+          <input
+            ref={imageInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/gif,image/webp"
+            multiple
+            className="hidden"
+            onChange={(e) => handleImageSelection(e.target.files)}
+          />
+
+          <div className="space-y-4">
+            {eventImagePreviews.length > 0 ? (
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {eventImagePreviews.map((previewUrl, index) => (
+                  <div
+                    key={`${eventImages[index]?.name || "image"}-${index}`}
+                    className="group relative overflow-hidden rounded-xl border border-slate-700 bg-slate-800/60"
+                  >
+                    <img
+                      src={previewUrl}
+                      alt={`Event upload preview ${index + 1}`}
+                      className="h-44 w-full object-cover"
+                    />
+                    <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 bg-gradient-to-t from-slate-950/90 to-transparent p-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-white">
+                          {eventImages[index]?.name}
+                        </p>
+                        <p className="text-xs text-slate-300">
+                          {(eventImages[index]?.size / 1024 / 1024).toFixed(2)} MB
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        onClick={() => removeImageAtIndex(index)}
+                        variant="ghost"
+                        size="sm"
+                        className="text-white hover:bg-white/10"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="border-2 border-dashed border-slate-700 rounded-lg p-12 text-center opacity-90">
+                <Upload className="w-12 h-12 text-fuchsia-300 mx-auto mb-4" />
+                <p className="text-white mb-2">
+                  Add a cover image to make the event listing stand out.
+                </p>
+                <p className="text-sm text-slate-400">
+                  JPG, PNG, GIF, or WebP. You can attach up to {MAX_EVENT_IMAGES} images.
+                </p>
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center gap-3">
+              <Button
+                type="button"
+                onClick={() => imageInputRef.current?.click()}
+                variant="outline"
+                size="sm"
+                className="border-slate-700 hover:bg-slate-800 text-white"
+              >
+                <Upload className="w-4 h-4 mr-2 text-fuchsia-300" />
+                Choose image(s)
+              </Button>
+
+              {eventImages.length > 0 && (
+                <Button
+                  type="button"
+                  onClick={clearImageSelection}
+                  variant="ghost"
+                  size="sm"
+                  className="text-slate-300 hover:bg-slate-800"
+                >
+                  Clear selection
+                </Button>
+              )}
+
+              <p className="text-xs text-slate-500">
+                {eventImages.length}/{MAX_EVENT_IMAGES} selected
+              </p>
+            </div>
+
+            {fieldErrors.imageFiles && (
+              <p className="text-sm text-red-400">{fieldErrors.imageFiles}</p>
+            )}
           </div>
         </CardContent>
       </Card>

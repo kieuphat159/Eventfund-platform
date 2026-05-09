@@ -26,6 +26,7 @@ import { ImageWithFallback } from "../../components/figma/ImageWithFallback";
 import { useAuth } from "../../contexts/AuthContext";
 import { useLoading } from "../../components/ui/loadingContext";
 import { useWeb3Auth } from "@web3auth/modal/react";
+import { resolveTransactionProvider } from "../../services/providerService";
 import {
   listingService,
   type ApiEvent,
@@ -289,14 +290,7 @@ export const TicketDetail: React.FC = () => {
       return;
     }
 
-    const provider = web3Auth?.provider as
-      | {
-          request: (args: {
-            method: string;
-            params?: unknown[];
-          }) => Promise<unknown>;
-        }
-      | undefined;
+    const provider = resolveTransactionProvider(web3Auth?.provider);
 
     if (!provider?.request) {
       showListingPopup(

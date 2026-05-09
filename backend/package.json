@@ -18,6 +18,7 @@
     "worker:deposits": "node src/workers/depositWorker.js",
     "test:blockchain:connections": "node src/services/blockchain/test/connections/all.js",
     "test:mongo": "node src/config/testMongoDB.js",
+    "test:redis": "node src/config/testRedis.js",
     "test:cloudinary": "node src/config/testCloudinary.js",
     "seed": "node src/scripts/seed.js",
     "add:event-verifier": "node src/scripts/addEventVerifier.js",
