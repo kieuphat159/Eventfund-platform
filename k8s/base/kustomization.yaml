@@ -14,7 +14,6 @@ resources:
   # 2. Secrets (ESO sync từ SSM)
   - secrets/secretstore.yaml
   - secrets/externalsecret-backend.yaml
-  - secrets/externalsecret-frontend.yaml
 
   # 3. Backend config
   - backend/configmap.yaml
