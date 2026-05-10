@@ -1,0 +1,93 @@
+name: Manual – Infrastructure Apply
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "apply" to confirm'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  terraform-apply:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.confirm == 'apply'
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Load config
+        id: config
+        uses: ./.github/actions/load-config
+
+      - name: Configure AWS
+        uses: ./.github/actions/setup-aws
+        with:
+          aws_account_id: ${{ secrets.AWS_ACCOUNT_ID }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ steps.config.outputs.terraform_version }}
+
+      - name: Terraform Init
+        working-directory: terraform
+        run: terraform init
+
+      - name: Terraform Plan
+        working-directory: terraform
+        run: terraform plan -out=tfplan
+        env:
+          TF_VAR_region: ${{ steps.config.outputs.aws_region }}
+          TF_VAR_project_name: ${{ steps.config.outputs.project_name }}
+          TF_VAR_eks_version: ${{ steps.config.outputs.tf_eks_version }}
+          TF_VAR_node_group_instance_types: '["${{ steps.config.outputs.tf_node_instance_type }}"]'
+          TF_VAR_node_desired_capacity: ${{ steps.config.outputs.tf_node_desired_capacity }}
+          TF_VAR_node_min_capacity: ${{ steps.config.outputs.tf_node_min_capacity }}
+          TF_VAR_node_max_capacity: ${{ steps.config.outputs.tf_node_max_capacity }}
+          TF_VAR_vpc_cidr: ${{ steps.config.outputs.tf_vpc_cidr }}
+          TF_VAR_public_subnets_cidr: ${{ steps.config.outputs.tf_public_subnets_cidr }}
+          TF_VAR_private_subnets_cidr: ${{ steps.config.outputs.tf_private_subnets_cidr }}
+          TF_VAR_azs: ${{ steps.config.outputs.tf_azs }}
+          TF_VAR_ecr_backend_repo: ${{ steps.config.outputs.ecr_backend_repository }}
+          TF_VAR_ssm_prefix: /${{ steps.config.outputs.project_name }}/${{ steps.config.outputs.environment }}/backend
+          TF_VAR_environment: ${{ steps.config.outputs.environment }}
+          TF_VAR_github_actions_role_name: ${{ steps.config.outputs.github_actions_role_name }}
+          TF_VAR_github_repos: '["repo:${{ github.repository }}:*"]'
+          TF_VAR_security_reports_bucket: ${{ steps.config.outputs.s3_security_reports_bucket }}
+          TF_VAR_security_reports_retention_days: ${{ steps.config.outputs.security_reports_retention_days }}
+
+      - name: Terraform Apply
+        working-directory: terraform
+        run: terraform apply tfplan
+
+      - name: Update CloudFront distribution ID in config
+        run: |
+          CF_ID=$(terraform -chdir=terraform output -raw cloudfront_distribution_id 2>/dev/null || echo "")
+          if [ -n "$CF_ID" ]; then
+            sed -i "s|distribution_id:.*|distribution_id: ${CF_ID}|" .github/config/env.yml
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add .github/config/env.yml
+            git diff --staged --quiet || git commit -m "ci(infra): update CloudFront distribution ID"
+            git push
+            echo "✅ Updated CloudFront distribution ID: $CF_ID"
+          fi
+
+      - name: Render alertmanager config with secrets
+        env:
+          ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
+          ALERT_EMAIL_PASSWORD: ${{ secrets.ALERT_EMAIL_PASSWORD }}
+        run: |
+          envsubst < k8s/base/monitoring/alertmanager-config.yaml | \
+            kubectl apply -f - \
+            --kubeconfig <(aws eks update-kubeconfig \
+              --region ${{ steps.config.outputs.aws_region }} \
+              --name ${{ steps.config.outputs.project_name }} \
+              --dry-run \
+              | cat)

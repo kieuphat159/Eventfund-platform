@@ -1,0 +1,64 @@
+name: CD
+
+on:
+  # Trigger sau khi CI pass trên main
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [master, dev]
+  # Cho phép trigger thủ công
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag to deploy (default: latest commit SHA)'
+        required: false
+
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: false  # Không cancel deploy đang chạy
+
+jobs:
+  # Chỉ chạy nếu CI thành công (với workflow_run trigger)
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      should_deploy: ${{ steps.check.outputs.should_deploy }}
+      image_tag: ${{ steps.check.outputs.image_tag }}
+    steps:
+      - name: Check if should deploy
+        id: check
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.image_tag }}"
+            echo "should_deploy=true" >> $GITHUB_OUTPUT
+            echo "image_tag=${TAG:-${{ github.sha }}}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event.workflow_run.conclusion }}" = "success" ]; then
+            echo "should_deploy=true" >> $GITHUB_OUTPUT
+            echo "image_tag=${{ github.event.workflow_run.head_sha }}" >> $GITHUB_OUTPUT
+          else
+            echo "should_deploy=false" >> $GITHUB_OUTPUT
+            echo "image_tag=" >> $GITHUB_OUTPUT
+          fi
+
+  deploy-backend:
+    needs: check
+    if: needs.check.outputs.should_deploy == 'true'
+    uses: ./.github/workflows/reusable-deploy-backend.yml
+    permissions:
+      contents: write
+      id-token: write
+    with:
+      image_tag: ${{ needs.check.outputs.image_tag }}
+      environment: dev
+    secrets:
+      AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+
+  deploy-frontend:
+    needs: check
+    if: needs.check.outputs.should_deploy == 'true'
+    uses: ./.github/workflows/reusable-deploy-frontend.yml
+    permissions:
+      contents: read
+      id-token: write
+    secrets:
+      AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}

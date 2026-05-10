@@ -1,0 +1,71 @@
+name: Reusable – Deploy Frontend
+
+on:
+  workflow_call:
+    secrets:
+      AWS_ACCOUNT_ID:
+        required: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Load config
+        id: config
+        uses: ./.github/actions/load-config
+
+      - name: Configure AWS
+        uses: ./.github/actions/setup-aws
+        with:
+          aws_account_id: ${{ secrets.AWS_ACCOUNT_ID }}
+
+      - name: Pull frontend env from SSM
+        shell: bash
+        run: |
+          set -euo pipefail
+          SSM_PREFIX="/eventfund/${{ steps.config.outputs.environment }}/frontend"
+          ENV_FILE="frontend/.env"
+          aws ssm get-parameters-by-path \
+            --path "$SSM_PREFIX" \
+            --recursive \
+            --with-decryption \
+            --region ${{ steps.config.outputs.aws_region }} \
+            --query 'Parameters[*].[Name,Value]' \
+            --output json > /tmp/ssm.json
+          jq -r '.[] | @tsv' /tmp/ssm.json > /tmp/ssm.tsv
+          while IFS=$(printf '\t') read -r name value; do
+            KEY=$(echo "$name" | sed "s|^$SSM_PREFIX/||")
+            echo "${KEY}=${value}" >> "$ENV_FILE"
+          done < /tmp/ssm.tsv
+          rm -f /tmp/ssm.json /tmp/ssm.tsv
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ steps.config.outputs.node_version }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+
+      - name: Upload to S3
+        run: |
+          aws s3 sync frontend/dist/ s3://${{ steps.config.outputs.frontend_s3_bucket }} \
+            --delete \
+            --region ${{ steps.config.outputs.aws_region }}
+
+      - name: Invalidate CloudFront cache
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ steps.config.outputs.cloudfront_distribution_id }} \
+            --paths "/*"
