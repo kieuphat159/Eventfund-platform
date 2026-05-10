@@ -11,6 +11,10 @@ on:
         description: 'Scan type: full or pr-diff'
         type: string
         default: 'full'
+      pr_number:
+        description: 'Pull request number (used to filter artifact report for PR scans)'
+        type: string
+        default: ''
     secrets:
       SONAR_TOKEN:
         required: true
@@ -95,29 +99,42 @@ jobs:
 
           PROJECT_KEY="${{ steps.config.outputs.sonarcloud_project_key }}"
           BASE_URL="${{ steps.sonar_url.outputs.url }}"
+          PR_NUMBER="${{ inputs.pr_number }}"
           OUT="sonar-reports"
           mkdir -p $OUT
 
           echo "📥 Fetching SonarCloud data..."
 
+          # Build PR filter params if pr_number is provided
+          if [ -n "$PR_NUMBER" ]; then
+            echo "🔍 Filtering by PR #${PR_NUMBER}"
+            PR_FILTER_ISSUES="&pullRequest=${PR_NUMBER}"
+            PR_FILTER_HOTSPOTS="&pullRequest=${PR_NUMBER}"
+            PR_FILTER_QG="&pullRequest=${PR_NUMBER}"
+          else
+            PR_FILTER_ISSUES=""
+            PR_FILTER_HOTSPOTS=""
+            PR_FILTER_QG=""
+          fi
+
           # Issues (bugs, vulnerabilities, code smells)
           curl -sf -u "$SONAR_TOKEN:" \
-            "$BASE_URL/api/issues/search?projectKeys=$PROJECT_KEY&ps=500&resolved=false" \
+            "$BASE_URL/api/issues/search?projectKeys=$PROJECT_KEY&ps=500&resolved=false${PR_FILTER_ISSUES}" \
             -o $OUT/issues.json || echo "⚠️ Failed to fetch issues"
 
-          # Measures (metrics)
+          # Measures (metrics) — always full project, no PR filter available
           curl -sf -u "$SONAR_TOKEN:" \
             "$BASE_URL/api/measures/component?component=$PROJECT_KEY&metricKeys=bugs,vulnerabilities,code_smells,coverage,duplicated_lines_density,ncloc,security_hotspots,reliability_rating,security_rating,sqale_rating,sqale_index,alert_status" \
             -o $OUT/measures.json || echo "⚠️ Failed to fetch measures"
 
           # Security hotspots
           curl -sf -u "$SONAR_TOKEN:" \
-            "$BASE_URL/api/hotspots/search?projectKey=$PROJECT_KEY&ps=500" \
+            "$BASE_URL/api/hotspots/search?projectKey=$PROJECT_KEY&ps=500${PR_FILTER_HOTSPOTS}" \
             -o $OUT/hotspots.json || echo "⚠️ Failed to fetch hotspots"
 
           # Quality Gate status
           curl -sf -u "$SONAR_TOKEN:" \
-            "$BASE_URL/api/qualitygates/project_status?projectKey=$PROJECT_KEY" \
+            "$BASE_URL/api/qualitygates/project_status?projectKey=$PROJECT_KEY${PR_FILTER_QG}" \
             -o $OUT/quality-gate.json || echo "⚠️ Failed to fetch quality gate"
 
           echo "✅ Exported SonarCloud reports"

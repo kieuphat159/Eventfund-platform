@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: eventfund-dev
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/truongtrongdat94/Eventfund-platform.git
+    targetRevision: main
+    path: k8s/base
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: eventfund-dev
+  syncPolicy:
+    automated:
+      prune: true      # xóa resource không còn trong Git
+      selfHeal: true   # tự fix nếu ai đó sửa trực tiếp trên cluster
+    syncOptions:
+      - CreateNamespace=true

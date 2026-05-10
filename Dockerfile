@@ -21,8 +21,8 @@ WORKDIR /app
 # ─── Stage 2: Production image ───────────────────────────────────────────────
 FROM node:20.19.0-alpine AS production
 
-# Install AWS CLI for Parameter Store access
-RUN apk add --no-cache aws-cli curl jq
+# curl: health check
+RUN apk add --no-cache curl
 
 # Security: non-root user
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
@@ -38,10 +38,6 @@ COPY --chown=appuser:appgroup backend/src ./backend/src
 # Copy installed node_modules from deps stage
 COPY --from=deps --chown=appuser:appgroup /app/backend/node_modules ./backend/node_modules
 
-# Copy entrypoint script
-COPY --chown=appuser:appgroup docker-entrypoint.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
-
 # Create logs directory with correct permissions
 RUN mkdir -p /app/backend/logs && chown -R appuser:appgroup /app/backend/logs
 
@@ -49,13 +45,12 @@ USER appuser
 
 WORKDIR /app/backend
 
+# Port chỉ relevant cho api process, các process khác không dùng
+# Healthcheck và CMD được định nghĩa per-process trong k8s deployment
 EXPOSE 4000
-
-# Improved health check using Node.js
-HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
-    CMD node -e "require('http').get('http://localhost:4000/health', (r) => { let d=''; r.on('data', c => d+=c); r.on('end', () => { try { const j=JSON.parse(d); process.exit(j.ok ? 0 : 1); } catch(e) { process.exit(1); }}); }).on('error', () => process.exit(1));"
 
 STOPSIGNAL SIGTERM
 
-ENTRYPOINT ["docker-entrypoint.sh"]
-CMD ["node", "src/server.js"]
+# Không set CMD mặc định — buộc k8s deployment phải khai báo command rõ ràng
+# để tránh vô tình chạy sai process
+CMD ["node", "--help"]

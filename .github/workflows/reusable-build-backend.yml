@@ -46,8 +46,8 @@ jobs:
           context: .
           file: ./Dockerfile
           target: production
-          push: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
-          load: ${{ github.ref != 'refs/heads/main' || github.event_name != 'push' }}
+          push: ${{ github.event_name == 'push' }}
+          load: ${{ github.event_name != 'push' }}
           tags: |
             ${{ steps.login-ecr.outputs.registry }}/${{ steps.config.outputs.ecr_backend_repository }}:latest
             ${{ steps.login-ecr.outputs.registry }}/${{ steps.config.outputs.ecr_backend_repository }}:${{ github.sha }}
