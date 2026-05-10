@@ -122,7 +122,7 @@ jobs:
           sarif_file: trivy-results.sarif
 
       - name: Output build info
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        if: github.ref == 'refs/heads/master' && github.event_name == 'push'
         run: |
           echo "Image pushed to ECR:"
           echo "  - ${{ steps.login-ecr.outputs.registry }}/${{ steps.config.outputs.ecr_backend_repository }}:latest"
