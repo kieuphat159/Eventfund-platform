@@ -12,92 +12,71 @@ jobs:
   backend:
     runs-on: ubuntu-latest
 
-    env:
-      RPC_URL: ${{ secrets.RPC_URL }}
-
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # Load config
       - name: Load config
         id: config
         uses: ./.github/actions/load-config
 
-      # Setup AWS (OIDC)
       - name: Configure AWS
         uses: ./.github/actions/setup-aws
         with:
           aws_account_id: ${{ secrets.AWS_ACCOUNT_ID }}
 
-      # Setup Docker Buildx
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # Login ECR
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      # Build and push Docker image
-      - name: Build and push Docker image
+      # Build và load vào local daemon để smoke test dùng ngay
+      # Không push ở bước này — push riêng sau khi test pass
+      - name: Build image
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
           target: production
-          push: ${{ github.event_name == 'push' }}
-          load: ${{ github.event_name != 'push' }}
+          push: false
+          load: true
           tags: |
-            ${{ steps.login-ecr.outputs.registry }}/${{ steps.config.outputs.ecr_backend_repository }}:latest
             ${{ steps.login-ecr.outputs.registry }}/${{ steps.config.outputs.ecr_backend_repository }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          build-args: |
-            BUILDKIT_INLINE_CACHE=1
 
-      # Debug SSM
-      - name: Debug SSM permissions
-        run: |
-          echo "🔍 Checking SSM path: /eventfund/dev/backend"
-          aws ssm get-parameters-by-path \
-            --path "/eventfund/dev/backend" \
-            --recursive \
-            --with-decryption \
-            --region ${{ steps.config.outputs.aws_region }} \
-            --query "Parameters[*].Name" \
-            --output json
-
-      # Smoke test
+      # Smoke test dùng image local — không cần pull từ ECR
       - name: Smoke test (/health)
         run: |
           set -euo pipefail
 
           IMAGE_TAG="${{ steps.login-ecr.outputs.registry }}/${{ steps.config.outputs.ecr_backend_repository }}:${{ github.sha }}"
 
-          # Pull env vars từ SSM rồi inject vào container
-          ENV_ARGS=""
-          while IFS=$'\t' read -r name value; do
-            KEY=$(echo "$name" | sed 's|.*/||')
-            ENV_ARGS="$ENV_ARGS -e ${KEY}=${value}"
-          done < <(aws ssm get-parameters-by-path \
+          # Pull env vars từ SSM, ghi vào temp file để inject vào container
+          # Dùng env-file thay vì -e flag để handle values có spaces/ký tự đặc biệt
+          ENV_FILE=$(mktemp)
+          trap "rm -f $ENV_FILE" EXIT  # đảm bảo xóa file dù exit thế nào
+
+          aws ssm get-parameters-by-path \
             --path "/eventfund/dev/backend" \
             --recursive \
             --with-decryption \
             --region ${{ steps.config.outputs.aws_region }} \
             --query 'Parameters[*].[Name,Value]' \
-            --output text 2>/dev/null)
+            --output json | \
+          jq -r '.[] | (.[0] | split("/") | last) + "=" + .[1]' > "$ENV_FILE"
 
           docker run -d \
             --name backend-test \
             -p 4000:4000 \
-            $ENV_ARGS \
+            --env-file "$ENV_FILE" \
             "$IMAGE_TAG"
 
           for i in {1..60}; do
             if curl -fsS "http://localhost:4000/health" | jq -e '.ok == true' >/dev/null 2>&1; then
               echo "✅ Health check passed"
-              docker logs backend-test
               docker stop backend-test
               exit 0
             fi
@@ -106,19 +85,31 @@ jobs:
           done
 
           echo "❌ Health check failed"
-          docker logs --tail 200 backend-test
+          docker logs --tail 100 backend-test
           docker stop backend-test
           exit 1
 
-      # Trivy scan (PR / dev branch only)
+      # Push lên ECR chỉ khi là push event (không phải PR)
+      # Chạy sau khi smoke test pass
+      - name: Push image to ECR
+        if: github.event_name == 'push'
+        run: |
+          IMAGE="${{ steps.login-ecr.outputs.registry }}/${{ steps.config.outputs.ecr_backend_repository }}"
+          docker tag "${IMAGE}:${{ github.sha }}" "${IMAGE}:latest"
+          docker push "${IMAGE}:${{ github.sha }}"
+          docker push "${IMAGE}:latest"
+          echo "✅ Pushed: ${IMAGE}:${{ github.sha }}"
+          echo "✅ Pushed: ${IMAGE}:latest"
+
+      # Trivy scan — chạy trên image local, không cần pull từ ECR
       - name: Run Trivy security scan
         if: github.event_name == 'pull_request' || github.ref == 'refs/heads/dev'
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ steps.config.outputs.ecr_backend_repository }}:${{ github.sha }}
-          format: 'sarif'
-          output: 'trivy-results.sarif'
-          severity: 'CRITICAL,HIGH'
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
           exit-code: '0'
         env:
           TRIVY_NO_PROGRESS: 'true'
@@ -128,10 +119,3 @@ jobs:
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-results.sarif
-
-      - name: Output build info
-        if: github.ref == 'refs/heads/master' && github.event_name == 'push'
-        run: |
-          echo "Image pushed to ECR:"
-          echo "  - ${{ steps.login-ecr.outputs.registry }}/${{ steps.config.outputs.ecr_backend_repository }}:latest"
-          echo "  - ${{ steps.login-ecr.outputs.registry }}/${{ steps.config.outputs.ecr_backend_repository }}:${{ github.sha }}"
