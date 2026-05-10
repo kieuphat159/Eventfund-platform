@@ -3,39 +3,39 @@ kind: Kustomization
 
 # Image tag được CI/CD cập nhật tự động qua `kustomize edit set image`
 images:
-  - name: eventfund-backend
-    newName: eventfund-backend  # CI sẽ replace bằng full ECR URL
-    newTag: latest
+- name: eventfund-backend
+  newName: .dkr.ecr.ap-southeast-1.amazonaws.com/eventfund-backend
+  newTag: ff8e60f55351a0f8bfbffda749458c4d11c53b19
 
-resources:
   # 1. Namespace trước
-  - namespace/namespace.yaml
 
   # 2. Secrets (ESO sync từ SSM)
-  - secrets/secretstore.yaml
-  - secrets/externalsecret-backend.yaml
 
   # 3. Backend config
-  - backend/configmap.yaml
 
   # 4. API server
-  - backend/api-deployment.yaml
-  - backend/api-service.yaml
-  - backend/api-ingress.yaml
-  - backend/api-hpa.yaml
 
   # 5. Blockchain indexers & processors
-  - backend/indexer-fund-deployment.yaml
-  - backend/processor-fund-deployment.yaml
-  - backend/indexer-ticket-deployment.yaml
-  - backend/processor-ticket-deployment.yaml
-  - backend/indexer-marketplace-deployment.yaml
-  - backend/processor-marketplace-deployment.yaml
 
   # 6. Workers
-  - backend/worker-deposits-deployment.yaml
 
   # 7. Frontend — served via CloudFront + S3 (không deploy trong K8s)
   # 8. Monitoring
-  - monitoring/prometheus-rules.yaml
-  - monitoring/alertmanager-config.yaml
+resources:
+- namespace/namespace.yaml
+- secrets/secretstore.yaml
+- secrets/externalsecret-backend.yaml
+- backend/configmap.yaml
+- backend/api-deployment.yaml
+- backend/api-service.yaml
+- backend/api-ingress.yaml
+- backend/api-hpa.yaml
+- backend/indexer-fund-deployment.yaml
+- backend/processor-fund-deployment.yaml
+- backend/indexer-ticket-deployment.yaml
+- backend/processor-ticket-deployment.yaml
+- backend/indexer-marketplace-deployment.yaml
+- backend/processor-marketplace-deployment.yaml
+- backend/worker-deposits-deployment.yaml
+- monitoring/prometheus-rules.yaml
+- monitoring/alertmanager-config.yaml
