@@ -51,6 +51,4 @@ EXPOSE 4000
 
 STOPSIGNAL SIGTERM
 
-# Không set CMD mặc định — buộc k8s deployment phải khai báo command rõ ràng
-# để tránh vô tình chạy sai process
-CMD ["node", "--help"]
+CMD ["node", "src/server.js"]
