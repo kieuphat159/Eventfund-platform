@@ -75,15 +75,23 @@ jobs:
 
           IMAGE_TAG="${{ steps.login-ecr.outputs.registry }}/${{ steps.config.outputs.ecr_backend_repository }}:${{ github.sha }}"
 
+          # Pull env vars từ SSM rồi inject vào container
+          ENV_ARGS=""
+          while IFS=$'\t' read -r name value; do
+            KEY=$(echo "$name" | sed 's|.*/||')
+            ENV_ARGS="$ENV_ARGS -e ${KEY}=${value}"
+          done < <(aws ssm get-parameters-by-path \
+            --path "/eventfund/dev/backend" \
+            --recursive \
+            --with-decryption \
+            --region ${{ steps.config.outputs.aws_region }} \
+            --query 'Parameters[*].[Name,Value]' \
+            --output text 2>/dev/null)
+
           docker run -d \
             --name backend-test \
             -p 4000:4000 \
-            -e USE_AWS_PARAMS=true \
-            -e ENV=dev \
-            -e AWS_REGION=${{ steps.config.outputs.aws_region }} \
-            -e AWS_ACCESS_KEY_ID=${{ env.AWS_ACCESS_KEY_ID }} \
-            -e AWS_SECRET_ACCESS_KEY=${{ env.AWS_SECRET_ACCESS_KEY }} \
-            -e AWS_SESSION_TOKEN=${{ env.AWS_SESSION_TOKEN }} \
+            $ENV_ARGS \
             "$IMAGE_TAG"
 
           for i in {1..60}; do
