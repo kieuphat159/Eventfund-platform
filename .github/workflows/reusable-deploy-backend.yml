@@ -93,5 +93,8 @@ jobs:
                   k8s/base/backend/configmap.yaml \
                   k8s/base/secrets/externalsecret-backend.yaml \
                   k8s/base/secrets/secretstore.yaml
-          git diff --staged --quiet || git commit -m "ci(deploy): update backend image to ${{ inputs.image_tag }}"
-          git push
+          git diff --staged --quiet && echo "No changes to commit" && exit 0
+          git commit -m "ci(deploy): update backend image to ${{ inputs.image_tag }}"
+          # Rebase trước khi push để tránh conflict khi có commit mới trên remote
+          git pull --rebase origin ${{ github.ref_name }}
+          git push origin ${{ github.ref_name }}
