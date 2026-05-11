@@ -92,7 +92,7 @@ jobs:
       # Push lên ECR chỉ khi là push event (không phải PR)
       # Chạy sau khi smoke test pass
       - name: Push image to ECR
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         run: |
           IMAGE="${{ steps.login-ecr.outputs.registry }}/${{ steps.config.outputs.ecr_backend_repository }}"
           docker tag "${IMAGE}:${{ github.sha }}" "${IMAGE}:latest"
