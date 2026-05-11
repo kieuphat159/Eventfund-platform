@@ -20,9 +20,6 @@ permissions:
   contents: read
   id-token: write
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Job 1: Load config → export tất cả outputs để job 2 dùng qua needs
-# ─────────────────────────────────────────────────────────────────────────────
 jobs:
   setup:
     name: Load Config
@@ -58,16 +55,12 @@ jobs:
         id: config
         uses: ./.github/actions/load-config
 
-  # ─────────────────────────────────────────────────────────────────────────────
-  # Job 2: Destroy — env được set một lần duy nhất ở job level
-  # ─────────────────────────────────────────────────────────────────────────────
   destroy:
     name: Destroy Billable AWS Resources
     runs-on: ubuntu-latest
     needs: setup
     if: github.event.inputs.confirm == 'destroy'
 
-    # ── Khai báo TF_VARs MỘT LẦN ở đây, tất cả steps bên dưới tự kế thừa ──
     env:
       TF_VAR_region:                          ${{ needs.setup.outputs.aws_region }}
       TF_VAR_project_name:                    ${{ needs.setup.outputs.project_name }}
@@ -96,6 +89,12 @@ jobs:
         with:
           aws_account_id: ${{ secrets.AWS_ACCOUNT_ID }}
 
+      - name: Setup kubectl
+        run: |
+          aws eks update-kubeconfig \
+            --region ${{ needs.setup.outputs.aws_region }} \
+            --name ${{ needs.setup.outputs.project_name }} 2>/dev/null || true
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
@@ -105,89 +104,31 @@ jobs:
         working-directory: terraform
         run: terraform init
 
-      # ── [0/4] Xóa resources do Kubernetes tạo ngoài Terraform ───────────────
-      # Security groups, NLBs tạo bởi service.type=LoadBalancer không nằm
-      # trong terraform state → phải xóa thủ công trước khi destroy VPC
-      - name: "[0/4] Cleanup k8s-managed AWS resources"
-        continue-on-error: true
-        run: |
-          # Xóa NLBs do k8s tạo
-          NLB_ARNS=$(aws elbv2 describe-load-balancers \
-            --region ${{ needs.setup.outputs.aws_region }} \
-            --query "LoadBalancers[?contains(LoadBalancerName,'k8s-')].LoadBalancerArn" \
-            --output text)
-          for arn in $NLB_ARNS; do
-            echo "Deleting NLB: $arn"
-            aws elbv2 delete-load-balancer --region ${{ needs.setup.outputs.aws_region }} --load-balancer-arn $arn
-          done
-          [ -n "$NLB_ARNS" ] && sleep 30 || true
-
-          # Xóa security groups do k8s tạo (tên bắt đầu bằng k8s-)
-          SG_IDS=$(aws ec2 describe-security-groups \
-            --region ${{ needs.setup.outputs.aws_region }} \
-            --filters "Name=tag-key,Values=kubernetes.io/cluster/${{ needs.setup.outputs.project_name }}" \
-            --query "SecurityGroups[?GroupName!='default'].GroupId" \
-            --output text)
-          for sg in $SG_IDS; do
-            echo "Deleting SG: $sg"
-            aws ec2 delete-security-group --region ${{ needs.setup.outputs.aws_region }} --group-id $sg 2>&1 || true
-          done
-
-      # ── [1/4] Destroy Helm releases ─────────────────────────────────────────
-      # ALB controller sẽ xóa ALB/ENI trên AWS khi bị uninstall.
-      # Phải hoàn thành trước khi xóa EKS và VPC.
+      # Helm destroy tự trigger null_resource.cleanup_ingress_on_destroy
+      # → kubectl delete ingress → ALB Controller xóa ALB + SG → ENIs released
       - name: "[1/4] Destroy Helm releases"
         id: destroy_helm
         working-directory: terraform
         continue-on-error: true
         run: terraform destroy -target=module.helm -auto-approve
 
-      # Xóa NLBs còn sót do service.type=LoadBalancer tạo ngoài Terraform
-      # (nếu có) để tránh subnet dependency khi xóa VPC
-      - name: "[1/4] Cleanup orphaned NLBs"
-        continue-on-error: true
-        run: |
-          aws eks update-kubeconfig \
-            --region ${{ needs.setup.outputs.aws_region }} \
-            --name ${{ needs.setup.outputs.project_name }} 2>/dev/null || true
-          NLB_ARNS=$(aws elbv2 describe-load-balancers \
-            --region ${{ needs.setup.outputs.aws_region }} \
-            --query "LoadBalancers[?contains(LoadBalancerName,'k8s-')].LoadBalancerArn" \
-            --output text)
-          for ARN in $NLB_ARNS; do
-            echo "Deleting NLB: $ARN"
-            aws elbv2 delete-load-balancer \
-              --region ${{ needs.setup.outputs.aws_region }} \
-              --load-balancer-arn "$ARN"
-          done
-          [ -n "$NLB_ARNS" ] && sleep 30 || echo "No orphaned NLBs found"
-
-      # ── [2/4] IAM IRSA roles ─────────────────────────────────────────────────
-      # Phải destroy sau Helm (Helm dùng roles), trước EKS
-      # (roles tham chiếu OIDC provider của EKS).
       - name: "[2/4] Destroy IAM IRSA roles"
         id: destroy_iam
         working-directory: terraform
         continue-on-error: true
         run: terraform destroy -target=module.iam -auto-approve
 
-      # ── [3/4] EKS cluster + node group ──────────────────────────────────────
-      # EC2 t3.large x2 + EKS control plane = phần tốn tiền nhất (~$0.27/hr).
       - name: "[3/4] Destroy EKS cluster"
         id: destroy_eks
         working-directory: terraform
         run: terraform destroy -target=module.eks -auto-approve
 
-      # ── [4/4] VPC + NAT Gateway (optional) ──────────────────────────────────
-      # NAT Gateway: ~$0.045/hr + data charges.
-      # Chọn 'no' nếu muốn giữ VPC để redeploy nhanh hơn.
       - name: "[4/4] Destroy VPC + NAT Gateway + EIP"
         id: destroy_vpc
         if: github.event.inputs.destroy_vpc == 'yes'
         working-directory: terraform
         run: terraform destroy -target=module.vpc -auto-approve
 
-      # ── Summary ──────────────────────────────────────────────────────────────
       - name: Summary
         if: always()
         run: |
@@ -204,17 +145,17 @@ jobs:
             || echo "| IAM IRSA roles | ⚠️ Skipped/Failed | – |" >> $GITHUB_STEP_SUMMARY
 
           [[ "${{ steps.destroy_eks.outcome }}" == "success" ]] \
-            && echo "| EKS + 2× t3.large nodes | ✅ Destroyed | ~\$0.27/hr |" >> $GITHUB_STEP_SUMMARY \
-            || echo "| EKS + 2× t3.large nodes | ❌ Failed – still running! | – |" >> $GITHUB_STEP_SUMMARY
+            && echo "| EKS + nodes | ✅ Destroyed | ~\$0.27/hr |" >> $GITHUB_STEP_SUMMARY \
+            || echo "| EKS + nodes | ❌ Failed – still running! | – |" >> $GITHUB_STEP_SUMMARY
 
           if [[ "${{ github.event.inputs.destroy_vpc }}" == "yes" ]]; then
             [[ "${{ steps.destroy_vpc.outcome }}" == "success" ]] \
               && echo "| VPC + NAT Gateway + EIP | ✅ Destroyed | ~\$0.05/hr |" >> $GITHUB_STEP_SUMMARY \
               || echo "| VPC + NAT Gateway + EIP | ❌ Failed – still running! | – |" >> $GITHUB_STEP_SUMMARY
           else
-            echo "| VPC + NAT Gateway + EIP | ⏭️ Kept (fast redeploy) | \$0.05/hr still running |" >> $GITHUB_STEP_SUMMARY
+            echo "| VPC + NAT Gateway + EIP | ⏭️ Kept | \$0.05/hr still running |" >> $GITHUB_STEP_SUMMARY
           fi
 
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Kept:** ECR, S3, CloudFront, SSM, IAM GitHub Actions role" >> $GITHUB_STEP_SUMMARY
+          echo "**Kept:** ECR, S3, CloudFront, SSM, IAM, OIDC" >> $GITHUB_STEP_SUMMARY
           echo "**Redeploy:** Run **Manual – Infrastructure Apply** workflow" >> $GITHUB_STEP_SUMMARY

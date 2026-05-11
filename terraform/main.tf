@@ -49,7 +49,6 @@ module "eks" {
   cluster_name          = var.project_name
   vpc_id                = module.vpc.vpc_id
   private_subnet_ids    = module.vpc.private_subnet_ids
-  public_subnet_ids     = module.vpc.public_subnet_ids
   eks_version           = var.eks_version
   node_instance_types   = var.node_group_instance_types
   node_desired_capacity = var.node_desired_capacity
@@ -90,7 +89,7 @@ module "frontend" {
 # 60s đủ để API server ready và IAM OIDC propagate trên AWS side
 resource "time_sleep" "wait_for_eks" {
   depends_on      = [module.eks]
-  create_duration = "60s"
+  create_duration = "120s"
 }
 
 module "iam" {

@@ -22,6 +22,10 @@ terraform {
       source  = "hashicorp/time"
       version = "~> 0.11"
     }
+    null = {
+      source  = "hashicorp/null"
+      version = "~> 3.0"
+    }
   }
 
   backend "s3" {
@@ -47,6 +51,8 @@ provider "kubernetes" {
     command     = "aws"
     args        = ["eks", "get-token", "--cluster-name", module.eks.cluster_name, "--region", var.region]
   }
+  skip_credentials_validation = true
+  skip_metadata_api_check     = true
 }
 
 provider "helm" {
