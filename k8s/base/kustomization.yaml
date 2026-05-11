@@ -4,8 +4,8 @@ kind: Kustomization
 # Image tag được CI/CD cập nhật tự động qua `kustomize edit set image`
 images:
 - name: eventfund-backend
-  newName: .dkr.ecr.ap-southeast-1.amazonaws.com/eventfund-backend
-  newTag: a9d5b75ad1e44ea717985db3219e5c080950a1f9
+  newName: 612827970242.dkr.ecr.ap-southeast-1.amazonaws.com/eventfund-backend
+  newTag: 3e64b7cdbf5d48e52f2e931e59981c437a7439b7
 
   # 1. Namespace trước
 
