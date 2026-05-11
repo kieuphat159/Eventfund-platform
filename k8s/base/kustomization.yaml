@@ -3,37 +3,21 @@ kind: Kustomization
 
 # Image tag được CI/CD cập nhật tự động qua `kustomize edit set image`
 images:
-  - name: eventfund-backend
-    newName: eventfund-backend  # CI sẽ replace bằng full ECR URL
-    newTag: latest
+- name: eventfund-backend
+  newName: 612827970242.dkr.ecr.ap-southeast-1.amazonaws.com/eventfund-backend
+  newTag: fa4486dbbc6cd9da9abf9563a61506e4daac4ad4
 
-resources:
   # 1. Namespace trước
-  - namespace/namespace.yaml
 
   # 2. Secrets (ESO sync từ SSM)
-  - secrets/secretstore.yaml
-  - secrets/externalsecret-backend.yaml
 
   # 3. Backend config
-  - backend/configmap.yaml
 
   # 4. API server
-  - backend/api-deployment.yaml
-  - backend/api-service.yaml
-  - backend/api-ingress.yaml
-  - backend/api-hpa.yaml
 
   # 5. Blockchain indexers & processors
-  - backend/indexer-fund-deployment.yaml
-  - backend/processor-fund-deployment.yaml
-  - backend/indexer-ticket-deployment.yaml
-  - backend/processor-ticket-deployment.yaml
-  - backend/indexer-marketplace-deployment.yaml
-  - backend/processor-marketplace-deployment.yaml
 
   # 6. Workers
-  - backend/worker-deposits-deployment.yaml
 
   # 7. Frontend — served via CloudFront + S3 (không deploy trong K8s)
   # 8. Monitoring
