@@ -4,25 +4,26 @@ kind: Kustomization
 images:
 - name: eventfund-backend
   newName: 612827970242.dkr.ecr.ap-southeast-1.amazonaws.com/eventfund-backend
-  newTag: 943a31a79e16e4fa3a749762c171853abb45f2db
+  newTag: fa4486dbbc6cd9da9abf9563a61506e4daac4ad4
 
-resources:
-- namespace/namespace.yaml
-- secrets/secretstore.yaml
-- secrets/externalsecret-backend.yaml
-- backend/configmap.yaml
-- backend/api-deployment.yaml
-- backend/api-service.yaml
-- backend/api-ingress.yaml
-- backend/api-hpa.yaml
-- backend/indexer-fund-deployment.yaml
-- backend/processor-fund-deployment.yaml
-- backend/indexer-ticket-deployment.yaml
-- backend/processor-ticket-deployment.yaml
-- backend/indexer-marketplace-deployment.yaml
-- backend/processor-marketplace-deployment.yaml
-- backend/worker-deposits-deployment.yaml
-- monitoring/prometheus-rules.yaml
-- monitoring/alertmanager-config.yaml
-- monitoring/grafana-ingress.yaml
-- argocd/argocd-ingress.yaml
+  # 1. Namespace trước
+
+  # 2. Secrets (ESO sync từ SSM)
+
+  # 3. Backend config
+
+  # 4. API server
+
+  # 5. Blockchain indexers & processors
+
+  # 6. Workers
+
+  # 7. Frontend — served via CloudFront + S3 (không deploy trong K8s)
+  # 8. Monitoring
+  - monitoring/prometheus-rules.yaml
+  # alertmanager-config.yaml được apply riêng trong manual-infra-apply workflow
+  # không đưa vào ArgoCD sync để tránh conflict với Prometheus Helm
+  - monitoring/grafana-ingress.yaml
+
+  # 9. ArgoCD ingress
+  - argocd/argocd-ingress.yaml

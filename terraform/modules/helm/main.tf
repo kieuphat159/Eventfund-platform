@@ -135,6 +135,14 @@ resource "helm_release" "argocd" {
     name  = "server.extraArgs[0]"
     value = "--insecure"
   }
+  set {
+    name  = "server.extraArgs[1]"
+    value = "--basehref=/argocd"
+  }
+  set {
+    name  = "server.extraArgs[2]"
+    value = "--rootpath=/argocd"
+  }
 
   depends_on = [helm_release.alb_controller, helm_release.eso]
 }
