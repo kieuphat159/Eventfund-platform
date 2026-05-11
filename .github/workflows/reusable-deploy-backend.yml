@@ -25,14 +25,14 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Load config
-        id: config
-        uses: ./.github/actions/load-config
-
       - name: Configure AWS
         uses: ./.github/actions/setup-aws
         with:
           aws_account_id: ${{ secrets.AWS_ACCOUNT_ID }}
+
+      - name: Load config
+        id: config
+        uses: ./.github/actions/load-config
 
       - name: Setup Kustomize
         uses: imranismail/setup-kustomize@v2
