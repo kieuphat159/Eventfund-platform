@@ -72,8 +72,16 @@ jobs:
         run: |
           ECR_URL="${{ steps.config.outputs.ecr_backend_repository_url }}"
           cd k8s/base
-          kustomize edit set image eventfund-backend=${ECR_URL}:${{ inputs.image_tag }}
+
+          # Dùng sed thay vì kustomize edit để tránh làm hỏng cấu trúc YAML khi có comments
+          # Chỉ update dòng newTag của image eventfund-backend
+          sed -i "/name: eventfund-backend/,/newTag:/ s|newTag:.*|newTag: ${{ inputs.image_tag }}|" kustomization.yaml
+
+          # Update newName nếu ECR URL thay đổi
+          sed -i "/name: eventfund-backend/,/newName:/ s|newName:.*|newName: ${ECR_URL}|" kustomization.yaml
+
           echo "Updated image to: ${ECR_URL}:${{ inputs.image_tag }}"
+
           # Validate file không bị corrupt
           kustomize build . > /dev/null || { echo "❌ kustomization.yaml is invalid after edit"; exit 1; }
 

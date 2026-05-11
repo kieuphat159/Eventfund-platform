@@ -66,14 +66,22 @@ jobs:
 
       - name: Invalidate CloudFront cache
         run: |
-          # Lấy distribution ID từ AWS theo S3 bucket origin — không hardcode
-          DIST_ID=$(aws cloudfront list-distributions \
-            --query "DistributionList.Items[?Origins.Items[0].DomainName=='${{ steps.config.outputs.frontend_s3_bucket }}.s3.${{ steps.config.outputs.aws_region }}.amazonaws.com'].Id" \
-            --output text)
+          # Auto-query CloudFront distribution ID by S3 bucket origin
+          BUCKET="${{ steps.config.outputs.frontend_s3_bucket }}"
+          REGION="${{ steps.config.outputs.aws_region }}"
+
+          # Query tất cả distributions và filter bằng jq để tìm origin chứa bucket name
+          DIST_ID=$(aws cloudfront list-distributions --output json | \
+            jq -r ".DistributionList.Items[] | select(.Origins.Items[].DomainName | contains(\"${BUCKET}\")) | .Id" | \
+            head -n 1)
+
           if [ -z "$DIST_ID" ]; then
-            echo "❌ CloudFront distribution not found for bucket ${{ steps.config.outputs.frontend_s3_bucket }}"
+            echo "❌ CloudFront distribution not found for bucket: ${BUCKET}"
+            echo "Available distributions:"
+            aws cloudfront list-distributions --query "DistributionList.Items[].{Id:Id, Origins:Origins.Items[*].DomainName}" --output json
             exit 1
           fi
+
           echo "✅ Found distribution: $DIST_ID"
           aws cloudfront create-invalidation \
             --distribution-id "$DIST_ID" \
