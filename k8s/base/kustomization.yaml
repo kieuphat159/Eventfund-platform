@@ -2,26 +2,26 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 images:
-  - name: eventfund-backend
-    newName: 612827970242.dkr.ecr.ap-southeast-1.amazonaws.com/eventfund-backend
-    newTag: fa4486dbbc6cd9da9abf9563a61506e4daac4ad4
+- name: eventfund-backend
+  newName: 612827970242.dkr.ecr.ap-southeast-1.amazonaws.com/eventfund-backend
+  newTag: cb6e40e3858cf336a680cb1d9816965ff1eb4263
 
 resources:
-  - namespace/namespace.yaml
-  - secrets/secretstore.yaml
-  - secrets/externalsecret-backend.yaml
-  - backend/configmap.yaml
-  - backend/api-deployment.yaml
-  - backend/api-service.yaml
-  - backend/api-ingress.yaml
-  - backend/api-hpa.yaml
-  - backend/indexer-fund-deployment.yaml
-  - backend/processor-fund-deployment.yaml
-  - backend/indexer-ticket-deployment.yaml
-  - backend/processor-ticket-deployment.yaml
-  - backend/indexer-marketplace-deployment.yaml
-  - backend/processor-marketplace-deployment.yaml
-  - backend/worker-deposits-deployment.yaml
-  - monitoring/prometheus-rules.yaml
-  - monitoring/grafana-ingress.yaml
-  - argocd/argocd-ingress.yaml
+- namespace/namespace.yaml
+- secrets/secretstore.yaml
+- secrets/externalsecret-backend.yaml
+- backend/configmap.yaml
+- backend/api-deployment.yaml
+- backend/api-service.yaml
+- backend/api-ingress.yaml
+- backend/api-hpa.yaml
+- backend/indexer-fund-deployment.yaml
+- backend/processor-fund-deployment.yaml
+- backend/indexer-ticket-deployment.yaml
+- backend/processor-ticket-deployment.yaml
+- backend/indexer-marketplace-deployment.yaml
+- backend/processor-marketplace-deployment.yaml
+- backend/worker-deposits-deployment.yaml
+- monitoring/prometheus-rules.yaml
+- monitoring/grafana-ingress.yaml
+- argocd/argocd-ingress.yaml
