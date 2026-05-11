@@ -3,8 +3,14 @@ name: CI
 on:
   push:
     branches: [dev, master, ci/cd]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
   pull_request:
     branches: [dev, master, ci/cd]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
   workflow_dispatch:
 
 concurrency:
@@ -12,7 +18,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Detect which services have changed
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      backend:  ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+            frontend:
+              - 'frontend/**'
+
   frontend:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     uses: ./.github/workflows/reusable-build-frontend.yml
     permissions:
       contents: read
@@ -24,6 +49,8 @@ jobs:
     uses: ./.github/workflows/reusable-build-contracts.yml
 
   backend:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     uses: ./.github/workflows/reusable-build-backend.yml
     permissions:
       contents: read
@@ -34,6 +61,8 @@ jobs:
       RPC_URL: ${{ secrets.RPC_URL }}
 
   sonarcloud:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true'
     uses: ./.github/workflows/reusable-scan-sonarqube.yml
     with:
       upload_to_s3: false

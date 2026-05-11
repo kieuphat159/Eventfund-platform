@@ -26,6 +26,15 @@ outputs:
   cloudfront_distribution_id:
     description: 'CloudFront distribution ID for frontend'
     value: ${{ steps.load.outputs.cloudfront_distribution_id }}
+  argocd_repo_url:
+    description: 'ArgoCD Git repo URL'
+    value: ${{ steps.load.outputs.argocd_repo_url }}
+  argocd_target_revision:
+    description: 'ArgoCD Git branch/tag'
+    value: ${{ steps.load.outputs.argocd_target_revision }}
+  argocd_app_namespace:
+    description: 'ArgoCD app namespace'
+    value: ${{ steps.load.outputs.argocd_app_namespace }}
   s3_security_reports_bucket:
     description: 'S3 Security Reports Bucket'
     value: ${{ steps.load.outputs.s3_security_reports_bucket }}
@@ -103,6 +112,11 @@ runs:
 
         # CloudFront
         echo "cloudfront_distribution_id=$(yq '.cloudfront.distribution_id' $CONFIG_FILE)" >> $GITHUB_OUTPUT
+
+        # ArgoCD
+        echo "argocd_repo_url=$(yq '.argocd.repo_url' $CONFIG_FILE)" >> $GITHUB_OUTPUT
+        echo "argocd_target_revision=$(yq '.argocd.target_revision' $CONFIG_FILE)" >> $GITHUB_OUTPUT
+        echo "argocd_app_namespace=$(yq '.argocd.app_namespace' $CONFIG_FILE)" >> $GITHUB_OUTPUT
 
         # Node
         echo "node_version=$(yq '.node.version' $CONFIG_FILE)" >> $GITHUB_OUTPUT
