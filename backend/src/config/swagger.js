@@ -8,7 +8,7 @@ const options = {
     info: {
       title: 'EventFund Platform API',
       version: '1.0.0',
-      description: 'Web3 Event Platform with SIWE authentication and blockchain integration',
+      description: 'Web3 Event Platform with Web3Auth JWT authentication and blockchain integration',
       contact: {
         name: 'EventFund Team',
         email: 'support@eventfund.example.com'
@@ -34,7 +34,7 @@ const options = {
           type: 'http',
           scheme: 'bearer',
           bearerFormat: 'JWT',
-          description: 'JWT token obtained from /auth/verify endpoint'
+          description: 'JWT token obtained from /auth/login endpoint'
         }
       },
       schemas: {
@@ -90,7 +90,7 @@ const options = {
       },
       {
         name: 'Authentication',
-        description: 'SIWE authentication endpoints'
+        description: 'Web3Auth authentication endpoints'
       },
       {
         name: 'Events',

@@ -34,6 +34,11 @@ import { resolveTransactionProvider } from "../../services/providerService";
 import { useAuth } from "../../contexts/AuthContext";
 import { useLoading } from "../../components/ui/loadingContext";
 import { useWeb3Auth } from "@web3auth/modal/react";
+import { InsufficientBalanceDialog } from "../../components/shared/InsufficientBalanceDialog";
+import {
+  getInsufficientBalanceMessage,
+  isInsufficientBalanceError,
+} from "../../lib/insufficientBalance";
 
 type TicketTierForm = {
   name: string;
@@ -86,6 +91,7 @@ export const EditEvent: React.FC = () => {
 
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [completing, setCompleting] = useState(false);
   const [eventData, setEventData] = useState<EventItem | null>(null);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -101,6 +107,9 @@ export const EditEvent: React.FC = () => {
   ]);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [showConfirmOpen, setShowConfirmOpen] = useState(false);
+  const [insufficientBalanceMessage, setInsufficientBalanceMessage] =
+    useState("");
   const topAnchorRef = useRef<HTMLDivElement | null>(null);
 
   const scrollToTop = () => {
@@ -240,25 +249,59 @@ export const EditEvent: React.FC = () => {
         return;
       }
 
-      const normalizedTiers = ticketTiers
-        .filter((tier) => tier.name.trim() && tier.price !== "" && tier.supply !== "")
-        .map((tier) => ({
-          name: tier.name.trim(),
-          price: Number(tier.price),
-          totalSupply: Number(tier.supply),
-        }));
+      const hasInvalidTier = ticketTiers.some(
+        (tier) =>
+          !tier.name.trim() ||
+          !isPositiveWeiInteger(tier.price) ||
+          Number.isNaN(Number(tier.supply)) ||
+          Number(tier.supply) <= 0,
+      );
+
+      if (hasInvalidTier) {
+        setError("Ticket price or supply is invalid.");
+        return;
+      }
+
+      const normalizedTiers = ticketTiers.map((tier) => ({
+        name: tier.name.trim(),
+        price: Number(tier.price),
+        totalSupply: Number(tier.supply),
+      }));
 
       if (!normalizedTiers.length) {
         setError("Please add at least one valid ticket tier.");
         return;
       }
 
-      const updated = await updateEvent(id, updatePayload);
-
-      if (hasInvalidTier) {
-        setError("Ticket price or supply is invalid.");
+      const start = buildStartDate();
+      if (!start) {
+        setError("The event start time is invalid.");
         return;
       }
+
+      setSubmitting(true);
+      showLoading("Updating event...");
+
+      const totalTickets = normalizedTiers.reduce(
+        (sum, tier) => sum + tier.totalSupply,
+        0,
+      );
+
+      const updatePayload = {
+        title: title.trim(),
+        description: description.trim(),
+        category,
+        startDate: start.toISOString(),
+        endDate: eventData?.endDate,
+        fundingGoal: fundingGoal.trim(),
+        minStakeRequired: minStakeRequired.trim() || "0",
+        totalTickets,
+        venue: { address: location.trim() },
+        ticketTiers: normalizedTiers,
+        ...(status !== currentStatus ? { status } : {}),
+      };
+
+      const updated = await updateEvent(id, updatePayload);
 
       setSuccess("Event updated successfully");
       setEventData(updated);
@@ -275,60 +318,46 @@ export const EditEvent: React.FC = () => {
     }
   };
 
-      const start = buildStartDate();
-      if (!start) {
-        setError("The event start time is invalid.");
-        return;
-      }
+  const handleCompleteEvent = async () => {
+    if (!id) return;
 
-      // confirmation handled by modal trigger; proceed when called
+    try {
+      setError("");
+      setSuccess("");
+      setCompleting(true);
+      showLoading("Completing event...");
 
-      const fundingDeadline = eventData?.fundingDeadline
-        ? new Date(eventData.fundingDeadline)
-        : new Date(start.getTime() - 7 * 24 * 60 * 60 * 1000);
-
-      if (!fundingGoal.trim()) {
-        setError("Please enter a funding goal.");
+      if (!user?.walletAddress) {
+        await connectWallet();
+        setError("Wallet connected. Please click Mark as Completed again.");
         return;
       }
 
       const provider = resolveTransactionProvider(web3Auth?.provider);
-      if (!provider?.request) {
-        setError(
-          "Wallet provider is not ready. Please reconnect wallet and try again.",
-        );
-        return;
-      }
-
-      const updated = await updateEvent(id, {
-        title: title.trim(),
-        description: description.trim(),
-        category,
-        startDate: start.toISOString(),
-        endDate: end.toISOString(),
-        fundingGoal: fundingGoal.trim(),
-        minStakeRequired: minStakeRequired.trim() || "0",
-        fundingDeadline: fundingDeadline.toISOString(),
-        totalTickets,
-        venue: { address: location.trim() },
-        ticketTiers: normalizedTiers,
-        ...(status !== currentStatus ? { status } : {}),
-      });
+      const updated = await completeEventWithWalletFallback(
+        provider,
+        id,
+        { status: "completed" },
+        user.walletAddress,
+        user.smartAccountAddress,
+      );
 
       if (!updated) {
-        setError("Failed to update event.");
+        setError("Failed to complete event.");
         return;
       }
 
-      setSuccess("Event updated successfully.");
       setEventData(updated);
       setStatus((updated.status as EventStatus) || "completed");
       setSuccess("Event completed successfully");
     } catch (err: any) {
+      if (isInsufficientBalanceError(err)) {
+        setInsufficientBalanceMessage(getInsufficientBalanceMessage(err));
+      }
       setError(
         err?.response?.data?.message ||
           err?.message ||
-          "An error occurred while updating the event.",
+          "An error occurred while completing the event.",
       );
     } finally {
       setCompleting(false);
@@ -339,6 +368,12 @@ export const EditEvent: React.FC = () => {
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
+      <InsufficientBalanceDialog
+        open={!!insufficientBalanceMessage}
+        message={insufficientBalanceMessage}
+        onClose={() => setInsufficientBalanceMessage("")}
+      />
+
       <div ref={topAnchorRef} />
 
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">

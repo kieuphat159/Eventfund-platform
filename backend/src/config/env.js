@@ -94,13 +94,6 @@ export const config = {
     expiresIn: process.env.JWT_EXPIRES_IN || '7d'
   },
 
-  // SIWE (will be added later)
-  siwe: {
-    domain: process.env.SIWE_DOMAIN || 'localhost:4000',
-    uri: process.env.SIWE_URI || 'http://localhost:4000',
-    chainId: parseInt(process.env.SIWE_CHAIN_ID) || 1
-  },
-
   // Rate Limiting
   rateLimit: {
     windowMs: Number.parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 900000, // 15 minutes

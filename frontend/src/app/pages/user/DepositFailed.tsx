@@ -4,9 +4,9 @@ import { Button } from "../../components/ui/button";
 import { Card, CardContent } from "../../components/ui/card";
 
 const ERROR_MESSAGES: Record<string, string> = {
-  invalid_signature: "Chữ ký không hợp lệ",
-  payment_failed: "Thanh toán thất bại",
-  unknown_error: "Lỗi không xác định",
+  invalid_signature: "Invalid signature",
+  payment_failed: "Payment failed",
+  unknown_error: "Unknown error",
 };
 
 export const DepositFailed = () => {
@@ -26,7 +26,7 @@ export const DepositFailed = () => {
           <div className="flex flex-col items-center justify-center py-8">
             <XCircle className="mb-4 h-16 w-16 text-red-500" />
             <h2 className="mb-2 text-xl font-semibold text-white">
-              Thanh toán thất bại
+              Payment Failed
             </h2>
             <p className="mb-6 text-center text-sm text-slate-400">{errorMessage}</p>
 

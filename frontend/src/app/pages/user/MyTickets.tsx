@@ -3,7 +3,6 @@ import {
   Ticket,
   QrCode,
   Download,
-  Share2,
   Calendar,
   MapPin,
 } from "lucide-react";
@@ -27,8 +26,15 @@ import {
   listTicketOnchain,
 } from "@/app/services/listings.service";
 import { QRCodeCanvas } from "qrcode.react";
-import { ethers, formatEther } from "ethers";
+import { formatEther } from "ethers";
+import { useWeb3Auth } from "@web3auth/modal/react";
+import { resolveTransactionProvider } from "../../services/providerService";
 import { logger } from "../../lib/logger";
+import { InsufficientBalanceDialog } from "../../components/shared/InsufficientBalanceDialog";
+import {
+  getInsufficientBalanceMessage,
+  isInsufficientBalanceError,
+} from "../../lib/insufficientBalance";
 
 const ETH_ADDRESS_REGEX = /^0x[a-fA-F0-9]{40}$/;
 
@@ -63,6 +69,14 @@ const isPositiveWeiInteger = (value: string) => {
   return /^[0-9]+$/.test(trimmed) && BigInt(trimmed) > 0n;
 };
 
+const formatWei = (value: string | bigint | number) => {
+  try {
+    return BigInt(value || "0").toLocaleString();
+  } catch {
+    return "0";
+  }
+};
+
 export const MyTickets: React.FC = () => {
   const { user, connectWallet } = useAuth();
   const { web3Auth } = useWeb3Auth();
@@ -82,6 +96,9 @@ export const MyTickets: React.FC = () => {
   const [cancelTicket, setCancelTicket] = useState<ApiTicket | null>(null);
   const [cancelLoading, setCancelLoading] = useState(false);
   const [refundingTokenId, setRefundingTokenId] = useState<string | null>(null);
+  const [insufficientBalanceMessage, setInsufficientBalanceMessage] =
+    useState("");
+  const walletProvider = resolveTransactionProvider(web3Auth?.provider);
 
   useEffect(() => {
     if (!listingPopup) return;
@@ -216,8 +233,54 @@ export const MyTickets: React.FC = () => {
 
     return null;
   };
+
+  const handleClaimRefund = async (ticket: ApiTicket) => {
+    try {
+      if (!user?.walletAddress) {
+        await connectWallet();
+        showListingPopup(
+          "success",
+          "Wallet connected. Please click Claim Refund again.",
+        );
+        return;
+      }
+
+      if (!walletProvider?.request) {
+        throw new Error(
+          "Wallet provider is not ready. Please reconnect wallet and try again.",
+        );
+      }
+
+      setRefundingTokenId(ticket.tokenId);
+      await claimTicketRefundOnChain(
+        walletProvider,
+        ticket.tokenId,
+        user.walletAddress,
+      );
+      const data = await getUserTickets(user.walletAddress);
+      setTickets(data);
+      showListingPopup("success", `Refund claimed for ticket #${ticket.tokenId}`);
+    } catch (err) {
+      if (isInsufficientBalanceError(err)) {
+        setInsufficientBalanceMessage(getInsufficientBalanceMessage(err));
+      }
+      showListingPopup(
+        "error",
+        err instanceof Error ? err.message : "Failed to claim refund",
+      );
+    } finally {
+      setRefundingTokenId(null);
+    }
+  };
+
   return (
     <div className="space-y-6">
+      <InsufficientBalanceDialog
+        open={!!insufficientBalanceMessage}
+        message={insufficientBalanceMessage}
+        onClose={() => setInsufficientBalanceMessage("")}
+      />
+
       {listingPopup && (
         <div className="fixed top-4 right-4 z-[60]">
           <div
@@ -456,7 +519,7 @@ export const MyTickets: React.FC = () => {
             </div>
 
             <p className="text-slate-400 text-xs mt-3">
-              Verifier sẽ quét mã này để xác thực vé
+              Verifier will scan this code to verify your ticket
             </p>
 
             <Button
@@ -572,6 +635,11 @@ export const MyTickets: React.FC = () => {
                     setListingPrice("");
                   } catch (err: any) {
                     const message = err?.message || "Failed to list ticket";
+                    if (isInsufficientBalanceError(err)) {
+                      setInsufficientBalanceMessage(
+                        getInsufficientBalanceMessage(err),
+                      );
+                    }
                     setListingError(message);
                     showListingPopup("error", `Listing failed: ${message}`);
                   } finally {
@@ -654,6 +722,11 @@ export const MyTickets: React.FC = () => {
                     setCancelTicket(null);
                   } catch (err: any) {
                     const message = err?.message || "Failed to cancel listing";
+                    if (isInsufficientBalanceError(err)) {
+                      setInsufficientBalanceMessage(
+                        getInsufficientBalanceMessage(err),
+                      );
+                    }
                     showListingPopup("error", `Cancel failed: ${message}`);
                   } finally {
                     setCancelLoading(false);

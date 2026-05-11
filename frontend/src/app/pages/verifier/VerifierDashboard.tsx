@@ -942,8 +942,8 @@ export const VerifierDashboard: React.FC = () => {
             )}
 
             <p className="text-sm text-slate-500">
-              Nếu camera không đọc được, bạn vẫn có thể đóng cửa sổ này và nhập
-              `tokenId` thủ công ở bên dưới.
+              If the camera cannot read the code, you can close this window and manually enter
+              `tokenId` below.
             </p>
           </div>
         </DialogContent>
