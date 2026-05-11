@@ -39,3 +39,7 @@ resources:
   # 8. Monitoring
   - monitoring/prometheus-rules.yaml
   - monitoring/alertmanager-config.yaml
+  - monitoring/grafana-ingress.yaml
+
+  # 9. ArgoCD ingress
+  - argocd/argocd-ingress.yaml

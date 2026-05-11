@@ -130,6 +130,12 @@ resource "helm_release" "argocd" {
   wait             = true
   cleanup_on_fail  = true
 
+  # --insecure: tắt TLS nội bộ, để CloudFront terminate SSL
+  set {
+    name  = "server.extraArgs[0]"
+    value = "--insecure"
+  }
+
   depends_on = [helm_release.alb_controller, helm_release.eso]
 }
 
@@ -148,6 +154,16 @@ resource "helm_release" "prometheus" {
   set {
     name  = "prometheus.prometheusSpec.retention"
     value = "7d"
+  }
+
+  # Grafana subpath — cần thiết khi serve từ /grafana qua CloudFront
+  set {
+    name  = "grafana.grafana\\.ini.server.root_url"
+    value = "%(protocol)s://%(domain)s/grafana"
+  }
+  set {
+    name  = "grafana.grafana\\.ini.server.serve_from_sub_path"
+    value = "true"
   }
 
   depends_on = [helm_release.alb_controller]

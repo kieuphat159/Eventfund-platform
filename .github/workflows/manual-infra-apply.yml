@@ -79,15 +79,112 @@ jobs:
             echo "✅ Updated CloudFront distribution ID: $CF_ID"
           fi
 
+      - name: Setup kubectl
+        run: |
+          aws eks update-kubeconfig \
+            --region ${{ steps.config.outputs.aws_region }} \
+            --name ${{ steps.config.outputs.project_name }}
+
+      # Chờ ArgoCD sync Ingress → ALB Controller tạo ALB → lấy DNS → update CloudFront origin
+      - name: Update CloudFront origin with ALB DNS
+        run: |
+          echo "Waiting for ALB to be provisioned by ALB Controller..."
+          for i in $(seq 1 30); do
+            ALB_DNS=$(kubectl get ingress -A \
+              -l "ingress.k8s.aws/stack=eventfund-shared" \
+              -o jsonpath="{.items[0].status.loadBalancer.ingress[0].hostname}" 2>/dev/null || echo "")
+            if [ -n "$ALB_DNS" ]; then
+              echo "✅ ALB DNS: $ALB_DNS"
+              break
+            fi
+            echo "Waiting... ($i/30)"
+            sleep 10
+          done
+
+          if [ -z "$ALB_DNS" ]; then
+            echo "⚠️ ALB not ready yet, skipping CloudFront update"
+            exit 0
+          fi
+
+          CF_ID=$(terraform -chdir=terraform output -raw cloudfront_distribution_id)
+          ETAG=$(aws cloudfront get-distribution-config --id "$CF_ID" --query 'ETag' --output text)
+
+          # Lấy config hiện tại và thêm ALB origin
+          aws cloudfront get-distribution-config --id "$CF_ID" \
+            --query 'DistributionConfig' --output json > /tmp/cf-config.json
+
+          # Thêm ALB origin nếu chưa có
+          python3 - <<EOF
+          import json, sys
+
+          with open('/tmp/cf-config.json') as f:
+              config = json.load(f)
+
+          alb_dns = "$ALB_DNS"
+          origin_id = "alb-internal"
+
+          # Kiểm tra origin đã tồn tại chưa
+          existing = [o for o in config['Origins']['Items'] if o['Id'] == origin_id]
+          if not existing:
+              config['Origins']['Items'].append({
+                  "Id": origin_id,
+                  "DomainName": alb_dns,
+                  "CustomOriginConfig": {
+                      "HTTPPort": 80,
+                      "HTTPSPort": 443,
+                      "OriginProtocolPolicy": "http-only",
+                      "OriginSSLProtocols": {"Quantity": 1, "Items": ["TLSv1.2"]},
+                      "OriginReadTimeout": 30,
+                      "OriginKeepaliveTimeout": 5
+                  },
+                  "ConnectionAttempts": 3,
+                  "ConnectionTimeout": 10
+              })
+              config['Origins']['Quantity'] = len(config['Origins']['Items'])
+          else:
+              # Update DNS nếu ALB đã thay đổi
+              for o in config['Origins']['Items']:
+                  if o['Id'] == origin_id:
+                      o['DomainName'] = alb_dns
+
+          # Thêm cache behaviors cho /argocd/* và /grafana/*
+          behaviors = config.get('CacheBehaviors', {}).get('Items', [])
+          for path, origin in [('/argocd/*', origin_id), ('/grafana/*', origin_id)]:
+              if not any(b['PathPattern'] == path for b in behaviors):
+                  behaviors.append({
+                      "PathPattern": path,
+                      "TargetOriginId": origin_id,
+                      "ViewerProtocolPolicy": "redirect-to-https",
+                      "AllowedMethods": {"Quantity": 7, "Items": ["GET","HEAD","OPTIONS","PUT","POST","PATCH","DELETE"], "CachedMethods": {"Quantity": 2, "Items": ["GET","HEAD"]}},
+                      "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",  # CachingDisabled
+                      "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",  # AllViewer
+                      "Compress": True
+                  })
+          config['CacheBehaviors'] = {'Quantity': len(behaviors), 'Items': behaviors}
+
+          with open('/tmp/cf-config-updated.json', 'w') as f:
+              json.dump(config, f)
+          print("✅ CloudFront config updated")
+          EOF
+
+          aws cloudfront update-distribution \
+            --id "$CF_ID" \
+            --distribution-config file:///tmp/cf-config-updated.json \
+            --if-match "$ETAG"
+          echo "✅ CloudFront updated with ALB origin: $ALB_DNS"
+
       - name: Render alertmanager config with secrets
         env:
           ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
           ALERT_EMAIL_PASSWORD: ${{ secrets.ALERT_EMAIL_PASSWORD }}
         run: |
-          envsubst < k8s/base/monitoring/alertmanager-config.yaml | \
-            kubectl apply -f - \
-            --kubeconfig <(aws eks update-kubeconfig \
+          if [ -n "$ALERT_EMAIL" ] && [ -n "$ALERT_EMAIL_PASSWORD" ]; then
+            aws eks update-kubeconfig \
               --region ${{ steps.config.outputs.aws_region }} \
-              --name ${{ steps.config.outputs.project_name }} \
-              --dry-run \
-              | cat)
+              --name ${{ steps.config.outputs.project_name }}
+            export ALERT_EMAIL ALERT_EMAIL_PASSWORD
+            envsubst < k8s/base/monitoring/alertmanager-config.yaml | kubectl apply -f -
+            echo "✅ Alertmanager config applied"
+          else
+            echo "⚠️ ALERT_EMAIL or ALERT_EMAIL_PASSWORD not set, skipping alertmanager config"
+          fi
