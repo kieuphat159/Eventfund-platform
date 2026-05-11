@@ -6,7 +6,6 @@ import { UserLayout } from "./layouts/UserLayout";
 import { AdminLayout } from "./layouts/AdminLayout";
 import { LoadingProvider } from "./components/ui/loadingContext";
 
-
 // Public Pages
 import { Home } from "./pages/public/Home";
 import { Explore } from "./pages/public/Explore";
@@ -29,7 +28,7 @@ import { MyInvestments } from "./pages/user/MyInvestments";
 import { InvestmentDetail } from "./pages/user/InvestmentDetail";
 import { Wallet } from "./pages/user/Wallet";
 import { Profile } from "./pages/user/Profile";
-import { Settings } from "./pages/user/Settings";
+// import { Settings } from "./pages/user/Settings";
 import { DepositSuccess } from "./pages/user/DepositSuccess";
 import { DepositFailed } from "./pages/user/DepositFailed";
 
@@ -166,7 +165,7 @@ const AppRoutes: React.FC = () => {
         <Route path="fraud" element={<FraudMonitoring />} />
         <Route path="finance" element={<FinanceDashboard />} />
         <Route path="analytics" element={<AnalyticsDashboard />} />
-        <Route path="settings" element={<PlatformSettings />} />
+        {/* <Route path="settings" element={<PlatformSettings />} /> */}
       </Route>
 
       <Route
@@ -207,7 +206,7 @@ const AppRoutes: React.FC = () => {
         <Route path="deposit/success" element={<DepositSuccess />} />
         <Route path="deposit/failed" element={<DepositFailed />} />
         <Route path="account/profile" element={<Profile />} />
-        <Route path="account/settings" element={<Settings />} />
+        {/* <Route path="account/settings" element={<Settings />} /> */}
       </Route>
 
       <Route path="/" element={<PublicLayout />}>
