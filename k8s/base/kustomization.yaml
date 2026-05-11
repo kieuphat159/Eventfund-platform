@@ -22,7 +22,8 @@ images:
   # 7. Frontend — served via CloudFront + S3 (không deploy trong K8s)
   # 8. Monitoring
   - monitoring/prometheus-rules.yaml
-  - monitoring/alertmanager-config.yaml
+  # alertmanager-config.yaml được apply riêng trong manual-infra-apply workflow
+  # không đưa vào ArgoCD sync để tránh conflict với Prometheus Helm
   - monitoring/grafana-ingress.yaml
 
   # 9. ArgoCD ingress
