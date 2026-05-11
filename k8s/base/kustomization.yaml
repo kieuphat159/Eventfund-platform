@@ -21,21 +21,9 @@ images:
 
   # 7. Frontend — served via CloudFront + S3 (không deploy trong K8s)
   # 8. Monitoring
-resources:
-- namespace/namespace.yaml
-- secrets/secretstore.yaml
-- secrets/externalsecret-backend.yaml
-- backend/configmap.yaml
-- backend/api-deployment.yaml
-- backend/api-service.yaml
-- backend/api-ingress.yaml
-- backend/api-hpa.yaml
-- backend/indexer-fund-deployment.yaml
-- backend/processor-fund-deployment.yaml
-- backend/indexer-ticket-deployment.yaml
-- backend/processor-ticket-deployment.yaml
-- backend/indexer-marketplace-deployment.yaml
-- backend/processor-marketplace-deployment.yaml
-- backend/worker-deposits-deployment.yaml
-- monitoring/prometheus-rules.yaml
-- monitoring/alertmanager-config.yaml
+  - monitoring/prometheus-rules.yaml
+  - monitoring/alertmanager-config.yaml
+  - monitoring/grafana-ingress.yaml
+
+  # 9. ArgoCD ingress
+  - argocd/argocd-ingress.yaml
