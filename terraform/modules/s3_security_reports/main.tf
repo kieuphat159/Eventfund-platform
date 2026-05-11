@@ -3,8 +3,9 @@
 # Cấu trúc: s3://bucket/{tool}/YYYY/MM/DD/{scan-id}/
 
 resource "aws_s3_bucket" "this" {
-  bucket = var.bucket_name
-  tags   = var.tags
+  bucket        = var.bucket_name
+  force_destroy = true
+  tags          = var.tags
 }
 
 # Block tất cả public access
