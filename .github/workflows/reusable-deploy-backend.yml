@@ -64,7 +64,7 @@ jobs:
           export CONTRACTS_ARTIFACTS_DIR="${{ steps.config.outputs.k8s_contracts_artifacts_dir }}"
           export WEB3AUTH_NETWORK="${{ steps.config.outputs.k8s_web3auth_network }}"
 
-          for f in k8s/base/backend/configmap.yaml k8s/base/secrets/externalsecret-backend.yaml; do
+          for f in k8s/base/backend/configmap.yaml k8s/base/secrets/externalsecret-backend.yaml k8s/base/secrets/secretstore.yaml; do
             envsubst < "$f" > "$f.rendered" && mv "$f.rendered" "$f"
           done
 
