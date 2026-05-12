@@ -159,9 +159,7 @@ Mục tiêu là gỡ các **critical bugs** khiến flow Fund ↔ Ticket không 
 
 ---
 
-## 5) Những điểm còn thiếu / cần fix tiếp (không nằm trong patch này)
+## 5) Những điểm còn mở / có thể nâng cấp tiếp
 
-- **Marketplace royalty theo eventId**: Marketplace hiện gửi ETH vào Fund nhưng không gọi hàm có `eventId` ⇒ Fund không thể hạch toán royalty theo event.
-  - Nên quick-fix tiếp: Marketplace gọi `depositTicketRevenue(eventId)` (hoặc tách `depositRoyalty(eventId)` nếu muốn phân loại).
-- Refund vé end-to-end: Fund có `claimTicketRefund()` (chỉ Ticket gọi) nhưng Ticket chưa có flow gọi refund.
 - Shares ERC1155 (token hóa) chưa được triển khai; hiện vẫn dùng `shareOf/totalShares` internal.
+- Nếu muốn tách analytics chi tiết hơn, có thể split riêng escrow cho primary sales và royalty, thay vì cộng chung vào `escrowedRevenue`.

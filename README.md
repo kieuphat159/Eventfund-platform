@@ -225,16 +225,22 @@ npm run contracts deploy:all
 npm run contracts deploy:sepolia
 npm run contracts deploy:fund
 npm run contracts deploy:fund:sepolia
+npm run contracts test
 ```
 
-For contract tests, use Hardhat directly:
+For contract tests, use the package script from `contracts/`:
+
+```bash
+cd contracts
+npm test
+```
+
+You can still run Hardhat directly if you prefer:
 
 ```bash
 cd contracts
 npx hardhat test
 ```
-
-The current `contracts/package.json` test script is still a placeholder and does not run the suite.
 
 ## Frontend App Structure
 

@@ -120,8 +120,6 @@ Tài liệu này ghi lại các thay đổi đã được sửa nhanh trong `con
 
 ## 4) Những gì CHƯA giải quyết (cố ý để phase sau)
 
-- Fund chưa có escrow accounting theo `eventId` (Ticket đang forward ETH nhưng Fund chưa ghi nhận theo event).
-- Refund end-to-end chưa khép vòng (Ticket chưa gọi Fund.claimTicketRefund()).
 - Authorization cho `mintBatch()` hiện là quick fix (admin/organizer role); chuẩn hơn là Fund làm minter duy nhất hoặc module hóa rõ hơn.
 
 ## 5) File liên quan

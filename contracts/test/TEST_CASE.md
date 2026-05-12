@@ -65,6 +65,8 @@ npx hardhat test
 
 # Ticket.sol Test Cases
 
+> Lưu ý: các case mua vé, check-in, refund và thống kê doanh thu giả định event đã được funding đủ, gọi `finalizeFunding()`, rồi vào trạng thái `Ticketing` qua `Fund.startTicketing()`.
+
 ### 1. Nhóm Cấu hình & Quyền hạn (Admin & Setup)
 
 - **TC1**: Cấu hình Fund Contract: Kiểm tra chỉ ví có quyền Admin (`DEFAULT_ADMIN_ROLE`) mới có thể đặt địa chỉ hợp đồng Fund.
@@ -82,7 +84,7 @@ npx hardhat test
 
 ### 3. Nhóm Mua vé (Purchase Ticket)
 
-- **TC10**: Mua sơ cấp thành công: Người dùng mua vé từ Organizer thành công. Trạng thái sang `Sold`, NFT sang Buyer, tiền đẩy về Fund.
+- **TC10**: Mua sơ cấp thành công: Người dùng mua vé từ Organizer thành công sau khi event đã `Funded` và `Ticketing`. Trạng thái sang `Sold`, NFT sang Buyer, tiền đẩy về Fund.
 - **TC11**: Trả lại tiền thừa: Nếu người mua gửi thừa tiền, hợp đồng phải hoàn lại tiền dư.
 - **TC12**: Thanh toán thiếu: Revert lỗi `InsufficientPayment` nếu số tiền gửi nhỏ hơn giá vé.
 - **TC13**: Chặn mua lại vé đã bán: Không được phép mua vé đã có trạng thái `Sold`.

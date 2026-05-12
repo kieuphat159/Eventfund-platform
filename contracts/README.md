@@ -91,5 +91,20 @@ Sau khi deploy xong, script sẽ in ra địa chỉ và cũng upsert vào `contr
 ```shell
 npx hardhat help
 npx hardhat node
+npm test
 npx hardhat ignition deploy ./ignition/modules/Lock.js
+```
+
+## Test
+
+Chạy toàn bộ test smart contract từ thư mục `contracts/`:
+
+```shell
+npm test
+```
+
+Nếu cần chạy trực tiếp bằng Hardhat:
+
+```shell
+npx hardhat test
 ```
