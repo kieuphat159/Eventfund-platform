@@ -64,6 +64,29 @@ jobs:
     needs: setup
     if: github.event.inputs.confirm == 'destroy'
 
+    env:
+      TF_VAR_region:                          ${{ needs.setup.outputs.aws_region }}
+      TF_VAR_project_name:                    ${{ needs.setup.outputs.project_name }}
+      TF_VAR_environment:                     ${{ needs.setup.outputs.environment }}
+      TF_VAR_eks_version:                     ${{ needs.setup.outputs.tf_eks_version }}
+      TF_VAR_node_group_instance_types:       '["${{ needs.setup.outputs.tf_node_instance_type }}"]'
+      TF_VAR_node_desired_capacity:           ${{ needs.setup.outputs.tf_node_desired_capacity }}
+      TF_VAR_node_min_capacity:               ${{ needs.setup.outputs.tf_node_min_capacity }}
+      TF_VAR_node_max_capacity:               ${{ needs.setup.outputs.tf_node_max_capacity }}
+      TF_VAR_vpc_cidr:                        ${{ needs.setup.outputs.tf_vpc_cidr }}
+      TF_VAR_public_subnets_cidr:             ${{ needs.setup.outputs.tf_public_subnets_cidr }}
+      TF_VAR_private_subnets_cidr:            ${{ needs.setup.outputs.tf_private_subnets_cidr }}
+      TF_VAR_azs:                             ${{ needs.setup.outputs.tf_azs }}
+      TF_VAR_ecr_backend_repo:                ${{ needs.setup.outputs.ecr_backend_repository }}
+      TF_VAR_ssm_prefix:                      /${{ needs.setup.outputs.project_name }}/${{ needs.setup.outputs.environment }}/backend
+      TF_VAR_github_actions_role_name:        ${{ needs.setup.outputs.github_actions_role_name }}
+      TF_VAR_github_repos:                    '["repo:${{ github.repository }}:*"]'
+      TF_VAR_security_reports_bucket:         ${{ needs.setup.outputs.s3_security_reports_bucket }}
+      TF_VAR_security_reports_retention_days: ${{ needs.setup.outputs.security_reports_retention_days }}
+      TF_VAR_argocd_repo_url:                 ${{ needs.setup.outputs.argocd_repo_url }}
+      TF_VAR_argocd_target_revision:          ${{ needs.setup.outputs.argocd_target_revision }}
+      TF_VAR_argocd_app_namespace:            ${{ needs.setup.outputs.argocd_app_namespace }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -82,41 +105,6 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ needs.setup.outputs.terraform_version }}
-
-      - name: Generate terraform.tfvars
-        working-directory: terraform
-        run: |
-          cat > terraform.tfvars <<'EOF'
-          region       = "${{ needs.setup.outputs.aws_region }}"
-          project_name = "${{ needs.setup.outputs.project_name }}"
-          environment  = "${{ needs.setup.outputs.environment }}"
-          
-          vpc_cidr             = "${{ needs.setup.outputs.tf_vpc_cidr }}"
-          public_subnets_cidr  = ${{ needs.setup.outputs.tf_public_subnets_cidr }}
-          private_subnets_cidr = ${{ needs.setup.outputs.tf_private_subnets_cidr }}
-          azs                  = ${{ needs.setup.outputs.tf_azs }}
-          
-          eks_version               = "${{ needs.setup.outputs.tf_eks_version }}"
-          node_group_instance_types = ["${{ needs.setup.outputs.tf_node_instance_type }}"]
-          node_desired_capacity     = ${{ needs.setup.outputs.tf_node_desired_capacity }}
-          node_min_capacity         = ${{ needs.setup.outputs.tf_node_min_capacity }}
-          node_max_capacity         = ${{ needs.setup.outputs.tf_node_max_capacity }}
-          
-          ecr_backend_repo = "${{ needs.setup.outputs.ecr_backend_repository }}"
-          ssm_prefix       = "/${{ needs.setup.outputs.project_name }}/${{ needs.setup.outputs.environment }}/backend"
-          
-          github_actions_role_name        = "${{ needs.setup.outputs.github_actions_role_name }}"
-          github_repos                    = ["repo:${{ github.repository }}:*"]
-          security_reports_bucket         = "${{ needs.setup.outputs.s3_security_reports_bucket }}"
-          security_reports_retention_days = ${{ needs.setup.outputs.security_reports_retention_days }}
-          
-          argocd_repo_url        = "${{ needs.setup.outputs.argocd_repo_url }}"
-          argocd_target_revision = "${{ needs.setup.outputs.argocd_target_revision }}"
-          argocd_app_namespace   = "${{ needs.setup.outputs.argocd_app_namespace }}"
-          EOF
-          
-          echo "✅ Generated terraform.tfvars"
-          cat terraform.tfvars
 
       - name: Terraform Init
         working-directory: terraform
