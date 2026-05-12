@@ -35,6 +35,48 @@ jobs:
         with:
           terraform_version: ${{ steps.config.outputs.terraform_version }}
 
+      - name: Debug TF vars
+        run: |
+          echo "azs='$TF_VAR_azs'"
+          echo "public='$TF_VAR_public_subnets_cidr'"
+          echo "private='$TF_VAR_private_subnets_cidr'"
+        env:
+          TF_VAR_azs: ${{ steps.config.outputs.tf_azs }}
+          TF_VAR_public_subnets_cidr: ${{ steps.config.outputs.tf_public_subnets_cidr }}
+          TF_VAR_private_subnets_cidr: ${{ steps.config.outputs.tf_private_subnets_cidr }}
+
+      - name: Generate terraform.auto.tfvars.json
+        working-directory: terraform
+        run: |
+          cat > terraform.auto.tfvars.json <<EOF
+          {
+            "region": "${{ steps.config.outputs.aws_region }}",
+            "project_name": "${{ steps.config.outputs.project_name }}",
+            "environment": "${{ steps.config.outputs.environment }}",
+            "vpc_cidr": "${{ steps.config.outputs.tf_vpc_cidr }}",
+            "public_subnets_cidr": ${{ steps.config.outputs.tf_public_subnets_cidr }},
+            "private_subnets_cidr": ${{ steps.config.outputs.tf_private_subnets_cidr }},
+            "azs": ${{ steps.config.outputs.tf_azs }},
+            "eks_version": "${{ steps.config.outputs.tf_eks_version }}",
+            "node_group_instance_types": ["${{ steps.config.outputs.tf_node_instance_type }}"],
+            "node_desired_capacity": ${{ steps.config.outputs.tf_node_desired_capacity }},
+            "node_min_capacity": ${{ steps.config.outputs.tf_node_min_capacity }},
+            "node_max_capacity": ${{ steps.config.outputs.tf_node_max_capacity }},
+            "ecr_backend_repo": "${{ steps.config.outputs.ecr_backend_repository }}",
+            "ssm_prefix": "/${{ steps.config.outputs.project_name }}/${{ steps.config.outputs.environment }}/backend",
+            "github_actions_role_name": "${{ steps.config.outputs.github_actions_role_name }}",
+            "github_repos": ["repo:${{ github.repository }}:*"],
+            "security_reports_bucket": "${{ steps.config.outputs.s3_security_reports_bucket }}",
+            "security_reports_retention_days": ${{ steps.config.outputs.security_reports_retention_days }},
+            "argocd_repo_url": "${{ steps.config.outputs.argocd_repo_url }}",
+            "argocd_target_revision": "${{ steps.config.outputs.argocd_target_revision }}",
+            "argocd_app_namespace": "${{ steps.config.outputs.argocd_app_namespace }}"
+          }
+          EOF
+          
+          echo "✅ Generated terraform.auto.tfvars.json:"
+          cat terraform.auto.tfvars.json
+
       - name: Terraform Init
         working-directory: terraform
         run: terraform init
@@ -42,28 +84,6 @@ jobs:
       - name: Terraform Plan
         working-directory: terraform
         run: terraform plan -out=tfplan
-        env:
-          TF_VAR_region: ${{ steps.config.outputs.aws_region }}
-          TF_VAR_project_name: ${{ steps.config.outputs.project_name }}
-          TF_VAR_eks_version: ${{ steps.config.outputs.tf_eks_version }}
-          TF_VAR_node_group_instance_types: '["${{ steps.config.outputs.tf_node_instance_type }}"]'
-          TF_VAR_node_desired_capacity: ${{ steps.config.outputs.tf_node_desired_capacity }}
-          TF_VAR_node_min_capacity: ${{ steps.config.outputs.tf_node_min_capacity }}
-          TF_VAR_node_max_capacity: ${{ steps.config.outputs.tf_node_max_capacity }}
-          TF_VAR_vpc_cidr: ${{ steps.config.outputs.tf_vpc_cidr }}
-          TF_VAR_public_subnets_cidr: ${{ steps.config.outputs.tf_public_subnets_cidr }}
-          TF_VAR_private_subnets_cidr: ${{ steps.config.outputs.tf_private_subnets_cidr }}
-          TF_VAR_azs: ${{ steps.config.outputs.tf_azs }}
-          TF_VAR_ecr_backend_repo: ${{ steps.config.outputs.ecr_backend_repository }}
-          TF_VAR_ssm_prefix: /${{ steps.config.outputs.project_name }}/${{ steps.config.outputs.environment }}/backend
-          TF_VAR_environment: ${{ steps.config.outputs.environment }}
-          TF_VAR_github_actions_role_name: ${{ steps.config.outputs.github_actions_role_name }}
-          TF_VAR_github_repos: '["repo:${{ github.repository }}:*"]'
-          TF_VAR_security_reports_bucket: ${{ steps.config.outputs.s3_security_reports_bucket }}
-          TF_VAR_security_reports_retention_days: ${{ steps.config.outputs.security_reports_retention_days }}
-          TF_VAR_argocd_repo_url: ${{ steps.config.outputs.argocd_repo_url }}
-          TF_VAR_argocd_target_revision: ${{ steps.config.outputs.argocd_target_revision }}
-          TF_VAR_argocd_app_namespace: ${{ steps.config.outputs.argocd_app_namespace }}
 
       - name: Terraform Apply
         working-directory: terraform
