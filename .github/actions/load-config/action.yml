@@ -62,6 +62,33 @@ outputs:
   security_reports_retention_days:
     description: 'Security reports retention days'
     value: ${{ steps.load.outputs.security_reports_retention_days }}
+  tf_eks_version:
+    description: 'Terraform EKS version'
+    value: ${{ steps.load.outputs.tf_eks_version }}
+  tf_node_instance_type:
+    description: 'Terraform node instance type'
+    value: ${{ steps.load.outputs.tf_node_instance_type }}
+  tf_node_desired_capacity:
+    description: 'Terraform node desired capacity'
+    value: ${{ steps.load.outputs.tf_node_desired_capacity }}
+  tf_node_min_capacity:
+    description: 'Terraform node min capacity'
+    value: ${{ steps.load.outputs.tf_node_min_capacity }}
+  tf_node_max_capacity:
+    description: 'Terraform node max capacity'
+    value: ${{ steps.load.outputs.tf_node_max_capacity }}
+  tf_vpc_cidr:
+    description: 'Terraform VPC CIDR'
+    value: ${{ steps.load.outputs.tf_vpc_cidr }}
+  tf_public_subnets_cidr:
+    description: 'Terraform public subnets CIDR'
+    value: ${{ steps.load.outputs.tf_public_subnets_cidr }}
+  tf_private_subnets_cidr:
+    description: 'Terraform private subnets CIDR'
+    value: ${{ steps.load.outputs.tf_private_subnets_cidr }}
+  tf_azs:
+    description: 'Terraform availability zones'
+    value: ${{ steps.load.outputs.tf_azs }}
 
 runs:
   using: composite
