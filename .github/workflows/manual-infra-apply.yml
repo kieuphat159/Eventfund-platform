@@ -38,7 +38,7 @@ jobs:
       - name: Generate terraform.tfvars
         working-directory: terraform
         run: |
-          cat > terraform.tfvars <<EOF
+          cat > terraform.tfvars <<'EOF'
           region       = "${{ steps.config.outputs.aws_region }}"
           project_name = "${{ steps.config.outputs.project_name }}"
           environment  = "${{ steps.config.outputs.environment }}"
