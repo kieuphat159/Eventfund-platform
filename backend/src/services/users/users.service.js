@@ -58,11 +58,13 @@ export async function updateProfile(walletAddress, updates, repos = {}) {
   }
 
   // Bỏ qua toàn bộ các trường nhạy cảm như role, walletAddress, password...
-  const { username, email, avatarUrl } = updates;
+  const { username, email, avatarUrl, bio, location } = updates;
   const filteredUpdates = {
     ...(username !== undefined && { username }),
     ...(email !== undefined && { email }),
     ...(avatarUrl !== undefined && { avatarUrl }),
+    ...(bio !== undefined && { bio }),
+    ...(location !== undefined && { location }),
   };
 
   return await repository.updateProfile(walletAddress, filteredUpdates);
@@ -128,11 +130,13 @@ export async function updateProfileWithAvatar(
   }
 
   // Merge updates with avatar data
-  const { username, email, avatarUrl } = updates;
+  const { username, email, avatarUrl, bio, location } = updates;
   const filteredUpdates = {
     ...(username !== undefined && { username }),
     ...(email !== undefined && { email }),
     ...(avatarUrl !== undefined && { avatarUrl }),
+    ...(bio !== undefined && { bio }),
+    ...(location !== undefined && { location }),
     ...(avatarData && { avatarUrl: avatarData.avatarUrl }),
   };
 
