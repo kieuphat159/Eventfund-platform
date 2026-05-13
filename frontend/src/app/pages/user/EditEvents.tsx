@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Calendar, MapPin, Upload, Plus } from "lucide-react";
+import { Calendar, MapPin, Upload, Plus, Trash2 } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -46,7 +46,9 @@ type TicketTierForm = {
   supply: string;
 };
 
-const OWNER_FORWARD_STATUS_OPTIONS: Partial<Record<EventStatus, EventStatus[]>> = {
+const OWNER_FORWARD_STATUS_OPTIONS: Partial<
+  Record<EventStatus, EventStatus[]>
+> = {
   ticketing: ["ongoing"],
   ongoing: ["completed"],
 };
@@ -107,13 +109,15 @@ export const EditEvent: React.FC = () => {
   ]);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [completing, setCompleting] = useState(false);
   const [showConfirmOpen, setShowConfirmOpen] = useState(false);
-  const [insufficientBalanceMessage, setInsufficientBalanceMessage] =
-    useState("");
   const topAnchorRef = useRef<HTMLDivElement | null>(null);
 
   const scrollToTop = () => {
-    topAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    topAnchorRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -143,7 +147,9 @@ export const EditEvent: React.FC = () => {
         setTime(toTimeInputValue(data.startDate));
         setLocation(data.venue?.address || "");
         setCategory(data.category || "");
-        setFundingGoal(data.fundingGoal != null ? String(data.fundingGoal) : "");
+        setFundingGoal(
+          data.fundingGoal != null ? String(data.fundingGoal) : "",
+        );
         setMinStakeRequired(
           data.minStakeRequired != null ? String(data.minStakeRequired) : "",
         );
@@ -206,17 +212,12 @@ export const EditEvent: React.FC = () => {
     return new Date(`${date}T${time}`);
   };
 
-  const currentStatus = (eventData?.status as EventStatus) || "draft";
-  const allowedForwardStatuses =
-    OWNER_FORWARD_STATUS_OPTIONS[currentStatus] || [];
-  const canOwnerAdvanceStatus = allowedForwardStatuses.length > 0;
-  const canOwnerCancel = OWNER_CANCELABLE_STATUSES.has(currentStatus);
-  const canOwnerChangeStatus = canOwnerAdvanceStatus || canOwnerCancel;
-
   const handleSubmit = async () => {
     try {
+      setSubmitting(true);
       setError("");
       setSuccess("");
+      showLoading("Saving event...");
 
       if (!id) {
         setError("Missing event id.");
@@ -233,12 +234,21 @@ export const EditEvent: React.FC = () => {
         return;
       }
 
-      if (!date || !time) {
-        setError("Please choose an event date and time.");
+      const start = buildStartDate();
+      if (!start || Number.isNaN(start.getTime())) {
+        setError("The event start time is invalid.");
         return;
       }
 
-      // Only allow updating title, description, location, category in this view
+      const end = eventData?.endDate
+        ? new Date(eventData.endDate)
+        : new Date(start.getTime() + 60 * 60 * 1000);
+
+      if (Number.isNaN(end.getTime())) {
+        setError("The event end time is invalid.");
+        return;
+      }
+
       if (!location.trim()) {
         setError("Please enter a location.");
         return;
@@ -249,20 +259,16 @@ export const EditEvent: React.FC = () => {
         return;
       }
 
-      const hasInvalidTier = ticketTiers.some(
-        (tier) =>
-          !tier.name.trim() ||
-          !isPositiveWeiInteger(tier.price) ||
-          Number.isNaN(Number(tier.supply)) ||
-          Number(tier.supply) <= 0,
-      );
-
-      if (hasInvalidTier) {
-        setError("Ticket price or supply is invalid.");
+      if (!fundingGoal.trim()) {
+        setError("Please enter a funding goal.");
         return;
       }
 
-      const normalizedTiers = ticketTiers.map((tier) => ({
+      const filledTiers = ticketTiers.filter(
+        (tier) => tier.name.trim() && tier.price !== "" && tier.supply !== "",
+      );
+
+      const normalizedTiers = filledTiers.map((tier) => ({
         name: tier.name.trim(),
         price: Number(tier.price),
         totalSupply: Number(tier.supply),
@@ -273,37 +279,49 @@ export const EditEvent: React.FC = () => {
         return;
       }
 
-      const start = buildStartDate();
-      if (!start) {
-        setError("The event start time is invalid.");
+      const hasInvalidTier = normalizedTiers.some(
+        (_tier, index) =>
+          !isPositiveWeiInteger(filledTiers[index]?.price || "") ||
+          Number.isNaN(normalizedTiers[index]?.totalSupply) ||
+          !Number.isInteger(normalizedTiers[index]?.totalSupply) ||
+          normalizedTiers[index]?.totalSupply <= 0,
+      );
+
+      if (hasInvalidTier) {
+        setError("Ticket price or supply is invalid.");
         return;
       }
-
-      setSubmitting(true);
-      showLoading("Updating event...");
 
       const totalTickets = normalizedTiers.reduce(
         (sum, tier) => sum + tier.totalSupply,
         0,
       );
 
-      const updatePayload = {
+      const fundingDeadline = eventData?.fundingDeadline
+        ? new Date(eventData.fundingDeadline)
+        : new Date(start.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+      const updated = await updateEvent(id, {
         title: title.trim(),
         description: description.trim(),
         category,
         startDate: start.toISOString(),
-        endDate: eventData?.endDate,
+        endDate: end.toISOString(),
         fundingGoal: fundingGoal.trim(),
         minStakeRequired: minStakeRequired.trim() || "0",
+        fundingDeadline: fundingDeadline.toISOString(),
         totalTickets,
         venue: { address: location.trim() },
         ticketTiers: normalizedTiers,
         ...(status !== currentStatus ? { status } : {}),
-      };
+      });
 
-      const updated = await updateEvent(id, updatePayload);
+      if (!updated) {
+        setError("Failed to update event.");
+        return;
+      }
 
-      setSuccess("Event updated successfully");
+      setSuccess("Event updated successfully.");
       setEventData(updated);
       setStatus((updated.status as EventStatus) || status);
     } catch (err: any) {
@@ -319,27 +337,31 @@ export const EditEvent: React.FC = () => {
   };
 
   const handleCompleteEvent = async () => {
-    if (!id) return;
-
     try {
+      setCompleting(true);
       setError("");
       setSuccess("");
-      setCompleting(true);
       showLoading("Completing event...");
 
-      if (!user?.walletAddress) {
-        await connectWallet();
-        setError("Wallet connected. Please click Mark as Completed again.");
+      if (!id) {
+        setError("Missing event id.");
         return;
       }
 
       const provider = resolveTransactionProvider(web3Auth?.provider);
+      if (!provider?.request) {
+        setError(
+          "Wallet provider is not ready. Please reconnect wallet and try again.",
+        );
+        return;
+      }
+
       const updated = await completeEventWithWalletFallback(
         provider,
         id,
         { status: "completed" },
-        user.walletAddress,
-        user.smartAccountAddress,
+        user?.walletAddress,
+        user?.smartAccountAddress,
       );
 
       if (!updated) {
@@ -347,9 +369,9 @@ export const EditEvent: React.FC = () => {
         return;
       }
 
+      setSuccess("Event completed successfully.");
       setEventData(updated);
       setStatus((updated.status as EventStatus) || "completed");
-      setSuccess("Event completed successfully");
     } catch (err: any) {
       if (isInsufficientBalanceError(err)) {
         setInsufficientBalanceMessage(getInsufficientBalanceMessage(err));
@@ -365,6 +387,12 @@ export const EditEvent: React.FC = () => {
     }
   };
 
+  const currentStatus = (eventData?.status as EventStatus) || "draft";
+  const allowedForwardStatuses =
+    OWNER_FORWARD_STATUS_OPTIONS[currentStatus] || [];
+  const canOwnerAdvanceStatus = allowedForwardStatuses.length > 0;
+  const canOwnerCancel = OWNER_CANCELABLE_STATUSES.has(currentStatus);
+  const canOwnerChangeStatus = canOwnerAdvanceStatus || canOwnerCancel;
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -624,16 +652,17 @@ export const EditEvent: React.FC = () => {
             </p>
             {status === "cancelled" && currentStatus !== "cancelled" && (
               <div className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-                Event will be submitted according to the existing cancellation flow of the backend. If the event
-                is in `ticketing` status, the system will process it according to the corresponding ticketing cancellation
-                branch.
+                Event will be submitted according to the existing cancellation
+                flow of the backend. If the event is in `ticketing` status, the
+                system will process it according to the corresponding ticketing
+                cancellation branch.
               </div>
             )}
             {(currentStatus === "ticketing" || currentStatus === "ongoing") && (
               <div className="mt-3 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
                 <p>
-                  When eligible, the organizer's wallet can mark the event as completed to trigger
-                  on-chain completion and release revenue.
+                  When eligible, the organizer's wallet can mark the event as
+                  completed to trigger on-chain completion and release revenue.
                 </p>
                 <>
                   <Button
@@ -646,12 +675,19 @@ export const EditEvent: React.FC = () => {
                   </Button>
 
                   {/* Confirmation modal */}
-                  <AlertDialog open={showConfirmOpen} onOpenChange={setShowConfirmOpen}>
+                  <AlertDialog
+                    open={showConfirmOpen}
+                    onOpenChange={setShowConfirmOpen}
+                  >
                     <AlertDialogContent className="max-w-md border-slate-700 bg-slate-900">
                       <AlertDialogHeader>
-                        <AlertDialogTitle className="text-white">Confirm Completion</AlertDialogTitle>
+                        <AlertDialogTitle className="text-white">
+                          Confirm Completion
+                        </AlertDialogTitle>
                         <AlertDialogDescription className="text-slate-400">
-                          Are you sure you want to complete this event? The system will trigger on-chain completion and release revenue.
+                          Are you sure you want to complete this event? The
+                          system will trigger on-chain completion and release
+                          revenue.
                         </AlertDialogDescription>
                       </AlertDialogHeader>
                       <AlertDialogFooter>
@@ -739,20 +775,28 @@ export const EditEvent: React.FC = () => {
 
               <div className="grid gap-4 md:grid-cols-3">
                 <div>
-                  <Label htmlFor={`tier-name-${index}`} className="text-slate-300">
+                  <Label
+                    htmlFor={`tier-name-${index}`}
+                    className="text-slate-300"
+                  >
                     Tier Name
                   </Label>
                   <Input
                     id={`tier-name-${index}`}
                     placeholder="e.g., VIP, General"
                     value={tier.name}
-                    onChange={(e) => updateTierField(index, "name", e.target.value)}
+                    onChange={(e) =>
+                      updateTierField(index, "name", e.target.value)
+                    }
                     className="mt-1.5 border-slate-700 bg-slate-800 text-white"
                   />
                 </div>
 
                 <div>
-                  <Label htmlFor={`tier-price-${index}`} className="text-slate-300">
+                  <Label
+                    htmlFor={`tier-price-${index}`}
+                    className="text-slate-300"
+                  >
                     Price (ETH)
                   </Label>
                   <Input
@@ -762,13 +806,18 @@ export const EditEvent: React.FC = () => {
                     pattern="[0-9]*"
                     placeholder="e.g., 1000000000000000"
                     value={tier.price}
-                    onChange={(e) => updateTierField(index, "price", e.target.value)}
+                    onChange={(e) =>
+                      updateTierField(index, "price", e.target.value)
+                    }
                     className="mt-1.5 border-slate-700 bg-slate-800 text-white"
                   />
                 </div>
 
                 <div>
-                  <Label htmlFor={`tier-supply-${index}`} className="text-slate-300">
+                  <Label
+                    htmlFor={`tier-supply-${index}`}
+                    className="text-slate-300"
+                  >
                     Total Supply
                   </Label>
                   <Input
@@ -776,7 +825,9 @@ export const EditEvent: React.FC = () => {
                     type="number"
                     placeholder="100"
                     value={tier.supply}
-                    onChange={(e) => updateTierField(index, "supply", e.target.value)}
+                    onChange={(e) =>
+                      updateTierField(index, "supply", e.target.value)
+                    }
                     className="mt-1.5 border-slate-700 bg-slate-800 text-white"
                   />
                 </div>

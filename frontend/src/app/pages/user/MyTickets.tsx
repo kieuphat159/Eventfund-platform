@@ -1,11 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import {
-  Ticket,
-  QrCode,
-  Download,
-  Calendar,
-  MapPin,
-} from "lucide-react";
+import { Ticket, QrCode, Download, Calendar, MapPin, Trash2 } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -13,6 +7,7 @@ import {
   CardHeader,
   CardTitle,
 } from "../../components/ui/card";
+import { useWeb3Auth } from "@web3auth/modal/react";
 import { Button } from "../../components/ui/button";
 import { useAuth } from "../../contexts/AuthContext";
 import {
@@ -27,8 +22,6 @@ import {
 } from "@/app/services/listings.service";
 import { QRCodeCanvas } from "qrcode.react";
 import { formatEther } from "ethers";
-import { useWeb3Auth } from "@web3auth/modal/react";
-import { resolveTransactionProvider } from "../../services/providerService";
 import { logger } from "../../lib/logger";
 import { InsufficientBalanceDialog } from "../../components/shared/InsufficientBalanceDialog";
 import {
@@ -80,6 +73,8 @@ const formatWei = (value: string | bigint | number) => {
 export const MyTickets: React.FC = () => {
   const { user, connectWallet } = useAuth();
   const { web3Auth } = useWeb3Auth();
+  const walletProvider = web3Auth?.provider;
+
   const [listingPopup, setListingPopup] = useState<{
     type: "success" | "error";
     message: string;
@@ -168,7 +163,7 @@ export const MyTickets: React.FC = () => {
     );
   }, [tickets]);
 
-  const formatEth = (wei: string | bigint | number) => {
+  const formatWei = (wei: string | bigint | number) => {
     if (!wei || wei === "0" || wei === "0x0") return "0";
 
     try {
@@ -202,6 +197,47 @@ export const MyTickets: React.FC = () => {
     document.body.removeChild(link);
   };
 
+  const handleClaimRefund = async (ticket: ApiTicket) => {
+    try {
+      if (!user?.walletAddress) {
+        await connectWallet();
+        showListingPopup(
+          "success",
+          "Wallet connected. Please click Claim Refund again.",
+        );
+        return;
+      }
+
+      if (!walletProvider?.request) {
+        throw new Error(
+          "Wallet provider is not ready. Please reconnect wallet and try again.",
+        );
+      }
+
+      setRefundingTokenId(ticket.tokenId);
+
+      const result = await claimTicketRefundOnChain(
+        walletProvider,
+        ticket.tokenId,
+        user.walletAddress,
+      );
+
+      showListingPopup(
+        "success",
+        `Refund claimed for ticket #${ticket.tokenId}. Tx: ${result.txHash}`,
+      );
+
+      setTickets((prevTickets) =>
+        prevTickets.filter((item) => item._id !== ticket._id),
+      );
+    } catch (err: any) {
+      const message = err?.message || "Failed to claim refund";
+      showListingPopup("error", `Refund failed: ${message}`);
+    } finally {
+      setRefundingTokenId(null);
+    }
+  };
+
   const resolveActiveListingIdByTicket = async (ticket: ApiTicket) => {
     const ticketId = ticket._id;
 
@@ -232,45 +268,6 @@ export const MyTickets: React.FC = () => {
     }
 
     return null;
-  };
-
-  const handleClaimRefund = async (ticket: ApiTicket) => {
-    try {
-      if (!user?.walletAddress) {
-        await connectWallet();
-        showListingPopup(
-          "success",
-          "Wallet connected. Please click Claim Refund again.",
-        );
-        return;
-      }
-
-      if (!walletProvider?.request) {
-        throw new Error(
-          "Wallet provider is not ready. Please reconnect wallet and try again.",
-        );
-      }
-
-      setRefundingTokenId(ticket.tokenId);
-      await claimTicketRefundOnChain(
-        walletProvider,
-        ticket.tokenId,
-        user.walletAddress,
-      );
-      const data = await getUserTickets(user.walletAddress);
-      setTickets(data);
-      showListingPopup("success", `Refund claimed for ticket #${ticket.tokenId}`);
-    } catch (err) {
-      if (isInsufficientBalanceError(err)) {
-        setInsufficientBalanceMessage(getInsufficientBalanceMessage(err));
-      }
-      showListingPopup(
-        "error",
-        err instanceof Error ? err.message : "Failed to claim refund",
-      );
-    } finally {
-      setRefundingTokenId(null);
-    }
   };
 
   return (
@@ -320,7 +317,7 @@ export const MyTickets: React.FC = () => {
           <CardContent className="p-6">
             <p className="text-sm text-slate-400 mb-1">Total Value</p>
             <p className="text-3xl font-bold text-white">
-              {formatWei(totalValue)} wei
+              {formatWei(totalValue)} ETH
             </p>
           </CardContent>
         </Card>
@@ -403,7 +400,7 @@ export const MyTickets: React.FC = () => {
                       Purchase Price
                     </span>
                     <span className="text-sm font-semibold text-purple-400">
-                      {formatWei(purchasePrice)} wei
+                      {formatWei(purchasePrice)} ETH
                     </span>
                   </div>
                 </div>
@@ -500,6 +497,7 @@ export const MyTickets: React.FC = () => {
           </CardContent>
         </Card>
       )}
+
       {selectedTicket && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
           <div className="bg-slate-900 p-6 rounded-xl border border-slate-700 text-center w-[380px] max-w-[92vw]">
@@ -531,6 +529,7 @@ export const MyTickets: React.FC = () => {
           </div>
         </div>
       )}
+
       {listingTicket && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
           <div className="bg-slate-900 p-6 rounded-xl border border-slate-700 w-[320px]">
@@ -539,14 +538,14 @@ export const MyTickets: React.FC = () => {
             </h3>
 
             {(() => {
-              const originalPriceWei = BigInt(listingTicket.originalPrice || "0");
+              const originalPriceWei = BigInt(
+                listingTicket.originalPrice || "0",
+              );
               const maxAllowedWei = (originalPriceWei * 150n) / 100n;
               return (
                 <div className="mb-3 rounded-md border border-slate-700 bg-slate-800/60 p-3 text-xs text-slate-300">
-                  <p>Original price: {formatWei(originalPriceWei)} wei</p>
-                  <p>
-                    Max resale (150% cap): {formatWei(maxAllowedWei)} wei
-                  </p>
+                  <p>Original price: {formatWei(originalPriceWei)} ETH</p>
+                  <p>Max resale (150% cap): {formatWei(maxAllowedWei)} ETH</p>
                 </div>
               );
             })()}
@@ -581,7 +580,9 @@ export const MyTickets: React.FC = () => {
                   }
 
                   const normalizedPriceWei = listingPrice.trim();
-                  const originalPriceWei = BigInt(listingTicket.originalPrice || "0");
+                  const originalPriceWei = BigInt(
+                    listingTicket.originalPrice || "0",
+                  );
                   const maxAllowedWei = (originalPriceWei * 150n) / 100n;
                   if (BigInt(normalizedPriceWei) > maxAllowedWei) {
                     const message = `Price exceeds maximum allowed (${maxAllowedWei.toString()} wei)`;
@@ -663,6 +664,7 @@ export const MyTickets: React.FC = () => {
           </div>
         </div>
       )}
+
       {cancelTicket && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
           <div className="bg-slate-900 p-6 rounded-xl border border-slate-700 w-[340px]">

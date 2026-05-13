@@ -1,5 +1,5 @@
-import React from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import React from "react";
+import { Link, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
   Users,
@@ -13,9 +13,9 @@ import {
   Flag,
   ChevronLeft,
   ChevronRight,
-} from 'lucide-react';
-import { cn } from '../../lib/utils';
-import { SidebarShell } from './SidebarShell';
+} from "lucide-react";
+import { cn } from "../../lib/utils";
+import { SidebarShell } from "./SidebarShell";
 
 interface SidebarProps {
   collapsed: boolean;
@@ -33,14 +33,14 @@ export const AdminSidebar: React.FC<SidebarProps> = ({
   const location = useLocation();
 
   const adminNavItems = [
-    { icon: LayoutDashboard, label: 'Dashboard', path: '/admin/dashboard' },
-    { icon: Users, label: 'User Management', path: '/admin/users' },
-    { icon: Calendar, label: 'Event Management', path: '/admin/events' },
-    { icon: ShoppingCart, label: 'Marketplace', path: '/admin/marketplace' },
-    { icon: AlertTriangle, label: 'Fraud Monitoring', path: '/admin/fraud' },
-    { icon: DollarSign, label: 'Finance', path: '/admin/finance' },
-    { icon: BarChart3, label: 'Analytics', path: '/admin/analytics' },
-    { icon: Settings, label: 'Platform Settings', path: '/admin/settings' },
+    { icon: LayoutDashboard, label: "Dashboard", path: "/admin/dashboard" },
+    { icon: Users, label: "User Management", path: "/admin/users" },
+    { icon: Calendar, label: "Event Management", path: "/admin/events" },
+    { icon: ShoppingCart, label: "Marketplace", path: "/admin/marketplace" },
+    { icon: AlertTriangle, label: "Fraud Monitoring", path: "/admin/fraud" },
+    { icon: DollarSign, label: "Finance", path: "/admin/finance" },
+    { icon: BarChart3, label: "Analytics", path: "/admin/analytics" },
+    // { icon: Settings, label: "Platform Settings", path: "/admin/settings" },
   ];
 
   return (
@@ -73,14 +73,19 @@ export const AdminSidebar: React.FC<SidebarProps> = ({
               to={item.path}
               onClick={onCloseMobile}
               className={cn(
-                'flex items-center rounded-lg px-3 py-2 transition-all',
+                "flex items-center rounded-lg px-3 py-2 transition-all",
                 isActive
-                  ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white'
-                  : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                  ? "bg-gradient-to-r from-purple-600 to-blue-600 text-white"
+                  : "text-slate-400 hover:bg-slate-800 hover:text-white",
               )}
             >
               <Icon className="w-5 h-5 flex-shrink-0" />
-              <span className={cn('ml-3 text-sm md:block', collapsed ? 'md:hidden' : 'md:block')}>
+              <span
+                className={cn(
+                  "ml-3 text-sm md:block",
+                  collapsed ? "md:hidden" : "md:block",
+                )}
+              >
                 {item.label}
               </span>
             </Link>
@@ -88,7 +93,7 @@ export const AdminSidebar: React.FC<SidebarProps> = ({
         })}
       </nav>
 
-      {!collapsed && (
+      {/* {!collapsed && (
         <div className="mx-2 mb-2 hidden rounded-lg border border-slate-700 bg-slate-800 p-4 md:block">
           <h3 className="mb-3 text-xs font-semibold uppercase text-slate-400">System Status</h3>
           <div className="space-y-2 text-sm">
@@ -106,7 +111,7 @@ export const AdminSidebar: React.FC<SidebarProps> = ({
             </div>
           </div>
         </div>
-      )}
+      )} */}
     </SidebarShell>
   );
 };
