@@ -109,8 +109,8 @@ export const EditEvent: React.FC = () => {
   ]);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-  const [completing, setCompleting] = useState(false);
   const [showConfirmOpen, setShowConfirmOpen] = useState(false);
+  const [insufficientBalanceMessage, setInsufficientBalanceMessage] = useState("");
   const topAnchorRef = useRef<HTMLDivElement | null>(null);
 
   const scrollToTop = () => {

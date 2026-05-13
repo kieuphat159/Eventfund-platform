@@ -24,6 +24,7 @@ import { QRCodeCanvas } from "qrcode.react";
 import { formatEther } from "ethers";
 import { logger } from "../../lib/logger";
 import { InsufficientBalanceDialog } from "../../components/shared/InsufficientBalanceDialog";
+import { resolveTransactionProvider } from "../../services/providerService";
 import {
   getInsufficientBalanceMessage,
   isInsufficientBalanceError,
@@ -73,7 +74,6 @@ const formatWei = (value: string | bigint | number) => {
 export const MyTickets: React.FC = () => {
   const { user, connectWallet } = useAuth();
   const { web3Auth } = useWeb3Auth();
-  const walletProvider = web3Auth?.provider;
 
   const [listingPopup, setListingPopup] = useState<{
     type: "success" | "error";
