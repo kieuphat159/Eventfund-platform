@@ -20,6 +20,7 @@ mockFundWithSigner.createEventWithInvestment.staticCall = jest.fn();
 
 const mockFund = {
   getAddress: jest.fn(),
+  admin: jest.fn(),
   connect: jest.fn(() => mockFundWithSigner),
   interface: {
     parseLog: jest.fn(),
@@ -69,6 +70,9 @@ describe("events.service", () => {
     mockFund.connect.mockReturnValue(mockFundWithSigner);
     mockFund.getAddress.mockResolvedValue(
       "0x3333333333333333333333333333333333333333",
+    );
+    mockFund.admin.mockResolvedValue(
+      "0x9999999999999999999999999999999999999999",
     );
     mockFundWithSigner.withdrawStake.mockResolvedValue({
       wait: jest.fn().mockResolvedValue({ status: 1, logs: [] }),

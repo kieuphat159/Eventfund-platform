@@ -16,6 +16,7 @@ import {
 } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { useAuth } from "../../contexts/AuthContext";
+import { useWeb3Auth } from "@web3auth/modal/react";
 import {
   claimTicketRefundOnChain,
   getUserTickets,
@@ -27,8 +28,9 @@ import {
   listTicketOnchain,
 } from "@/app/services/listings.service";
 import { QRCodeCanvas } from "qrcode.react";
-import { ethers, formatEther } from "ethers";
+import { formatEther } from "ethers";
 import { logger } from "../../lib/logger";
+import { resolveTransactionProvider } from "../../services/providerService";
 
 const ETH_ADDRESS_REGEX = /^0x[a-fA-F0-9]{40}$/;
 
@@ -63,6 +65,14 @@ const isPositiveWeiInteger = (value: string) => {
   return /^[0-9]+$/.test(trimmed) && BigInt(trimmed) > 0n;
 };
 
+const formatWei = (value?: string | number | bigint) => {
+  try {
+    return BigInt(String(value ?? "0")).toLocaleString();
+  } catch {
+    return "0";
+  }
+};
+
 export const MyTickets: React.FC = () => {
   const { user, connectWallet } = useAuth();
   const { web3Auth } = useWeb3Auth();
@@ -82,6 +92,15 @@ export const MyTickets: React.FC = () => {
   const [cancelTicket, setCancelTicket] = useState<ApiTicket | null>(null);
   const [cancelLoading, setCancelLoading] = useState(false);
   const [refundingTokenId, setRefundingTokenId] = useState<string | null>(null);
+  const walletProvider = useMemo(() => {
+    if (!web3Auth?.provider) return null;
+
+    try {
+      return resolveTransactionProvider(web3Auth.provider);
+    } catch {
+      return null;
+    }
+  }, [web3Auth?.provider]);
 
   useEffect(() => {
     if (!listingPopup) return;
@@ -215,6 +234,52 @@ export const MyTickets: React.FC = () => {
     }
 
     return null;
+  };
+
+  const handleClaimRefund = async (ticket: ApiTicket) => {
+    if (!ticket._id) {
+      showListingPopup("error", "Ticket ID is missing.");
+      return;
+    }
+
+    try {
+      if (!user?.walletAddress) {
+        await connectWallet();
+        showListingPopup(
+          "success",
+          "Wallet connected. Please click Claim Refund again.",
+        );
+        return;
+      }
+
+      if (!walletProvider?.request) {
+        throw new Error(
+          "Wallet provider is not ready. Please reconnect wallet and try again.",
+        );
+      }
+
+      setRefundingTokenId(ticket.tokenId);
+      const result = await claimTicketRefundOnChain(
+        walletProvider,
+        ticket.tokenId,
+        user.walletAddress,
+      );
+
+      showListingPopup(
+        "success",
+        `Refund claimed successfully. Tx: ${result.txHash}`,
+      );
+      setTickets((prevTickets) =>
+        prevTickets.map((item) =>
+          item._id === ticket._id ? { ...item, status: "refunded" } : item,
+        ),
+      );
+    } catch (err: any) {
+      const message = err?.message || "Failed to claim refund";
+      showListingPopup("error", `Refund failed: ${message}`);
+    } finally {
+      setRefundingTokenId(null);
+    }
   };
   return (
     <div className="space-y-6">

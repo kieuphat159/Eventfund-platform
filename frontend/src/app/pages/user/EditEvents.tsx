@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Calendar, MapPin, Upload, Plus } from "lucide-react";
+import { Calendar, MapPin, Upload, Plus, Trash2 } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -30,7 +30,6 @@ import {
   type EventItem,
   type EventStatus,
 } from "../../services/events.service";
-import { resolveTransactionProvider } from "../../services/providerService";
 import { useAuth } from "../../contexts/AuthContext";
 import { useLoading } from "../../components/ui/loadingContext";
 import { useWeb3Auth } from "@web3auth/modal/react";
@@ -80,7 +79,7 @@ const isPositiveWeiInteger = (value: string) => {
 export const EditEvent: React.FC = () => {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
-  const { user, connectWallet } = useAuth();
+  const { user } = useAuth();
   const { web3Auth } = useWeb3Auth();
   const { show: showLoading, hide: hideLoading } = useLoading();
 
@@ -99,6 +98,8 @@ export const EditEvent: React.FC = () => {
   const [ticketTiers, setTicketTiers] = useState<TicketTierForm[]>([
     { name: "General", price: "", supply: "" },
   ]);
+  const [showConfirmOpen, setShowConfirmOpen] = useState(false);
+  const [completing, setCompleting] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const topAnchorRef = useRef<HTMLDivElement | null>(null);
@@ -204,10 +205,18 @@ export const EditEvent: React.FC = () => {
   const canOwnerCancel = OWNER_CANCELABLE_STATUSES.has(currentStatus);
   const canOwnerChangeStatus = canOwnerAdvanceStatus || canOwnerCancel;
 
+  const buildEndDate = () => {
+    if (!eventData?.endDate) return null;
+    const endDate = new Date(eventData.endDate);
+    return Number.isNaN(endDate.getTime()) ? null : endDate;
+  };
+
   const handleSubmit = async () => {
     try {
       setError("");
       setSuccess("");
+      setSubmitting(true);
+      showLoading("Saving event...");
 
       if (!id) {
         setError("Missing event id.");
@@ -226,6 +235,12 @@ export const EditEvent: React.FC = () => {
 
       if (!date || !time) {
         setError("Please choose an event date and time.");
+        return;
+      }
+
+      const start = buildStartDate();
+      if (!start) {
+        setError("The event start time is invalid.");
         return;
       }
 
@@ -253,10 +268,56 @@ export const EditEvent: React.FC = () => {
         return;
       }
 
-      const updated = await updateEvent(id, updatePayload);
-
+      const hasInvalidTier = normalizedTiers.some(
+        (tier) =>
+          !Number.isFinite(tier.price) ||
+          !Number.isFinite(tier.totalSupply) ||
+          tier.price < 0 ||
+          tier.totalSupply <= 0,
+      );
       if (hasInvalidTier) {
         setError("Ticket price or supply is invalid.");
+        return;
+      }
+
+      const end = buildEndDate();
+      if (!end) {
+        setError("The event end time is invalid.");
+        return;
+      }
+
+      const totalTickets = normalizedTiers.reduce(
+        (sum, tier) => sum + tier.totalSupply,
+        0,
+      );
+
+      const fundingDeadline = eventData?.fundingDeadline
+        ? new Date(eventData.fundingDeadline)
+        : new Date(start.getTime() - 7 * 24 * 60 * 60 * 1000);
+      if (Number.isNaN(fundingDeadline.getTime())) {
+        setError("The funding deadline is invalid.");
+        return;
+      }
+
+      const updatePayload = {
+        title: title.trim(),
+        description: description.trim(),
+        category,
+        startDate: start.toISOString(),
+        endDate: end.toISOString(),
+        fundingGoal: fundingGoal.trim(),
+        minStakeRequired: minStakeRequired.trim() || "0",
+        fundingDeadline: fundingDeadline.toISOString(),
+        totalTickets,
+        venue: { address: location.trim() },
+        ticketTiers: normalizedTiers,
+        ...(status !== currentStatus ? { status } : {}),
+      };
+
+      const updated = await updateEvent(id, updatePayload);
+
+      if (!updated) {
+        setError("Failed to update event.");
         return;
       }
 
@@ -275,63 +336,49 @@ export const EditEvent: React.FC = () => {
     }
   };
 
-      const start = buildStartDate();
-      if (!start) {
-        setError("The event start time is invalid.");
+  const handleCompleteEvent = async () => {
+    try {
+      setError("");
+      setSuccess("");
+      setCompleting(true);
+      showLoading("Completing event...");
+
+      if (!id) {
+        setError("Missing event id.");
         return;
       }
 
-      // confirmation handled by modal trigger; proceed when called
-
-      const fundingDeadline = eventData?.fundingDeadline
-        ? new Date(eventData.fundingDeadline)
-        : new Date(start.getTime() - 7 * 24 * 60 * 60 * 1000);
-
-      if (!fundingGoal.trim()) {
-        setError("Please enter a funding goal.");
-        return;
-      }
-
-      const provider = resolveTransactionProvider(web3Auth?.provider);
-      if (!provider?.request) {
+      if (!web3Auth?.provider?.request) {
         setError(
           "Wallet provider is not ready. Please reconnect wallet and try again.",
         );
         return;
       }
 
-      const updated = await updateEvent(id, {
-        title: title.trim(),
-        description: description.trim(),
-        category,
-        startDate: start.toISOString(),
-        endDate: end.toISOString(),
-        fundingGoal: fundingGoal.trim(),
-        minStakeRequired: minStakeRequired.trim() || "0",
-        fundingDeadline: fundingDeadline.toISOString(),
-        totalTickets,
-        venue: { address: location.trim() },
-        ticketTiers: normalizedTiers,
-        ...(status !== currentStatus ? { status } : {}),
-      });
+      const completed = await completeEventWithWalletFallback(
+        web3Auth.provider,
+        id,
+        { status: "completed" },
+        user?.walletAddress,
+      );
 
-      if (!updated) {
-        setError("Failed to update event.");
+      if (!completed) {
+        setError("Failed to complete event.");
         return;
       }
 
-      setSuccess("Event updated successfully.");
-      setEventData(updated);
-      setStatus((updated.status as EventStatus) || "completed");
+      setEventData(completed);
+      setStatus((completed.status as EventStatus) || "completed");
       setSuccess("Event completed successfully");
     } catch (err: any) {
       setError(
         err?.response?.data?.message ||
           err?.message ||
-          "An error occurred while updating the event.",
+          "An error occurred while completing the event.",
       );
     } finally {
       setCompleting(false);
+      setShowConfirmOpen(false);
       hideLoading();
     }
   };

@@ -16,6 +16,7 @@ const mockFundWithSigner = {
 
 const mockFund = {
   getAddress: jest.fn(),
+  admin: jest.fn(),
   getEventStatus: jest.fn(),
   connect: jest.fn(() => mockFundWithSigner),
   interface: {
@@ -65,6 +66,9 @@ describe("admin.service updateEventStatus", () => {
     mockGetFund.mockReturnValue(mockFund);
     mockGetTicket.mockReturnValue(mockTicket);
     mockFund.getAddress.mockResolvedValue(fundAddress);
+    mockFund.admin.mockResolvedValue(
+      "0x9999999999999999999999999999999999999999",
+    );
     mockFund.getEventStatus.mockResolvedValue(2);
     mockFund.connect.mockReturnValue(mockFundWithSigner);
     mockFundWithSigner.withdrawStake.mockResolvedValue({
