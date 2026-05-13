@@ -137,18 +137,67 @@ jobs:
         continue-on-error: true
         run: terraform destroy -target=module.helm -auto-approve
 
+      - name: Wait for ALB + ENI cleanup
+        run: |
+          echo "Waiting for ALB Controller to cleanup ALB/ENI..."
+          sleep 30
+          
+          # Get VPC ID from Terraform output
+          VPC_ID=$(terraform -chdir=terraform output -raw vpc_id 2>/dev/null || echo "")
+          
+          if [ -n "$VPC_ID" ]; then
+            echo "Checking for remaining Load Balancers in VPC: $VPC_ID"
+            
+            # Count remaining ALBs
+            LB_COUNT=$(aws elbv2 describe-load-balancers \
+              --region ${{ needs.setup.outputs.aws_region }} \
+              --query "length(LoadBalancers[?VpcId=='$VPC_ID'])" \
+              --output text 2>/dev/null || echo "0")
+            
+            echo "Remaining Load Balancers: $LB_COUNT"
+            
+            # Force delete remaining ALBs
+            if [ "$LB_COUNT" -gt 0 ]; then
+              echo "Force deleting remaining Load Balancers..."
+              aws elbv2 describe-load-balancers \
+                --region ${{ needs.setup.outputs.aws_region }} \
+                --query "LoadBalancers[?VpcId=='$VPC_ID'].LoadBalancerArn" \
+                --output text | tr '\t' '\n' | grep -v '^$' | while read arn; do
+                  echo "Deleting LB: $arn"
+                  aws elbv2 delete-load-balancer --load-balancer-arn "$arn" --region ${{ needs.setup.outputs.aws_region }} 2>/dev/null || true
+                done
+              
+              echo "Waiting 60s for Load Balancers to be fully deleted..."
+              sleep 60
+            fi
+            
+            # Delete orphaned security groups created by ALB Controller
+            echo "Cleaning up orphaned security groups..."
+            SG_IDS=$(aws ec2 describe-security-groups \
+              --region ${{ needs.setup.outputs.aws_region }} \
+              --filters "Name=vpc-id,Values=$VPC_ID" "Name=tag-key,Values=elbv2.k8s.aws/cluster" \
+              --query "SecurityGroups[*].GroupId" \
+              --output text 2>/dev/null || echo "")
+            
+            for SG in $SG_IDS; do
+              echo "Deleting security group: $SG"
+              aws ec2 delete-security-group --group-id "$SG" --region ${{ needs.setup.outputs.aws_region }} 2>/dev/null || true
+            done
+          fi
+          
+          echo "ALB/ENI cleanup completed"
+
       - name: Remove Helm resources from Terraform state
         working-directory: terraform
         run: |
           echo "Removing Helm resources from state to prevent provider initialization errors..."
-          terraform state rm 'module.helm.helm_release.alb_controller' 2>/dev/null || true
-          terraform state rm 'module.helm.helm_release.eso' 2>/dev/null || true
-          terraform state rm 'module.helm.helm_release.metrics_server' 2>/dev/null || true
-          terraform state rm 'module.helm.helm_release.cluster_autoscaler' 2>/dev/null || true
-          terraform state rm 'module.helm.helm_release.argocd' 2>/dev/null || true
-          terraform state rm 'module.helm.helm_release.prometheus' 2>/dev/null || true
-          terraform state rm 'module.helm.null_resource.cleanup_ingress_on_destroy' 2>/dev/null || true
-          terraform state rm 'module.helm.null_resource.argocd_app' 2>/dev/null || true
+          
+          # Automatically remove all helm_release and null_resource from module.helm
+          terraform state list | grep -E '(helm_release|null_resource)' | grep 'module\.helm' | while read resource; do
+            echo "Removing: $resource"
+            terraform state rm "$resource" 2>/dev/null || true
+          done
+          
           echo "Helm resources removed from state"
 
       - name: "[2/4] Destroy IAM IRSA roles"
@@ -166,7 +215,43 @@ jobs:
         id: destroy_vpc
         if: github.event.inputs.destroy_vpc == 'yes'
         working-directory: terraform
-        run: terraform destroy -target=module.vpc -auto-approve -refresh=false
+        run: |
+          MAX_RETRIES=3
+          RETRY_COUNT=0
+          
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            echo "Attempt $((RETRY_COUNT + 1))/$MAX_RETRIES to destroy VPC..."
+            
+            if terraform destroy -target=module.vpc -auto-approve -refresh=false; then
+              echo "VPC destroyed successfully"
+              exit 0
+            fi
+            
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            
+            if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+              WAIT_TIME=$((30 * RETRY_COUNT))
+              echo "Destroy failed, waiting ${WAIT_TIME}s before retry..."
+              echo "Checking for remaining dependencies..."
+              
+              # Check for remaining ENIs
+              VPC_ID=$(terraform output -raw vpc_id 2>/dev/null || echo "")
+              if [ -n "$VPC_ID" ]; then
+                ENI_COUNT=$(aws ec2 describe-network-interfaces \
+                  --region ${{ needs.setup.outputs.aws_region }} \
+                  --filters "Name=vpc-id,Values=$VPC_ID" \
+                  --query "length(NetworkInterfaces)" \
+                  --output text 2>/dev/null || echo "0")
+                echo "Remaining ENIs in VPC: $ENI_COUNT"
+              fi
+              
+              sleep $WAIT_TIME
+            fi
+          done
+          
+          echo "Failed to destroy VPC after $MAX_RETRIES attempts"
+          echo "Manual cleanup may be required"
+          exit 1
 
       - name: Summary
         if: always()
