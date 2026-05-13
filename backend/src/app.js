@@ -48,7 +48,7 @@ setupSwagger(app);
 // Health check endpoint
 /**
  * @swagger
- * /health:
+ * /api/health:
  *   get:
  *     summary: Health check endpoint
  *     tags: [Health]
@@ -70,7 +70,7 @@ setupSwagger(app);
  *                   type: string
  *                   example: DEV
  */
-app.get('/health', (_, res) => {
+app.get('/api/health', (_, res) => {
   res.json({
     ok: true,
     timestamp: new Date().toISOString(),

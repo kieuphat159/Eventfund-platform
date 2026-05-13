@@ -170,9 +170,9 @@ jobs:
                   if o['Id'] == origin_id:
                       o['DomainName'] = alb_dns
 
-          # Thêm cache behaviors cho /argocd/* và /grafana/*
+          # Thêm cache behaviors cho /argocd/*, /grafana/*, và /api/*
           behaviors = config.get('CacheBehaviors', {}).get('Items', [])
-          for path, origin in [('/argocd/*', origin_id), ('/grafana/*', origin_id)]:
+          for path, origin in [('/argocd/*', origin_id), ('/grafana/*', origin_id), ('/api/*', origin_id)]:
               if not any(b['PathPattern'] == path for b in behaviors):
                   behaviors.append({
                       "PathPattern": path,
