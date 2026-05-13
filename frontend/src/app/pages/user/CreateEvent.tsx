@@ -18,6 +18,11 @@ import { createEventOnChain } from "../../services/events.service";
 import { resolveTransactionProvider } from "../../services/providerService";
 import { useAuth } from "../../contexts/AuthContext";
 import { cn } from "@/app/lib/utils";
+import { InsufficientBalanceDialog } from "../../components/shared/InsufficientBalanceDialog";
+import {
+  getInsufficientBalanceMessage,
+  isInsufficientBalanceError,
+} from "../../lib/insufficientBalance";
 
 const MAX_EVENT_IMAGES = 10;
 const ACCEPTED_IMAGE_TYPES = new Set([
@@ -69,15 +74,8 @@ export const CreateEvent: React.FC = () => {
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [eventImages, setEventImages] = useState<File[]>([]);
   const [eventImagePreviews, setEventImagePreviews] = useState<string[]>([]);
-
-  // Fake submit/loading helpers for long on-chain create flows (always enabled in dev)
-  const [fakeSubmitEnabled, setFakeSubmitEnabled] = useState(true);
-  const [fakeSubmitMs, setFakeSubmitMs] = useState<number>(3000);
-  const [fakeStepIndex, setFakeStepIndex] = useState(0);
-  const [fakeTxHash, setFakeTxHash] = useState<string | null>(null);
-  const [fakeStepMessage, setFakeStepMessage] = useState<string | undefined>(
-    undefined,
-  );
+  const [insufficientBalanceMessage, setInsufficientBalanceMessage] =
+    useState("");
 
   const [ticketTiers, setTicketTiers] = useState<TicketTierForm[]>([
     { name: "General", price: "", supply: "" },
@@ -621,6 +619,9 @@ export const CreateEvent: React.FC = () => {
       );
       navigate("/app/events/my-events");
     } catch (err: any) {
+      if (isInsufficientBalanceError(err)) {
+        setInsufficientBalanceMessage(getInsufficientBalanceMessage(err));
+      }
       setError(
         err?.response?.data?.message ||
           err?.message ||
@@ -632,56 +633,18 @@ export const CreateEvent: React.FC = () => {
     }
   };
 
-  // Fake progress simulation while submitting (does not interfere with actual flow)
-  React.useEffect(() => {
-    if (!submitting || !fakeSubmitEnabled) {
-      setFakeStepIndex(0);
-      setFakeTxHash(null);
-      setFakeStepMessage(undefined);
-      return;
-    }
-
-    // generate fake tx hash once
-    const genHash = () => {
-      const hex = Array.from({ length: 64 })
-        .map(() => "0123456789abcdef"[Math.floor(Math.random() * 16)])
-        .join("");
-      return `0x${hex}`;
-    };
-
-    const tx = genHash();
-    setFakeTxHash(tx);
-
-    const steps = [
-      "Preparing event metadata...",
-      "Uploading metadata to IPFS...",
-      "Estimating gas and preparing transaction...",
-      `Sending transaction ${tx.slice(0, 10)}...`,
-      "Waiting for transaction to be mined (0/3 confirmations)...",
-      "Confirming on-chain and syncing database...",
-    ];
-
-    let idx = 0;
-    setFakeStepIndex(0);
-    setFakeStepMessage(steps[0]);
-
-    const iv = setInterval(() => {
-      idx = Math.min(idx + 1, steps.length - 1);
-      setFakeStepIndex(idx);
-      setFakeStepMessage(steps[idx]);
-    }, Math.max(500, fakeSubmitMs));
-
-    return () => {
-      clearInterval(iv);
-    };
-  }, [submitting, fakeSubmitEnabled, fakeSubmitMs]);
-
   const handleSubmit = async () => {
     await submitEvent();
   };
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
+      <InsufficientBalanceDialog
+        open={!!insufficientBalanceMessage}
+        message={insufficientBalanceMessage}
+        onClose={() => setInsufficientBalanceMessage("")}
+      />
+
           <div>
             <h1 className="text-3xl font-bold text-white mb-2">Create Event</h1>
             <AlertBox title="Creation fee & revenue split" variant="info">
@@ -1409,22 +1372,22 @@ export const CreateEvent: React.FC = () => {
       </div>
       <Loading
         visible={submitting}
-        message={fakeSubmitEnabled ? fakeStepMessage || "Creating event..." : "Creating event..."}
+        message="Creating event..."
       >
-        {fakeSubmitEnabled && (
-          <div className="w-full text-left">
-            <p className="text-xs text-slate-400 mb-2">Tx: <span className="font-mono text-sm text-white break-all">{fakeTxHash}</span></p>
-            <div className="space-y-1">
-              <p className="text-sm text-slate-300 font-medium">{fakeStepMessage}</p>
-              <div className="h-2 bg-slate-800 rounded overflow-hidden mt-2">
-                <div
-                  className="bg-purple-400 h-2 rounded"
-                  style={{ width: `${Math.min(100, (fakeStepIndex + 1) * 16)}%` }}
-                />
-              </div>
-            </div>
-          </div>
-        )}
+        <style>
+          {`
+            @keyframes event-create-progress {
+              0% { transform: translateX(-120%); }
+              100% { transform: translateX(320%); }
+            }
+          `}
+        </style>
+        <div className="h-2 w-full overflow-hidden rounded-full bg-slate-800">
+          <div
+            className="h-full w-1/3 rounded-full bg-gradient-to-r from-cyan-300 via-purple-400 to-emerald-300"
+            style={{ animation: "event-create-progress 1.2s ease-in-out infinite" }}
+          />
+        </div>
       </Loading>
     </div>
   );

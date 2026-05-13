@@ -6,28 +6,8 @@ import User from "../../models/User.model.js";
 import { decodeJwt } from "jose";
 
 class AuthService {
-  constructor(nonceService, siweService, jwtService) {
-    this.nonceService = nonceService;
-    this.siweService = siweService;
+  constructor(jwtService) {
     this.jwtService = jwtService;
-  }
-
-  async generateNonce(walletAddress) {
-    return await this.nonceService.generateNonce(walletAddress);
-  }
-
-  async getNonce(walletAddress) {
-    return await this.nonceService.getNonce(walletAddress);
-  }
-
-  createSIWEMessage(walletAddress, nonce, domain, uri, chainId) {
-    return this.siweService.createSIWEMessage(
-      walletAddress,
-      nonce,
-      domain,
-      uri,
-      chainId,
-    );
   }
 
   async loginWithIdToken(idToken, eoaAddress, smartAccountAddress) {
@@ -141,51 +121,6 @@ class AuthService {
       token,
       walletAddress: user.walletAddress,
       user: { email: user.email ?? null, username: user.username },
-    };
-  }
-
-  async verifyAndAuthenticate(message, signature, smartAccountAddress) {
-    const parseResult = this.siweService.parseSIWEMessage(message);
-    if (!parseResult.valid) {
-      throw new BadRequestError(
-        parseResult.error || "Invalid SIWE message format",
-      );
-    }
-
-    const { address: walletAddress, nonce } = parseResult.parsed;
-
-    const verifyResult = await this.siweService.verifySIWE(message, signature);
-    if (!verifyResult.valid) {
-      throw new UnauthorizedError(verifyResult.error || "Invalid signature");
-    }
-
-    const nonceResult = await this.nonceService.validateNonce(
-      walletAddress,
-      nonce,
-    );
-    if (!nonceResult.valid) {
-      throw new UnauthorizedError(nonceResult.error || "Invalid nonce");
-    }
-
-    await this.nonceService.invalidateNonce(walletAddress);
-
-    // Persist smartAccountAddress if provided (external wallet login)
-    if (smartAccountAddress) {
-      const user = nonceResult.user;
-      user.smartAccountAddress = smartAccountAddress.toLowerCase();
-      await user.save();
-    }
-
-    const token = this.jwtService.generateToken(
-      nonceResult.user.walletAddress,
-      nonceResult.user.role,
-    );
-
-    return {
-      token,
-      user: {
-        walletAddress: nonceResult.user.walletAddress,
-      },
     };
   }
 

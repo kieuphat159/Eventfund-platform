@@ -1,5 +1,5 @@
-import React from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import React from "react";
+import { Link, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
   Calendar,
@@ -40,7 +40,7 @@ export const UserSidebar: React.FC<SidebarProps> = ({
     { icon: TrendingUp, label: "Investments", path: "/app/investments" },
     { icon: Wallet, label: "Wallet", path: "/app/wallet" },
     { icon: User, label: "Profile", path: "/app/account/profile" }, // Must match App.tsx
-    { icon: Settings, label: "Settings", path: "/app/account/settings" },
+    // { icon: Settings, label: "Settings", path: "/app/account/settings" },
   ];
 
   const verifierNavItems = [
@@ -97,7 +97,12 @@ export const UserSidebar: React.FC<SidebarProps> = ({
               )}
             >
               <Icon className="w-5 h-5 flex-shrink-0" />
-              <span className={cn("ml-3 text-sm md:block", collapsed ? "md:hidden" : "md:block")}>
+              <span
+                className={cn(
+                  "ml-3 text-sm md:block",
+                  collapsed ? "md:hidden" : "md:block",
+                )}
+              >
                 {item.label}
               </span>
             </Link>

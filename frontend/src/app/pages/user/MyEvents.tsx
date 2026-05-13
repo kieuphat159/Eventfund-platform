@@ -40,6 +40,11 @@ import { getTickets, type ApiTicket } from "../../services/tickets.service";
 import { resolveTransactionProvider } from "../../services/providerService";
 import { useAuth } from "../../contexts/AuthContext";
 import { useLoading } from "../../components/ui/loadingContext";
+import { InsufficientBalanceDialog } from "../../components/shared/InsufficientBalanceDialog";
+import {
+  getInsufficientBalanceMessage,
+  isInsufficientBalanceError,
+} from "../../lib/insufficientBalance";
 
 const OWNER_CANCELABLE_STATUSES = new Set<EventStatus>([
   "draft",
@@ -126,6 +131,8 @@ export const MyEvents: React.FC = () => {
   const [eventTickets, setEventTickets] = useState<ApiTicket[]>([]);
   const [ticketsLoading, setTicketsLoading] = useState(false);
   const [ticketsError, setTicketsError] = useState("");
+  const [insufficientBalanceMessage, setInsufficientBalanceMessage] =
+    useState("");
 
   useEffect(() => {
     const fetchEvents = async () => {
@@ -214,6 +221,9 @@ export const MyEvents: React.FC = () => {
         ),
       );
     } catch (err: any) {
+      if (isInsufficientBalanceError(err)) {
+        setInsufficientBalanceMessage(getInsufficientBalanceMessage(err));
+      }
       alert(
         err?.response?.data?.message ||
           err?.message ||
@@ -304,6 +314,12 @@ export const MyEvents: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      <InsufficientBalanceDialog
+        open={!!insufficientBalanceMessage}
+        message={insufficientBalanceMessage}
+        onClose={() => setInsufficientBalanceMessage("")}
+      />
+
       <div className="flex items-center justify-between">
         <div>
           <h1 className="mb-2 text-3xl font-semibold tracking-tight text-white">
@@ -590,7 +606,7 @@ export const MyEvents: React.FC = () => {
               Ticket QR - {ticketDialogEvent?.title || "Selected Event"}
             </DialogTitle>
             <DialogDescription className="text-slate-400">
-              Chọn ticket của event để xem QR và test flow scan verifier.
+              Select an event ticket to view QR and test verifier scan flow.
             </DialogDescription>
           </DialogHeader>
 
@@ -642,7 +658,7 @@ export const MyEvents: React.FC = () => {
                 </div>
               ) : (
                 <div className="py-10 text-center text-slate-400">
-                  Event này chưa có ticket để tạo QR.
+                  This event does not have tickets to create QR.
                 </div>
               )}
             </div>
@@ -691,7 +707,7 @@ export const MyEvents: React.FC = () => {
                 </div>
               ) : (
                 <div className="py-10 text-center text-slate-400">
-                  Chọn một ticket ở bên trái để xem QR.
+                  Select a ticket on the left to view QR.
                 </div>
               )}
             </div>

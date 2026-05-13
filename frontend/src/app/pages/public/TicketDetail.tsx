@@ -35,6 +35,11 @@ import {
   type BuyListingProgressStage,
 } from "../../services/listings.service";
 import { logger } from "../../lib/logger";
+import { InsufficientBalanceDialog } from "../../components/shared/InsufficientBalanceDialog";
+import {
+  getInsufficientBalanceMessage,
+  isInsufficientBalanceError,
+} from "../../lib/insufficientBalance";
 
 type ListingEvent = ApiEvent & {
   venue?: {
@@ -135,6 +140,8 @@ export const TicketDetail: React.FC = () => {
     type: "success" | "error";
     message: string;
   } | null>(null);
+  const [insufficientBalanceMessage, setInsufficientBalanceMessage] =
+    React.useState("");
 
   React.useEffect(() => {
     if (!buyPopup) return;
@@ -325,6 +332,9 @@ export const TicketDetail: React.FC = () => {
       setListing(refreshed);
       setShowBuyConfirm(false);
     } catch (err) {
+      if (isInsufficientBalanceError(err)) {
+        setInsufficientBalanceMessage(getInsufficientBalanceMessage(err));
+      }
       showListingPopup(
         "error",
         err instanceof Error ? err.message : "Failed to purchase ticket",
@@ -337,6 +347,12 @@ export const TicketDetail: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-950 via-purple-950/20 to-slate-950 py-8">
+      <InsufficientBalanceDialog
+        open={!!insufficientBalanceMessage}
+        message={insufficientBalanceMessage}
+        onClose={() => setInsufficientBalanceMessage("")}
+      />
+
       {buyPopup && (
         <div className="fixed top-4 right-4 z-[60]">
           <div
