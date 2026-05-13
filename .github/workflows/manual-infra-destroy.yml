@@ -122,7 +122,7 @@ jobs:
           }
           EOF
           
-          echo "✅ Generated terraform.auto.tfvars.json:"
+          echo "Generated terraform.auto.tfvars.json:"
           cat terraform.auto.tfvars.json
 
       - name: Terraform Init
@@ -137,6 +137,20 @@ jobs:
         continue-on-error: true
         run: terraform destroy -target=module.helm -auto-approve
 
+      - name: Remove Helm resources from Terraform state
+        working-directory: terraform
+        run: |
+          echo "Removing Helm resources from state to prevent provider initialization errors..."
+          terraform state rm 'module.helm.helm_release.alb_controller' 2>/dev/null || true
+          terraform state rm 'module.helm.helm_release.eso' 2>/dev/null || true
+          terraform state rm 'module.helm.helm_release.metrics_server' 2>/dev/null || true
+          terraform state rm 'module.helm.helm_release.cluster_autoscaler' 2>/dev/null || true
+          terraform state rm 'module.helm.helm_release.argocd' 2>/dev/null || true
+          terraform state rm 'module.helm.helm_release.prometheus' 2>/dev/null || true
+          terraform state rm 'module.helm.null_resource.cleanup_ingress_on_destroy' 2>/dev/null || true
+          terraform state rm 'module.helm.null_resource.argocd_app' 2>/dev/null || true
+          echo "Helm resources removed from state"
+
       - name: "[2/4] Destroy IAM IRSA roles"
         id: destroy_iam
         working-directory: terraform
@@ -146,41 +160,41 @@ jobs:
       - name: "[3/4] Destroy EKS cluster"
         id: destroy_eks
         working-directory: terraform
-        run: terraform destroy -target=module.eks -auto-approve
+        run: terraform destroy -target=module.eks -auto-approve -refresh=false
 
       - name: "[4/4] Destroy VPC + NAT Gateway + EIP"
         id: destroy_vpc
         if: github.event.inputs.destroy_vpc == 'yes'
         working-directory: terraform
-        run: terraform destroy -target=module.vpc -auto-approve
+        run: terraform destroy -target=module.vpc -auto-approve -refresh=false
 
       - name: Summary
         if: always()
         run: |
-          echo "## 💰 Destroy Report" >> $GITHUB_STEP_SUMMARY
+          echo "## Destroy Report" >> $GITHUB_STEP_SUMMARY
           echo "| Resource | Status | Saving |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|---|" >> $GITHUB_STEP_SUMMARY
 
           [[ "${{ steps.destroy_helm.outcome }}" == "success" ]] \
-            && echo "| Helm (ALB, ArgoCD, Prometheus) | ✅ Destroyed | ~\$0.02/hr |" >> $GITHUB_STEP_SUMMARY \
-            || echo "| Helm (ALB, ArgoCD, Prometheus) | ⚠️ Skipped/Failed | – |" >> $GITHUB_STEP_SUMMARY
+            && echo "| Helm (ALB, ArgoCD, Prometheus) | Destroyed | ~\$0.02/hr |" >> $GITHUB_STEP_SUMMARY \
+            || echo "| Helm (ALB, ArgoCD, Prometheus) | Skipped/Failed | – |" >> $GITHUB_STEP_SUMMARY
 
           [[ "${{ steps.destroy_iam.outcome }}" == "success" ]] \
-            && echo "| IAM IRSA roles | ✅ Destroyed | \$0 (free) |" >> $GITHUB_STEP_SUMMARY \
-            || echo "| IAM IRSA roles | ⚠️ Skipped/Failed | – |" >> $GITHUB_STEP_SUMMARY
+            && echo "| IAM IRSA roles | Destroyed | \$0 (free) |" >> $GITHUB_STEP_SUMMARY \
+            || echo "| IAM IRSA roles | Skipped/Failed | – |" >> $GITHUB_STEP_SUMMARY
 
           [[ "${{ steps.destroy_eks.outcome }}" == "success" ]] \
-            && echo "| EKS + nodes | ✅ Destroyed | ~\$0.27/hr |" >> $GITHUB_STEP_SUMMARY \
-            || echo "| EKS + nodes | ❌ Failed – still running! | – |" >> $GITHUB_STEP_SUMMARY
+            && echo "| EKS + nodes | Destroyed | ~\$0.27/hr |" >> $GITHUB_STEP_SUMMARY \
+            || echo "| EKS + nodes | Failed – still running! | – |" >> $GITHUB_STEP_SUMMARY
 
           if [[ "${{ github.event.inputs.destroy_vpc }}" == "yes" ]]; then
             [[ "${{ steps.destroy_vpc.outcome }}" == "success" ]] \
-              && echo "| VPC + NAT Gateway + EIP | ✅ Destroyed | ~\$0.05/hr |" >> $GITHUB_STEP_SUMMARY \
-              || echo "| VPC + NAT Gateway + EIP | ❌ Failed – still running! | – |" >> $GITHUB_STEP_SUMMARY
+              && echo "| VPC + NAT Gateway + EIP | Destroyed | ~\$0.05/hr |" >> $GITHUB_STEP_SUMMARY \
+              || echo "| VPC + NAT Gateway + EIP | Failed – still running! | – |" >> $GITHUB_STEP_SUMMARY
           else
-            echo "| VPC + NAT Gateway + EIP | ⏭️ Kept | \$0.05/hr still running |" >> $GITHUB_STEP_SUMMARY
+            echo "| VPC + NAT Gateway + EIP | Kept | \$0.05/hr still running |" >> $GITHUB_STEP_SUMMARY
           fi
 
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Kept:** ECR, S3, CloudFront, SSM, IAM, OIDC" >> $GITHUB_STEP_SUMMARY
-          echo "**Redeploy:** Run **Manual – Infrastructure Apply** workflow" >> $GITHUB_STEP_SUMMARY
+          echo "Kept: ECR, S3, CloudFront, SSM, IAM, OIDC" >> $GITHUB_STEP_SUMMARY
+          echo "Redeploy: Run Manual – Infrastructure Apply workflow" >> $GITHUB_STEP_SUMMARY
