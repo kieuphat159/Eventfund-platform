@@ -1,5 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Ticket, QrCode, Download, Calendar, MapPin, Trash2 } from "lucide-react";
+import {
+  Ticket,
+  QrCode,
+  Download,
+  Calendar,
+  MapPin,
+  Trash2,
+} from "lucide-react";
 import {
   Card,
   CardContent,

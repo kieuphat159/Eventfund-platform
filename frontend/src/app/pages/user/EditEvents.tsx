@@ -87,7 +87,7 @@ const isPositiveWeiInteger = (value: string) => {
 export const EditEvent: React.FC = () => {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
-  const { user, connectWallet } = useAuth();
+  const { user } = useAuth();
   const { web3Auth } = useWeb3Auth();
   const { show: showLoading, hide: hideLoading } = useLoading();
 
@@ -107,10 +107,11 @@ export const EditEvent: React.FC = () => {
   const [ticketTiers, setTicketTiers] = useState<TicketTierForm[]>([
     { name: "General", price: "", supply: "" },
   ]);
+  const [showConfirmOpen, setShowConfirmOpen] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-  const [showConfirmOpen, setShowConfirmOpen] = useState(false);
-  const [insufficientBalanceMessage, setInsufficientBalanceMessage] = useState("");
+  const [insufficientBalanceMessage, setInsufficientBalanceMessage] =
+    useState("");
   const topAnchorRef = useRef<HTMLDivElement | null>(null);
 
   const scrollToTop = () => {
@@ -383,6 +384,7 @@ export const EditEvent: React.FC = () => {
       );
     } finally {
       setCompleting(false);
+      setShowConfirmOpen(false);
       hideLoading();
     }
   };

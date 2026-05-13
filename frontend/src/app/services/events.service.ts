@@ -1,5 +1,6 @@
 import { api } from '../lib/api';
 import { logger } from '../lib/logger';
+import { encodeFunctionData } from "viem";
 
 export interface EventVenue {
   address?: string;
