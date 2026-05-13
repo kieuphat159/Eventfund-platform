@@ -31,6 +31,11 @@ import {
 import { useWeb3Auth } from "@web3auth/modal/react";
 import { resolveTransactionProvider } from "../../services/providerService";
 import { calculatePercentage, formatIntegerWithUnit } from "../../lib/utils";
+import { InsufficientBalanceDialog } from "../../components/shared/InsufficientBalanceDialog";
+import {
+  getInsufficientBalanceMessage,
+  isInsufficientBalanceError,
+} from "../../lib/insufficientBalance";
 
 export const EventDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -55,6 +60,8 @@ export const EventDetail: React.FC = () => {
   const [purchaseConfirmTier, setPurchaseConfirmTier] = useState<string | null>(
     null,
   );
+  const [insufficientBalanceMessage, setInsufficientBalanceMessage] =
+    useState("");
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
 
   useEffect(() => {
@@ -242,6 +249,9 @@ export const EventDetail: React.FC = () => {
       const refreshedEvent = await getEventById(eventId);
       setEvent(refreshedEvent);
     } catch (err) {
+      if (isInsufficientBalanceError(err)) {
+        setInsufficientBalanceMessage(getInsufficientBalanceMessage(err));
+      }
       setInvestError(err instanceof Error ? err.message : "Investment failed");
     } finally {
       setInvesting(false);
@@ -290,6 +300,9 @@ export const EventDetail: React.FC = () => {
       setEvent(refreshedEvent);
       await loadTicketData(event._id);
     } catch (err) {
+      if (isInsufficientBalanceError(err)) {
+        setInsufficientBalanceMessage(getInsufficientBalanceMessage(err));
+      }
       showBuyPopup(
         "error",
         err instanceof Error ? err.message : "Ticket purchase failed",
@@ -334,6 +347,12 @@ export const EventDetail: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-950 py-8">
+      <InsufficientBalanceDialog
+        open={!!insufficientBalanceMessage}
+        message={insufficientBalanceMessage}
+        onClose={() => setInsufficientBalanceMessage("")}
+      />
+
       {buyPopup && (
         <div className="fixed top-4 right-4 z-[60]">
           <div

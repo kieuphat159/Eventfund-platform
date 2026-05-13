@@ -6,6 +6,7 @@ import {
   X,
   Calendar,
   Ticket,
+  Zap,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { ethers } from "ethers";
@@ -23,7 +24,6 @@ import {
 } from "../../components/ui/select";
 import { Badge } from "../../components/ui/badge";
 import { listingService, ApiListing } from "../../services/listings.service";
-import Loading from "../../components/ui/loading";
 import { ImageWithFallback } from "../../components/figma/ImageWithFallback";
 import { logger } from "../../lib/logger";
 
@@ -67,7 +67,7 @@ export const Marketplace: React.FC = () => {
     };
 
     fetchListings();
-  }, [minPriceWei, maxPriceWei, sortBy]);
+  }, [appliedPriceRange, sortBy]);
 
   const clearFilters = () => {
     setSearchQuery("");
@@ -80,7 +80,7 @@ export const Marketplace: React.FC = () => {
 
   const activeFiltersCount = [
     searchQuery !== "",
-    minPriceWei.trim() !== "" || maxPriceWei.trim() !== "",
+    appliedPriceRange[0] !== 0.01 || appliedPriceRange[1] !== 10,
     selectedTicketType !== "all",
     selectedDate !== "all",
   ].filter(Boolean).length;
@@ -368,15 +368,8 @@ export const Marketplace: React.FC = () => {
                   </div>
 
                   <Button
-                    onClick={async (e) => {
+                    onClick={(e) => {
                       e.stopPropagation();
-                      if (buyLoading) return;
-                      setBuyMessage("Processing purchase...");
-                      setBuyLoading(true);
-                      const delay = fakeLoadingEnabled ? fakeLoadingMs : 600;
-                      await new Promise((r) => setTimeout(r, delay));
-                      setBuyLoading(false);
-                      setBuyMessage(undefined);
                       navigate(`/tickets/${listingId}`);
                     }}
                     className="w-full bg-gradient-to-r from-purple-600 to-blue-600 text-white hover:from-purple-700 hover:to-blue-700"

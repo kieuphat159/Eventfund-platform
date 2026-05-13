@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Ticket, QrCode, Download, Calendar, MapPin } from "lucide-react";
+import { Ticket, QrCode, Download, Calendar, MapPin, Trash2 } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -23,6 +23,11 @@ import {
 import { QRCodeCanvas } from "qrcode.react";
 import { formatEther } from "ethers";
 import { logger } from "../../lib/logger";
+import { InsufficientBalanceDialog } from "../../components/shared/InsufficientBalanceDialog";
+import {
+  getInsufficientBalanceMessage,
+  isInsufficientBalanceError,
+} from "../../lib/insufficientBalance";
 
 const ETH_ADDRESS_REGEX = /^0x[a-fA-F0-9]{40}$/;
 
@@ -57,6 +62,14 @@ const isPositiveWeiInteger = (value: string) => {
   return /^[0-9]+$/.test(trimmed) && BigInt(trimmed) > 0n;
 };
 
+const formatWei = (value: string | bigint | number) => {
+  try {
+    return BigInt(value || "0").toLocaleString();
+  } catch {
+    return "0";
+  }
+};
+
 export const MyTickets: React.FC = () => {
   const { user, connectWallet } = useAuth();
   const { web3Auth } = useWeb3Auth();
@@ -78,6 +91,9 @@ export const MyTickets: React.FC = () => {
   const [cancelTicket, setCancelTicket] = useState<ApiTicket | null>(null);
   const [cancelLoading, setCancelLoading] = useState(false);
   const [refundingTokenId, setRefundingTokenId] = useState<string | null>(null);
+  const [insufficientBalanceMessage, setInsufficientBalanceMessage] =
+    useState("");
+  const walletProvider = resolveTransactionProvider(web3Auth?.provider);
 
   useEffect(() => {
     if (!listingPopup) return;
@@ -256,6 +272,12 @@ export const MyTickets: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      <InsufficientBalanceDialog
+        open={!!insufficientBalanceMessage}
+        message={insufficientBalanceMessage}
+        onClose={() => setInsufficientBalanceMessage("")}
+      />
+
       {listingPopup && (
         <div className="fixed top-4 right-4 z-[60]">
           <div
@@ -495,7 +517,7 @@ export const MyTickets: React.FC = () => {
             </div>
 
             <p className="text-slate-400 text-xs mt-3">
-              Verifier sẽ quét mã này để xác thực vé
+              Verifier will scan this code to verify your ticket
             </p>
 
             <Button
@@ -614,6 +636,11 @@ export const MyTickets: React.FC = () => {
                     setListingPrice("");
                   } catch (err: any) {
                     const message = err?.message || "Failed to list ticket";
+                    if (isInsufficientBalanceError(err)) {
+                      setInsufficientBalanceMessage(
+                        getInsufficientBalanceMessage(err),
+                      );
+                    }
                     setListingError(message);
                     showListingPopup("error", `Listing failed: ${message}`);
                   } finally {
@@ -697,6 +724,11 @@ export const MyTickets: React.FC = () => {
                     setCancelTicket(null);
                   } catch (err: any) {
                     const message = err?.message || "Failed to cancel listing";
+                    if (isInsufficientBalanceError(err)) {
+                      setInsufficientBalanceMessage(
+                        getInsufficientBalanceMessage(err),
+                      );
+                    }
                     showListingPopup("error", `Cancel failed: ${message}`);
                   } finally {
                     setCancelLoading(false);

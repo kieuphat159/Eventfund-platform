@@ -34,6 +34,11 @@ import {
 } from "../../lib/utils";
 import { StatusBadge } from "../../components/StatusBadge";
 import { logger } from "../../lib/logger";
+import { InsufficientBalanceDialog } from "../../components/shared/InsufficientBalanceDialog";
+import {
+  getInsufficientBalanceMessage,
+  isInsufficientBalanceError,
+} from "../../lib/insufficientBalance";
 
 export const MyInvestments: React.FC = () => {
   const { user, connectWallet } = useAuth();
@@ -42,6 +47,8 @@ export const MyInvestments: React.FC = () => {
   const [investments, setInvestments] = useState<InvestmentDetailType[]>([]);
   const [loading, setLoading] = useState(true);
   const [refundingEventId, setRefundingEventId] = useState<string | null>(null);
+  const [insufficientBalanceMessage, setInsufficientBalanceMessage] =
+    useState("");
 
   useEffect(() => {
     const fetchInvestments = async () => {
@@ -96,6 +103,9 @@ export const MyInvestments: React.FC = () => {
       );
       await refreshInvestments();
     } catch (error) {
+      if (isInsufficientBalanceError(error)) {
+        setInsufficientBalanceMessage(getInsufficientBalanceMessage(error));
+      }
       console.error("Failed to claim contribution refund:", error);
     } finally {
       setRefundingEventId(null);
@@ -147,6 +157,12 @@ export const MyInvestments: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      <InsufficientBalanceDialog
+        open={!!insufficientBalanceMessage}
+        message={insufficientBalanceMessage}
+        onClose={() => setInsufficientBalanceMessage("")}
+      />
+
       <div>
         <h1 className="text-3xl font-semibold tracking-tight text-white mb-2">
           My Investments

@@ -34,6 +34,11 @@ import { resolveTransactionProvider } from "../../services/providerService";
 import { useAuth } from "../../contexts/AuthContext";
 import { useLoading } from "../../components/ui/loadingContext";
 import { useWeb3Auth } from "@web3auth/modal/react";
+import { InsufficientBalanceDialog } from "../../components/shared/InsufficientBalanceDialog";
+import {
+  getInsufficientBalanceMessage,
+  isInsufficientBalanceError,
+} from "../../lib/insufficientBalance";
 
 type TicketTierForm = {
   name: string;
@@ -88,6 +93,7 @@ export const EditEvent: React.FC = () => {
 
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [completing, setCompleting] = useState(false);
   const [eventData, setEventData] = useState<EventItem | null>(null);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -367,6 +373,9 @@ export const EditEvent: React.FC = () => {
       setEventData(updated);
       setStatus((updated.status as EventStatus) || "completed");
     } catch (err: any) {
+      if (isInsufficientBalanceError(err)) {
+        setInsufficientBalanceMessage(getInsufficientBalanceMessage(err));
+      }
       setError(
         err?.response?.data?.message ||
           err?.message ||
@@ -387,6 +396,12 @@ export const EditEvent: React.FC = () => {
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
+      <InsufficientBalanceDialog
+        open={!!insufficientBalanceMessage}
+        message={insufficientBalanceMessage}
+        onClose={() => setInsufficientBalanceMessage("")}
+      />
+
       <div ref={topAnchorRef} />
 
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
