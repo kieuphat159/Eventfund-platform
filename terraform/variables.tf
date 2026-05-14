@@ -181,3 +181,10 @@ variable "argocd_app_namespace" {
   description = "Kubernetes namespace to deploy app into"
   default     = "eventfund-dev"
 }
+
+# ─── EKS Access ──────────────────────────────────────────────────────────────
+variable "admin_user_arns" {
+  type        = list(string)
+  description = "List of IAM user ARNs to grant cluster admin access (for local development)"
+  default     = []
+}

@@ -67,7 +67,7 @@ module "eks" {
   cluster_log_types               = var.cluster_log_types
   authentication_mode             = var.authentication_mode
   bootstrap_admin_permissions     = var.bootstrap_admin_permissions
-  github_actions_role_arn         = module.github_actions_role.role_arn
+  admin_user_arns                 = var.admin_user_arns
   # implicit dependency: module.vpc qua vpc_id, private_subnet_ids, public_subnet_ids
 }
 
