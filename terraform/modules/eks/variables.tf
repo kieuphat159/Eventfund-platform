@@ -85,8 +85,8 @@ variable "bootstrap_admin_permissions" {
   default     = true
 }
 
-variable "github_actions_role_arn" {
-  type        = string
-  description = "ARN of GitHub Actions IAM role to grant EKS cluster access"
-  default     = ""
+variable "admin_user_arns" {
+  type        = list(string)
+  description = "List of IAM user ARNs to grant cluster admin access (for local development)"
+  default     = []
 }
