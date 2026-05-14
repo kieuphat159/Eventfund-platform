@@ -49,10 +49,10 @@ jobs:
             # Extract key từ path: /eventfund/dev/frontend/VITE_API_BASE_URL → VITE_API_BASE_URL
             KEY=$(echo "$name" | sed "s|^$SSM_PREFIX/||")
             echo "${KEY}=${value}" >> "$ENV_FILE"
-            echo "✅ Loaded: $KEY"
+            echo " Loaded: $KEY"
           done
 
-          echo "✅ Frontend env loaded"
+          echo " Frontend env loaded"
 
       - name: Set up Node.js
         uses: actions/setup-node@v4

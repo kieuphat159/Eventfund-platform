@@ -70,7 +70,7 @@ jobs:
 
           # Validate
           if [ -z "$TICKET_ADDRESS" ] || [ -z "$FUND_ADDRESS" ] || [ -z "$MARKETPLACE_ADDRESS" ]; then
-            echo "❌ Failed to extract contract addresses"
+            echo " Failed to extract contract addresses"
             exit 1
           fi
 
@@ -84,7 +84,7 @@ jobs:
             --type "SecureString" \
             --overwrite \
             --region ${{ steps.config.outputs.aws_region }}
-          echo "✅ Updated TICKET_ADDRESS"
+          echo " Updated TICKET_ADDRESS"
 
           aws ssm put-parameter \
             --name "/eventfund/dev/FUND_ADDRESS" \
@@ -92,7 +92,7 @@ jobs:
             --type "SecureString" \
             --overwrite \
             --region ${{ steps.config.outputs.aws_region }}
-          echo "✅ Updated FUND_ADDRESS"
+          echo " Updated FUND_ADDRESS"
 
           aws ssm put-parameter \
             --name "/eventfund/dev/MARKETPLACE_ADDRESS" \
@@ -100,7 +100,7 @@ jobs:
             --type "SecureString" \
             --overwrite \
             --region ${{ steps.config.outputs.aws_region }}
-          echo "✅ Updated MARKETPLACE_ADDRESS"
+          echo " Updated MARKETPLACE_ADDRESS"
 
           echo ""
-          echo "✅ All contract addresses updated in AWS Parameter Store"
+          echo " All contract addresses updated in AWS Parameter Store"

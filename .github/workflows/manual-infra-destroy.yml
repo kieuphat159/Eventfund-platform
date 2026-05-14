@@ -1,4 +1,4 @@
-name: Manual – Infrastructure Destroy (Cost Savings)
+name: Manual – Infrastructure Destroy
 
 on:
   workflow_dispatch:
@@ -129,8 +129,9 @@ jobs:
         working-directory: terraform
         run: terraform init
 
-      # Helm destroy tự trigger null_resource.cleanup_ingress_on_destroy
-      # → kubectl delete ingress → ALB Controller xóa ALB + SG → ENIs released
+      # Destroy Helm releases first to trigger cleanup of ALB/ENIs
+      # GitHub Actions role now has EKS access entry → can authenticate with cluster
+      # Helm destroy → kubectl delete ingress → ALB Controller cleanup ALB + SG → ENIs released
       - name: "[1/4] Destroy Helm releases"
         id: destroy_helm
         working-directory: terraform
