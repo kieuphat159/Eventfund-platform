@@ -84,3 +84,9 @@ variable "bootstrap_admin_permissions" {
   description = "Grant cluster creator admin permissions via access entry"
   default     = true
 }
+
+variable "github_actions_role_arn" {
+  type        = string
+  description = "ARN of GitHub Actions IAM role to grant EKS cluster access"
+  default     = ""
+}

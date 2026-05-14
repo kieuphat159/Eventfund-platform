@@ -83,7 +83,7 @@ jobs:
           echo "Updated image to: ${ECR_URL}:${{ inputs.image_tag }}"
 
           # Validate file không bị corrupt
-          kustomize build . > /dev/null || { echo "❌ kustomization.yaml is invalid after edit"; exit 1; }
+          kustomize build . > /dev/null || { echo " kustomization.yaml is invalid after edit"; exit 1; }
 
       - name: Commit and push
         run: |

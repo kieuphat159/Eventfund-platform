@@ -76,7 +76,7 @@ jobs:
 
           for i in {1..60}; do
             if curl -fsS "http://localhost:4000/health" | jq -e '.ok == true' >/dev/null 2>&1; then
-              echo "✅ Health check passed"
+              echo " Health check passed"
               docker stop backend-test
               exit 0
             fi
@@ -84,7 +84,7 @@ jobs:
             sleep 3
           done
 
-          echo "❌ Health check failed"
+          echo " Health check failed"
           docker logs --tail 100 backend-test
           docker stop backend-test
           exit 1
@@ -98,8 +98,8 @@ jobs:
           docker tag "${IMAGE}:${{ github.sha }}" "${IMAGE}:latest"
           docker push "${IMAGE}:${{ github.sha }}"
           docker push "${IMAGE}:latest"
-          echo "✅ Pushed: ${IMAGE}:${{ github.sha }}"
-          echo "✅ Pushed: ${IMAGE}:latest"
+          echo " Pushed: ${IMAGE}:${{ github.sha }}"
+          echo " Pushed: ${IMAGE}:latest"
 
       # Trivy scan — chạy trên image local, không cần pull từ ECR
       - name: Run Trivy security scan

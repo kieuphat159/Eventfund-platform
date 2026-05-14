@@ -111,11 +111,11 @@ runs:
         CONFIG_FILE="${{ github.action_path }}/../../config/env.yml"
 
         if [ ! -f "$CONFIG_FILE" ]; then
-          echo "❌ Config file not found: $CONFIG_FILE"
+          echo " Config file not found: $CONFIG_FILE"
           exit 1
         fi
 
-        echo "📋 Loading configuration from: $CONFIG_FILE"
+        echo " Loading configuration from: $CONFIG_FILE"
 
         # Project
         echo "project_name=$(yq '.project.name' $CONFIG_FILE)" >> $GITHUB_OUTPUT
@@ -193,4 +193,4 @@ runs:
         echo "k8s_contracts_artifacts_dir=$(yq '.k8s.contracts_artifacts_dir' $CONFIG_FILE)" >> $GITHUB_OUTPUT
         echo "k8s_web3auth_network=$(yq '.k8s.web3auth_network' $CONFIG_FILE)" >> $GITHUB_OUTPUT
 
-        echo "✅ Configuration loaded successfully"
+        echo " Configuration loaded successfully"

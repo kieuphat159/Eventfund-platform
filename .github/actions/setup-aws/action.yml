@@ -55,7 +55,7 @@ runs:
         echo "region=${REGION}" >> $GITHUB_OUTPUT
         echo "role_arn=${ROLE_ARN}" >> $GITHUB_OUTPUT
 
-        echo "📋 AWS Configuration:"
+        echo " AWS Configuration:"
         echo "  Region: ${REGION}"
         echo "  Role ARN: ${ROLE_ARN}"
 
@@ -68,5 +68,5 @@ runs:
     - name: Verify AWS identity
       shell: bash
       run: |
-        echo "✅ AWS credentials configured successfully"
+        echo " AWS credentials configured successfully"
         aws sts get-caller-identity

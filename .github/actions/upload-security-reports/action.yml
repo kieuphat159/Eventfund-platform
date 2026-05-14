@@ -33,7 +33,7 @@ runs:
       shell: bash
       run: |
         if [ ! -d "${{ inputs.reports_path }}" ]; then
-          echo "❌ Reports directory not found: ${{ inputs.reports_path }}"
+          echo " Reports directory not found: ${{ inputs.reports_path }}"
           exit 1
         fi
 
@@ -59,7 +59,7 @@ runs:
           if [ -f "$CONFIG_FILE" ]; then
             S3_BUCKET=$(yq '.s3.security_reports_bucket' "$CONFIG_FILE")
           else
-            echo "❌ S3 bucket not provided and config file not found"
+            echo " S3 bucket not provided and config file not found"
             exit 1
           fi
         fi
@@ -83,9 +83,9 @@ runs:
           --metadata "scan-id=${{ inputs.scan_id }},tool=${{ inputs.tool }},branch=${{ github.ref_name }},commit=${{ github.sha }}" \
           --no-progress
 
-        echo "✅ Uploaded to: ${S3_DEST}"
+        echo " Uploaded to: ${S3_DEST}"
         echo ""
-        echo "📋 S3 Contents:"
+        echo " S3 Contents:"
         aws s3 ls "${S3_DEST}" --recursive --human-readable
 
     - name: Generate summary

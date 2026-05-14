@@ -124,5 +124,5 @@ runs:
         }
         EOF
 
-        echo "✅ Created metadata.json"
+        echo " Created metadata.json"
         cat metadata.json | jq .

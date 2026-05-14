@@ -59,7 +59,7 @@ jobs:
         run: |
           chmod -R 777 reports/
           cp metadata.json reports/
-          echo "✅ Copied metadata.json to reports/"
+          echo " Copied metadata.json to reports/"
 
       # Configure AWS (if uploading to S3)
       - name: Configure AWS

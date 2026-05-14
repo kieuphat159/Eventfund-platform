@@ -76,13 +76,13 @@ jobs:
             head -n 1)
 
           if [ -z "$DIST_ID" ]; then
-            echo "❌ CloudFront distribution not found for bucket: ${BUCKET}"
+            echo " CloudFront distribution not found for bucket: ${BUCKET}"
             echo "Available distributions:"
             aws cloudfront list-distributions --query "DistributionList.Items[].{Id:Id, Origins:Origins.Items[*].DomainName}" --output json
             exit 1
           fi
 
-          echo "✅ Found distribution: $DIST_ID"
+          echo " Found distribution: $DIST_ID"
           aws cloudfront create-invalidation \
             --distribution-id "$DIST_ID" \
             --paths "/*"
