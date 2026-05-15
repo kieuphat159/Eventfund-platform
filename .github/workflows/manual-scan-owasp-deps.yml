@@ -1,0 +1,26 @@
+name: Manual – OWASP Dependency-Check (New)
+
+on:
+  workflow_dispatch:
+    inputs:
+      upload_to_s3:
+        description: 'Upload reports to S3'
+        type: boolean
+        default: true
+      path:
+        description: 'Path to scan (default: entire project)'
+        type: string
+        default: '.'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  owasp-scan:
+    uses: ./.github/workflows/reusable-scan-owasp-deps.yml
+    with:
+      upload_to_s3: ${{ inputs.upload_to_s3 }}
+      path: ${{ inputs.path }}
+    secrets:
+      AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}

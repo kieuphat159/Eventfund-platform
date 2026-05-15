@@ -1,0 +1,81 @@
+name: Reusable – OWASP Dependency-Check
+
+on:
+  workflow_call:
+    inputs:
+      upload_to_s3:
+        description: 'Upload reports to S3'
+        type: boolean
+        default: true
+      path:
+        description: 'Path to scan (default: entire project)'
+        type: string
+        default: '.'
+    secrets:
+      AWS_ACCOUNT_ID:
+        required: false
+
+jobs:
+  owasp-scan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for better analysis
+
+      # Load configuration
+      - name: Load config
+        id: config
+        uses: ./.github/actions/load-config
+
+      # Generate scan metadata
+      - name: Generate scan metadata
+        id: metadata
+        uses: ./.github/actions/generate-scan-metadata
+        with:
+          tool: owasp-dependency-check
+
+      # Run OWASP Dependency-Check
+      - name: Run OWASP Dependency-Check
+        uses: dependency-check/Dependency-Check_Action@main
+        with:
+          project: 'eventfund-platform'
+          path: ${{ inputs.path }}
+          format: 'HTML'
+          out: 'reports'
+          args: >
+            --format SARIF
+            --exclude "**/node_modules/**"
+            --exclude "**/dist/**"
+            --exclude "**/build/**"
+            --exclude "**/coverage/**"
+
+      # Copy metadata to reports folder
+      - name: Copy metadata to reports
+        if: always()
+        shell: bash
+        run: |
+          chmod -R 777 reports/
+          cp metadata.json reports/
+          echo " Copied metadata.json to reports/"
+
+      # Configure AWS (if uploading to S3)
+      - name: Configure AWS
+        if: always() && inputs.upload_to_s3
+        uses: ./.github/actions/setup-aws
+        with:
+          aws_account_id: ${{ secrets.AWS_ACCOUNT_ID }}
+
+      # Upload reports
+      - name: Upload reports
+        if: always()
+        uses: ./.github/actions/upload-security-reports
+        with:
+          scan_id: ${{ steps.metadata.outputs.scan_id }}
+          tool: owasp-dependency-check
+          reports_path: reports
+          s3_path: ${{ steps.metadata.outputs.s3_path }}
+          retention_days: 30
+          upload_to_s3: ${{ inputs.upload_to_s3 }}
