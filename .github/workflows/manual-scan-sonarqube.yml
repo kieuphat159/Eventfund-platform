@@ -1,7 +1,21 @@
-name: Manual – SonarQube Scan
+name: Manual – SonarQube Full Scan
 
 on:
   workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to scan'
+        required: false
+        default: 'master'
+        type: choice
+        options:
+          - master
+          - dev
+      enable_quality_gate:
+        description: 'Enable Quality Gate check (only for master)'
+        required: false
+        default: true
+        type: boolean
 
 permissions:
   contents: read
@@ -9,6 +23,9 @@ permissions:
 jobs:
   sonarqube-scan:
     uses: ./.github/workflows/reusable-scan-sonarqube.yml
+    with:
+      branch: ${{ inputs.branch }}
+      scan_mode: full  # Manual workflow always uses full scan
     secrets:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
       SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}

@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [dev, master, ci/cd]
+    branches: [dev, master]
     paths:
       - 'backend/**'
       - 'frontend/**'
@@ -117,6 +117,9 @@ jobs:
     permissions:
       contents: read
       actions: read
+    with:
+      branch: ${{ github.ref_name }}
+      scan_mode: pr  # CI always uses PR mode (changed files only)
     secrets:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
       SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
