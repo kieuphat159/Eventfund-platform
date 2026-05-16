@@ -514,6 +514,18 @@ export async function verifyTicket(
     : null;
 }
 
+export async function markTicketAsUsed(
+  tokenId: string,
+): Promise<ApiTicket | null> {
+  const response = await api.post<TicketDetailResponse>(
+    `/tickets/${encodeURIComponent(tokenId)}/use`,
+    {},
+    { headers: getAuthHeaders() },
+  );
+
+  return response.data ? normalizeTicket(response.data) : null;
+}
+
 export async function createPurchaseIntent(
   payload: PurchaseIntentPayload,
 ): Promise<PurchaseIntentData | null> {
@@ -751,6 +763,7 @@ export const ticketsService = {
   getTicketByTokenId,
   getTicketStats,
   verifyTicket,
+  markTicketAsUsed,
   createUseTicketIntent,
   confirmUseTicketTransaction,
   useTicketOnChain,

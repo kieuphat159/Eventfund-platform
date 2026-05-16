@@ -41,6 +41,7 @@ import { useLoading } from "../../components/ui/loadingContext";
 import {
   getTicketByTokenId,
   getTickets,
+  markTicketAsUsed,
   type ApiTicket,
   verifyTicket,
   useTicketOnChain,
@@ -274,18 +275,15 @@ export const VerifierDashboard: React.FC = () => {
                   )
                 : false,
             );
-        const onchainDocs = filteredDocs.filter((event) =>
-          Boolean(event.contractEventId),
-        );
-        setEvents(onchainDocs);
+        setEvents(filteredDocs);
 
-        if (!selectedEvent && onchainDocs.length > 0) {
-          setSelectedEvent(onchainDocs[0]._id);
+        if (!selectedEvent && filteredDocs.length > 0) {
+          setSelectedEvent(filteredDocs[0]._id);
         } else if (
           selectedEvent &&
-          !onchainDocs.some((event) => event._id === selectedEvent)
+          !filteredDocs.some((event) => event._id === selectedEvent)
         ) {
-          setSelectedEvent(onchainDocs[0]?._id || "");
+          setSelectedEvent(filteredDocs[0]?._id || "");
         }
       } catch (err) {
         const message =
@@ -495,34 +493,39 @@ export const VerifierDashboard: React.FC = () => {
           return;
         }
 
-        if (!selectedEventData?.contractEventId) {
-          throw new Error("Selected event is not available for on-chain check-in.");
-        }
-
         try {
-          const provider = resolveTransactionProvider(web3Auth?.provider);
-          if (!provider) {
-            throw new Error(
-              "Wallet provider is not ready. Please reconnect wallet and try again.",
+          if (selectedEventData?.contractEventId) {
+            const provider = resolveTransactionProvider(web3Auth?.provider);
+            if (!provider) {
+              throw new Error(
+                "Wallet provider is not ready. Please reconnect wallet and try again.",
+              );
+            }
+
+            const result = await useTicketOnChain(
+              provider as any,
+              normalizedTokenId,
+              user?.walletAddress,
             );
-          }
 
-          const result = await useTicketOnChain(
-            provider as any,
-            normalizedTokenId,
-            user?.walletAddress,
-          );
-
-          if (result?.confirmation?.synced || result?.confirmation?.alreadySynced) {
-            await loadSelectedEventData(selectedEvent);
+            if (result?.confirmation?.synced || result?.confirmation?.alreadySynced) {
+              await loadSelectedEventData(selectedEvent);
+            } else {
+              throw new Error(
+                "On-chain check-in transaction was sent but confirmation did not sync.",
+              );
+            }
           } else {
-            throw new Error(
-              "On-chain check-in transaction was sent but confirmation did not sync.",
-            );
+            const updatedTicket = await markTicketAsUsed(normalizedTokenId);
+            if (!updatedTicket) {
+              throw new Error("Off-chain check-in did not return updated ticket data.");
+            }
+
+            await loadSelectedEventData(selectedEvent);
           }
         } catch (err) {
           const message =
-            err instanceof Error ? err.message : "On-chain check-in failed";
+            err instanceof Error ? err.message : "Check-in failed";
           setActionError(message);
           setManualRecords((prev) => [
             createManualRecord(normalizedTokenId, "invalid", ticket.currentOwner),
@@ -706,7 +709,7 @@ export const VerifierDashboard: React.FC = () => {
               <CardHeader>
                 <CardTitle className="text-white">Ticket Scanner</CardTitle>
                 <CardDescription className="text-slate-400">
-                  Scan QR codes or enter ticket IDs manually
+                  Scan QR codes for assigned events and process check-in automatically
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -903,8 +906,8 @@ export const VerifierDashboard: React.FC = () => {
             </h3>
             <p className="mx-auto max-w-md text-slate-400">
               {events.length > 0
-                ? "Choose an on-chain event from the dropdown above to start managing check-ins and scanning tickets"
-                : "This account has no on-chain event assignment yet, so there is nothing to scan right now."}
+                ? "Choose an assigned event from the dropdown above to start managing check-ins and scanning tickets"
+                : "This account has no event assignment yet, so there is nothing to scan right now."}
             </p>
           </CardContent>
         </Card>

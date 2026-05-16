@@ -8,7 +8,7 @@ import {
   Ticket,
   Zap,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { ethers } from "ethers";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -27,17 +27,27 @@ import { listingService, ApiListing } from "../../services/listings.service";
 import { ImageWithFallback } from "../../components/figma/ImageWithFallback";
 import { logger } from "../../lib/logger";
 
+const formatWei = (value?: string | number | bigint) => {
+  try {
+    return BigInt(String(value ?? "0")).toLocaleString();
+  } catch {
+    return "0";
+  }
+};
+
 export const Marketplace: React.FC = () => {
   const [showFilters, setShowFilters] = React.useState(true);
   const [searchQuery, setSearchQuery] = React.useState("");
-  const [priceRange, setPriceRange] = React.useState([0.01, 10]);
-  const [appliedPriceRange, setAppliedPriceRange] = React.useState([0.01, 10]);
+  const [priceLimit, setPriceLimit] = React.useState([10]);
+  const [appliedPriceLimit, setAppliedPriceLimit] = React.useState(10);
   const [selectedTicketType, setSelectedTicketType] = React.useState("all");
   const [selectedDate, setSelectedDate] = React.useState("all");
   const [sortBy, setSortBy] = React.useState("newest");
   const [listings, setListings] = React.useState<ApiListing[]>([]);
   const [loading, setLoading] = React.useState(true);
-  const navigate = useNavigate();
+  const sliderMax = 10;
+  const selectedMaxPrice = priceLimit[0] ?? sliderMax;
+  const sliderProgress = (selectedMaxPrice / sliderMax) * 100;
 
   React.useEffect(() => {
     const fetchListings = async () => {
@@ -53,8 +63,7 @@ export const Marketplace: React.FC = () => {
         const res = await listingService.getAll({
           page: 1,
           limit: 20,
-          minPrice: ethers.parseEther(appliedPriceRange[0].toString()).toString(),
-          maxPrice: ethers.parseEther(appliedPriceRange[1].toString()).toString(),
+          maxPrice: ethers.parseEther(appliedPriceLimit.toString()).toString(),
           ...sortMap[sortBy],
         });
 
@@ -67,12 +76,12 @@ export const Marketplace: React.FC = () => {
     };
 
     fetchListings();
-  }, [appliedPriceRange, sortBy]);
+  }, [appliedPriceLimit, sortBy]);
 
   const clearFilters = () => {
     setSearchQuery("");
-    setPriceRange([0.01, 10]);
-    setAppliedPriceRange([0.01, 10]);
+    setPriceLimit([sliderMax]);
+    setAppliedPriceLimit(sliderMax);
     setSelectedTicketType("all");
     setSelectedDate("all");
     setSortBy("newest");
@@ -80,16 +89,10 @@ export const Marketplace: React.FC = () => {
 
   const activeFiltersCount = [
     searchQuery !== "",
-    appliedPriceRange[0] !== 0.01 || appliedPriceRange[1] !== 10,
+    appliedPriceLimit !== sliderMax,
     selectedTicketType !== "all",
     selectedDate !== "all",
   ].filter(Boolean).length;
-
-  if (loading) {
-    return (
-      <div className="p-10 text-center text-white">Loading marketplace...</div>
-    );
-  }
 
   const filteredListings = listings.filter((listing) => {
     const eventTitle = listing.eventId?.title?.toLowerCase() || "";
@@ -206,21 +209,31 @@ export const Marketplace: React.FC = () => {
                 <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
                   <div className="space-y-3 xl:col-span-2">
                     <Label className="font-medium text-slate-300">
-                      Price Range (ETH)
+                      Max Price (ETH)
                     </Label>
                     <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+                      <div className="relative px-2 pt-8">
+                        <div
+                          className="pointer-events-none absolute top-0 z-10 min-w-[88px] -translate-x-1/2 rounded-full border border-cyan-400/30 bg-slate-900 px-3 py-1.5 text-center text-sm font-semibold leading-none text-cyan-200 shadow-lg"
+                          style={{ left: `calc(${sliderProgress}% * 0.96 + 8px)` }}
+                        >
+                          {selectedMaxPrice.toFixed(2)} ETH
+                        </div>
+                      </div>
                       <Slider
-                        min={0.01}
-                        max={10}
+                        min={0}
+                        max={sliderMax}
                         step={0.01}
-                        value={priceRange}
-                        onValueChange={setPriceRange}
-                        onValueCommit={(value) => setAppliedPriceRange(value)}
+                        value={priceLimit}
+                        onValueChange={setPriceLimit}
+                        onValueCommit={(value) =>
+                          setAppliedPriceLimit(value[0] ?? sliderMax)
+                        }
                         className="w-full"
                       />
                       <div className="mt-4 flex items-center justify-between text-sm text-slate-400">
-                        <span>{priceRange[0].toFixed(2)} ETH</span>
-                        <span>{priceRange[1].toFixed(2)} ETH</span>
+                        <span>0.00 ETH</span>
+                        <span>{sliderMax.toFixed(2)} ETH</span>
                       </div>
                     </div>
                   </div>
@@ -278,9 +291,9 @@ export const Marketplace: React.FC = () => {
                           Search: {searchQuery}
                         </Badge>
                       )}
-                      {(priceRange[0] !== 0.01 || priceRange[1] !== 10) && (
+                      {appliedPriceLimit !== sliderMax && (
                         <Badge className="border-green-500/20 bg-green-600/10 text-green-400">
-                          {priceRange[0].toFixed(2)}-{priceRange[1].toFixed(2)} ETH
+                          Up to {appliedPriceLimit.toFixed(2)} ETH
                         </Badge>
                       )}
                       {selectedTicketType !== "all" && (
@@ -317,7 +330,31 @@ export const Marketplace: React.FC = () => {
         </div>
 
         <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-          {filteredListings.map((listing) => {
+          {loading
+            ? Array.from({ length: 6 }).map((_, index) => (
+                <div
+                  key={`marketplace-skeleton-${index}`}
+                  className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/90"
+                >
+                  <div className="aspect-video animate-pulse bg-slate-800" />
+                  <div className="space-y-4 p-5 sm:p-6">
+                    <div className="h-6 w-3/4 animate-pulse rounded bg-slate-800" />
+                    <div className="h-4 w-1/3 animate-pulse rounded bg-slate-800" />
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="w-1/2 space-y-2">
+                        <div className="h-3 w-16 animate-pulse rounded bg-slate-800" />
+                        <div className="h-4 w-full animate-pulse rounded bg-slate-800" />
+                      </div>
+                      <div className="w-24 space-y-2">
+                        <div className="ml-auto h-3 w-10 animate-pulse rounded bg-slate-800" />
+                        <div className="ml-auto h-6 w-20 animate-pulse rounded bg-slate-800" />
+                      </div>
+                    </div>
+                    <div className="h-10 w-full animate-pulse rounded bg-slate-800" />
+                  </div>
+                </div>
+              ))
+            : filteredListings.map((listing) => {
             const listingId = listing.id || listing._id;
             const eventTitle = listing.eventId?.title || "Untitled event";
             const eventImage =
@@ -327,9 +364,9 @@ export const Marketplace: React.FC = () => {
             const seller = listing.seller || "Unknown seller";
 
             return (
-              <div
+              <Link
                 key={listingId}
-                onClick={() => navigate(`/tickets/${listingId}`)}
+                to={`/tickets/${listingId}`}
                 className="cursor-pointer overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/90 transition-all hover:-translate-y-1 hover:border-purple-500/50 hover:shadow-lg hover:shadow-purple-500/10"
               >
                 <div className="relative aspect-video overflow-hidden">
@@ -368,22 +405,21 @@ export const Marketplace: React.FC = () => {
                   </div>
 
                   <Button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      navigate(`/tickets/${listingId}`);
-                    }}
+                    asChild
                     className="w-full bg-gradient-to-r from-purple-600 to-blue-600 text-white hover:from-purple-700 hover:to-blue-700"
                   >
-                    <ShoppingCart className="mr-2 h-4 w-4" />
-                    Buy Now
+                    <span>
+                      <ShoppingCart className="mr-2 h-4 w-4" />
+                      Buy Now
+                    </span>
                   </Button>
                 </div>
-              </div>
+              </Link>
             );
           })}
         </div>
 
-        {filteredListings.length === 0 && (
+        {!loading && filteredListings.length === 0 && (
           <div className="py-20 text-center">
             <ShoppingCart className="mx-auto mb-4 h-16 w-16 text-slate-700" />
             <h3 className="mb-2 text-xl font-semibold text-white">
