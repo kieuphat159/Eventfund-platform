@@ -20,6 +20,8 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Configure AWS
         uses: ./.github/actions/setup-aws
@@ -59,7 +61,7 @@ jobs:
 
           IMAGE_TAG="${{ steps.login-ecr.outputs.registry }}/${{ steps.config.outputs.ecr_backend_repository }}:${{ github.sha }}"
           ENVIRONMENT="${{ inputs.environment }}"
-
+          
           # Pull env vars từ SSM, ghi vào temp file để inject vào container
           # Dùng env-file thay vì -e flag để handle values có spaces/ký tự đặc biệt
           ENV_FILE=$(mktemp)
@@ -99,20 +101,35 @@ jobs:
 
       # Push lên ECR chỉ khi là push event (không phải PR)
       # Chạy sau khi smoke test pass
+      # Dùng docker/build-push-action để push multiple tags cùng lúc
       - name: Push image to ECR
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-        run: |
-          IMAGE="${{ steps.login-ecr.outputs.registry }}/${{ steps.config.outputs.ecr_backend_repository }}"
-          docker tag "${IMAGE}:${{ github.sha }}" "${IMAGE}:latest"
-          docker push "${IMAGE}:${{ github.sha }}"
-          docker push "${IMAGE}:latest"
-          echo " Pushed: ${IMAGE}:${{ github.sha }}"
-          echo " Pushed: ${IMAGE}:latest"
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          target: production
+          push: true
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/${{ steps.config.outputs.ecr_backend_repository }}:${{ github.sha }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ steps.config.outputs.ecr_backend_repository }}:latest
+          cache-from: type=gha
+
+      # Add Trivy DB cache for faster scans
+      - name: Cache Trivy DB
+        if: github.event_name == 'pull_request' || github.ref == 'refs/heads/dev'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/trivy
+          key: trivy-db-${{ github.run_id }}
+          restore-keys: |
+            trivy-db-
 
       # Trivy scan — chạy trên image local, không cần pull từ ECR
+      # Pin to commit hash for security and reproducibility
       - name: Run Trivy security scan
         if: github.event_name == 'pull_request' || github.ref == 'refs/heads/dev'
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
           image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ steps.config.outputs.ecr_backend_repository }}:${{ github.sha }}
           format: sarif
