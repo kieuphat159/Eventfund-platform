@@ -2,6 +2,11 @@ name: Reusable – Backend
 
 on:
   workflow_call:
+    inputs:
+      environment:
+        description: 'Environment (dev or prod)'
+        type: string
+        default: 'dev'
     secrets:
       AWS_ACCOUNT_ID:
         required: true
@@ -53,14 +58,17 @@ jobs:
           set -euo pipefail
 
           IMAGE_TAG="${{ steps.login-ecr.outputs.registry }}/${{ steps.config.outputs.ecr_backend_repository }}:${{ github.sha }}"
+          ENVIRONMENT="${{ inputs.environment }}"
 
           # Pull env vars từ SSM, ghi vào temp file để inject vào container
           # Dùng env-file thay vì -e flag để handle values có spaces/ký tự đặc biệt
           ENV_FILE=$(mktemp)
           trap "rm -f $ENV_FILE" EXIT  # đảm bảo xóa file dù exit thế nào
 
+          echo "📥 Pulling env vars from SSM: /eventfund/${ENVIRONMENT}/backend"
+
           aws ssm get-parameters-by-path \
-            --path "/eventfund/dev/backend" \
+            --path "/eventfund/${ENVIRONMENT}/backend" \
             --recursive \
             --with-decryption \
             --region ${{ steps.config.outputs.aws_region }} \
@@ -76,7 +84,7 @@ jobs:
 
           for i in {1..60}; do
             if curl -fsS "http://localhost:4000/health" | jq -e '.ok == true' >/dev/null 2>&1; then
-              echo " Health check passed"
+              echo "✅ Health check passed"
               docker stop backend-test
               exit 0
             fi
@@ -84,7 +92,7 @@ jobs:
             sleep 3
           done
 
-          echo " Health check failed"
+          echo "❌ Health check failed"
           docker logs --tail 100 backend-test
           docker stop backend-test
           exit 1

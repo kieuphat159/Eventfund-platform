@@ -1,0 +1,59 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: eventfund-dev
+
+resources:
+  - ../../base
+
+patches:
+  # Patch ConfigMap to set NODE_ENV=DEV
+  - target:
+      kind: ConfigMap
+      name: eventfund-backend-config
+    patch: |-
+      - op: replace
+        path: /data/NODE_ENV
+        value: "DEV"
+
+  # Patch ExternalSecret to use /eventfund/dev/backend path
+  - target:
+      kind: ExternalSecret
+      name: eventfund-backend-secret
+    patch: |-
+      - op: replace
+        path: /spec/dataFrom/0/find/path
+        value: /eventfund/dev/backend
+      - op: replace
+        path: /spec/dataFrom/0/rewrite/0/regexp/source
+        value: "/eventfund/dev/backend/(.*)"
+
+  # Patch API deployment for dev-specific settings
+  - target:
+      kind: Deployment
+      name: api
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 2
+
+  # Patch HPA for dev-specific settings
+  - target:
+      kind: HorizontalPodAutoscaler
+      name: api-hpa
+    patch: |-
+      - op: replace
+        path: /spec/minReplicas
+        value: 2
+      - op: replace
+        path: /spec/maxReplicas
+        value: 4
+
+  # Patch Ingress annotations for dev
+  - target:
+      kind: Ingress
+      name: api-ingress
+    patch: |-
+      - op: add
+        path: /metadata/annotations/alb.ingress.kubernetes.io~1tags
+        value: "Environment=dev,ManagedBy=kustomize"

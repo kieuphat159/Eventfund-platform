@@ -71,6 +71,15 @@ jobs:
       - name: Update image tag in kustomization.yaml
         run: |
           ECR_URL="${{ steps.config.outputs.ecr_backend_repository_url }}"
+          ENVIRONMENT="${{ inputs.environment }}"
+          
+          # Determine overlay path based on environment
+          if [ "$ENVIRONMENT" = "prod" ]; then
+            OVERLAY_PATH="k8s/overlays/prod"
+          else
+            OVERLAY_PATH="k8s/overlays/dev"
+          fi
+          
           cd k8s/base
 
           # Dùng sed thay vì kustomize edit để tránh làm hỏng cấu trúc YAML khi có comments
@@ -81,9 +90,11 @@ jobs:
           sed -i "/name: eventfund-backend/,/newName:/ s|newName:.*|newName: ${ECR_URL}|" kustomization.yaml
 
           echo "Updated image to: ${ECR_URL}:${{ inputs.image_tag }}"
+          echo "Deploying to environment: $ENVIRONMENT via $OVERLAY_PATH"
 
           # Validate file không bị corrupt
-          kustomize build . > /dev/null || { echo " kustomization.yaml is invalid after edit"; exit 1; }
+          cd ../..
+          kustomize build $OVERLAY_PATH > /dev/null || { echo "kustomization.yaml is invalid after edit"; exit 1; }
 
       - name: Commit and push
         run: |

@@ -213,17 +213,14 @@ resource "null_resource" "cleanup_ingress_on_destroy" {
   depends_on = [helm_release.alb_controller]
 }
 
-# ─── ArgoCD Application ───────────────────────────────────────────────────────
-# Dùng null_resource + kubectl thay vì kubernetes_manifest
-# Lý do: kubernetes_manifest yêu cầu cluster alive khi destroy
-# → fail với "no client config" nếu cluster đã bị xóa trước
-resource "null_resource" "argocd_app" {
+# ─── ArgoCD Applications (Dev & Prod) ─────────────────────────────────────────
+# Deploy both dev and prod ArgoCD applications
+# Dev uses 'dev' branch, Prod uses 'master' branch
+resource "null_resource" "argocd_app_dev" {
   triggers = {
     cluster_name    = var.cluster_name
     region          = var.region
     repo_url        = var.argocd_repo_url
-    target_revision = var.argocd_target_revision
-    app_namespace   = var.argocd_app_namespace
   }
 
   provisioner "local-exec" {
@@ -236,15 +233,17 @@ kind: Application
 metadata:
   name: eventfund-dev
   namespace: argocd
+  labels:
+    environment: dev
 spec:
   project: default
   source:
     repoURL: ${var.argocd_repo_url}
-    targetRevision: ${var.argocd_target_revision}
-    path: k8s/base
+    targetRevision: dev
+    path: k8s/overlays/dev
   destination:
     server: https://kubernetes.default.svc
-    namespace: ${var.argocd_app_namespace}
+    namespace: eventfund-dev
   syncPolicy:
     automated:
       prune: true
@@ -261,6 +260,56 @@ MANIFEST
     command    = <<-EOT
       aws eks update-kubeconfig --region ${self.triggers.region} --name ${self.triggers.cluster_name} 2>/dev/null || exit 0
       kubectl delete application eventfund-dev -n argocd --ignore-not-found=true 2>/dev/null || true
+    EOT
+  }
+
+  depends_on = [helm_release.argocd, helm_release.eso]
+}
+
+resource "null_resource" "argocd_app_prod" {
+  triggers = {
+    cluster_name    = var.cluster_name
+    region          = var.region
+    repo_url        = var.argocd_repo_url
+  }
+
+  provisioner "local-exec" {
+    on_failure = continue
+    command    = <<-EOT
+      aws eks update-kubeconfig --region ${var.region} --name ${var.cluster_name}
+      kubectl apply -f - <<'MANIFEST'
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: eventfund-prod
+  namespace: argocd
+  labels:
+    environment: prod
+spec:
+  project: default
+  source:
+    repoURL: ${var.argocd_repo_url}
+    targetRevision: master
+    path: k8s/overlays/prod
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: eventfund-prod
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+MANIFEST
+    EOT
+  }
+
+  provisioner "local-exec" {
+    when       = destroy
+    on_failure = continue
+    command    = <<-EOT
+      aws eks update-kubeconfig --region ${self.triggers.region} --name ${self.triggers.cluster_name} 2>/dev/null || exit 0
+      kubectl delete application eventfund-prod -n argocd --ignore-not-found=true 2>/dev/null || true
     EOT
   }
 

@@ -34,61 +34,33 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ steps.config.outputs.terraform_version }}
+          terraform_wrapper: false
 
-      - name: Debug TF vars
+      - name: Cache Terraform plugins
+        uses: actions/cache@v4
+        with:
+          path: ~/.terraform.d/plugin-cache
+          key: ${{ runner.os }}-terraform-${{ hashFiles('**/.terraform.lock.hcl') }}
+          restore-keys: |
+            ${{ runner.os }}-terraform-
+
+      # ─── Step 1: Apply Cluster State ─────────────────────────────────────────
+      - name: "[1/2] Apply Cluster State (EKS, Node Group, NAT)"
+        id: apply_cluster
+        working-directory: terraform/cluster
         run: |
-          echo "azs='$TF_VAR_azs'"
-          echo "public='$TF_VAR_public_subnets_cidr'"
-          echo "private='$TF_VAR_private_subnets_cidr'"
-        env:
-          TF_VAR_azs: ${{ steps.config.outputs.tf_azs }}
-          TF_VAR_public_subnets_cidr: ${{ steps.config.outputs.tf_public_subnets_cidr }}
-          TF_VAR_private_subnets_cidr: ${{ steps.config.outputs.tf_private_subnets_cidr }}
+          terraform init
+          terraform plan -out=tfplan
+          terraform apply tfplan
 
-      - name: Generate terraform.auto.tfvars.json
-        working-directory: terraform
+      # ─── Step 2: Apply Services State ────────────────────────────────────────
+      - name: "[2/2] Apply Services State (Helm releases)"
+        id: apply_services
+        working-directory: terraform/services
         run: |
-          cat > terraform.auto.tfvars.json <<EOF
-          {
-            "region": "${{ steps.config.outputs.aws_region }}",
-            "project_name": "${{ steps.config.outputs.project_name }}",
-            "environment": "${{ steps.config.outputs.environment }}",
-            "vpc_cidr": "${{ steps.config.outputs.tf_vpc_cidr }}",
-            "public_subnets_cidr": ${{ steps.config.outputs.tf_public_subnets_cidr }},
-            "private_subnets_cidr": ${{ steps.config.outputs.tf_private_subnets_cidr }},
-            "azs": ${{ steps.config.outputs.tf_azs }},
-            "eks_version": "${{ steps.config.outputs.tf_eks_version }}",
-            "node_group_instance_types": ["${{ steps.config.outputs.tf_node_instance_type }}"],
-            "node_desired_capacity": ${{ steps.config.outputs.tf_node_desired_capacity }},
-            "node_min_capacity": ${{ steps.config.outputs.tf_node_min_capacity }},
-            "node_max_capacity": ${{ steps.config.outputs.tf_node_max_capacity }},
-            "node_capacity_type": "SPOT",
-            "ecr_backend_repo": "${{ steps.config.outputs.ecr_backend_repository }}",
-            "ssm_prefix": "/${{ steps.config.outputs.project_name }}/${{ steps.config.outputs.environment }}/backend",
-            "github_actions_role_name": "${{ steps.config.outputs.github_actions_role_name }}",
-            "github_repos": ["repo:${{ github.repository }}:*"],
-            "security_reports_bucket": "${{ steps.config.outputs.s3_security_reports_bucket }}",
-            "security_reports_retention_days": ${{ steps.config.outputs.security_reports_retention_days }},
-            "argocd_repo_url": "${{ steps.config.outputs.argocd_repo_url }}",
-            "argocd_target_revision": "${{ steps.config.outputs.argocd_target_revision }}",
-            "argocd_app_namespace": "${{ steps.config.outputs.argocd_app_namespace }}"
-          }
-          EOF
-          
-          echo " Generated terraform.auto.tfvars.json:"
-          cat terraform.auto.tfvars.json
-
-      - name: Terraform Init
-        working-directory: terraform
-        run: terraform init
-
-      - name: Terraform Plan
-        working-directory: terraform
-        run: terraform plan -out=tfplan
-
-      - name: Terraform Apply
-        working-directory: terraform
-        run: terraform apply tfplan
+          terraform init
+          terraform plan -out=tfplan
+          terraform apply tfplan
 
       - name: Setup kubectl
         run: |
@@ -99,24 +71,10 @@ jobs:
       - name: Wait for ArgoCD to be ready
         run: |
           echo "Waiting for ArgoCD to be ready..."
-          
-          for i in $(seq 1 60); do
-            # Check if ArgoCD server pod is running
-            ARGOCD_READY=$(kubectl get pods -n argocd -l app.kubernetes.io/name=argocd-server \
-              -o jsonpath='{.items[0].status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "")
-            
-            if [ "$ARGOCD_READY" = "True" ]; then
-              echo "✅ ArgoCD is ready"
-              break
-            fi
-            
-            echo "Waiting for ArgoCD... ($i/60)"
-            sleep 10
-          done
-          
-          if [ "$ARGOCD_READY" != "True" ]; then
-            echo "⚠️ ArgoCD not ready after 10 minutes, but continuing..."
-          fi
+          kubectl wait --for=condition=Ready pod \
+            -l app.kubernetes.io/name=argocd-server \
+            -n argocd \
+            --timeout=600s 2>/dev/null || echo "⚠️ ArgoCD not ready after 10 minutes, but continuing..."
 
       # Chờ ArgoCD sync Ingress → ALB Controller tạo ALB → lấy DNS → update CloudFront origin
       - name: Update CloudFront origin with ALB DNS
@@ -163,12 +121,12 @@ jobs:
             echo ""
             echo "You can manually update CloudFront later with:"
             echo "  kubectl get ingress -A"
-            echo "  ALB_DNS=\$(kubectl get ingress -n eventfund-dev api-ingress -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')"
+            echo "  ALB_DNS=\$(kubectl get ingress -n eventfund-dev api-ingress -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || kubectl get ingress -n eventfund-prod api-ingress -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')"
             echo "  aws cloudfront update-distribution --id <CF_ID> ..."
             exit 0
           fi
 
-          CF_ID=$(terraform -chdir=terraform output -raw cloudfront_distribution_id)
+          CF_ID=$(terraform -chdir=terraform/persistent output -raw cloudfront_distribution_id)
           ETAG=$(aws cloudfront get-distribution-config --id "$CF_ID" --query 'ETag' --output text)
 
           # Lấy config hiện tại và thêm ALB origin
@@ -176,64 +134,70 @@ jobs:
             --query 'DistributionConfig' --output json > /tmp/cf-config.json
 
           # Thêm ALB origin nếu chưa có
-          python3 - <<EOF
-          import json, sys
+          python3 - <<'PYTHON_EOF'
+          import json
+          import sys
 
-          with open('/tmp/cf-config.json') as f:
-              config = json.load(f)
+          try:
+              with open('/tmp/cf-config.json') as f:
+                  config = json.load(f)
 
-          alb_dns = "$ALB_DNS"
-          origin_id = "alb-internal"
+              alb_dns = "$ALB_DNS"
+              origin_id = "alb-internal"
 
-          # Kiểm tra origin đã tồn tại chưa
-          existing = [o for o in config['Origins']['Items'] if o['Id'] == origin_id]
-          if not existing:
-              config['Origins']['Items'].append({
-                  "Id": origin_id,
-                  "DomainName": alb_dns,
-                  "CustomOriginConfig": {
-                      "HTTPPort": 80,
-                      "HTTPSPort": 443,
-                      "OriginProtocolPolicy": "http-only",
-                      "OriginSslProtocols": {"Quantity": 1, "Items": ["TLSv1.2"]},
-                      "OriginReadTimeout": 30,
-                      "OriginKeepaliveTimeout": 5
-                  },
-                  "ConnectionAttempts": 3,
-                  "ConnectionTimeout": 10
-              })
-              config['Origins']['Quantity'] = len(config['Origins']['Items'])
-          else:
-              # Update DNS nếu ALB đã thay đổi
-              for o in config['Origins']['Items']:
-                  if o['Id'] == origin_id:
-                      o['DomainName'] = alb_dns
-
-          # Thêm cache behaviors cho /argocd/*, /grafana/*, và /api/*
-          behaviors = config.get('CacheBehaviors', {}).get('Items', [])
-          for path, origin in [('/argocd/*', origin_id), ('/grafana/*', origin_id), ('/api/*', origin_id)]:
-              if not any(b['PathPattern'] == path for b in behaviors):
-                  behaviors.append({
-                      "PathPattern": path,
-                      "TargetOriginId": origin_id,
-                      "ViewerProtocolPolicy": "redirect-to-https",
-                      "AllowedMethods": {"Quantity": 7, "Items": ["GET","HEAD","OPTIONS","PUT","POST","PATCH","DELETE"], "CachedMethods": {"Quantity": 2, "Items": ["GET","HEAD"]}},
-                      "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",  # CachingDisabled
-                      "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",  # AllViewer
-                      "Compress": True
+              # Kiểm tra origin đã tồn tại chưa
+              existing = [o for o in config['Origins']['Items'] if o['Id'] == origin_id]
+              if not existing:
+                  config['Origins']['Items'].append({
+                      "Id": origin_id,
+                      "DomainName": alb_dns,
+                      "CustomOriginConfig": {
+                          "HTTPPort": 80,
+                          "HTTPSPort": 443,
+                          "OriginProtocolPolicy": "http-only",
+                          "OriginSslProtocols": {"Quantity": 1, "Items": ["TLSv1.2"]},
+                          "OriginReadTimeout": 30,
+                          "OriginKeepaliveTimeout": 5
+                      },
+                      "ConnectionAttempts": 3,
+                      "ConnectionTimeout": 10
                   })
-          config['CacheBehaviors'] = {'Quantity': len(behaviors), 'Items': behaviors}
+                  config['Origins']['Quantity'] = len(config['Origins']['Items'])
+              else:
+                  # Update DNS nếu ALB đã thay đổi
+                  for o in config['Origins']['Items']:
+                      if o['Id'] == origin_id:
+                          o['DomainName'] = alb_dns
 
-          with open('/tmp/cf-config-updated.json', 'w') as f:
-              json.dump(config, f)
-          print(" CloudFront config updated")
-          EOF
+              # Thêm cache behaviors cho /argocd/*, /grafana/*, và /api/*
+              behaviors = config.get('CacheBehaviors', {}).get('Items', [])
+              for path, origin in [('/argocd/*', origin_id), ('/grafana/*', origin_id), ('/api/*', origin_id)]:
+                  if not any(b['PathPattern'] == path for b in behaviors):
+                      behaviors.append({
+                          "PathPattern": path,
+                          "TargetOriginId": origin_id,
+                          "ViewerProtocolPolicy": "redirect-to-https",
+                          "AllowedMethods": {"Quantity": 7, "Items": ["GET","HEAD","OPTIONS","PUT","POST","PATCH","DELETE"], "CachedMethods": {"Quantity": 2, "Items": ["GET","HEAD"]}},
+                          "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",  # CachingDisabled
+                          "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",  # AllViewer
+                          "Compress": True
+                      })
+              config['CacheBehaviors'] = {'Quantity': len(behaviors), 'Items': behaviors}
+
+              with open('/tmp/cf-config-updated.json', 'w') as f:
+                  json.dump(config, f)
+              print("✅ CloudFront config updated")
+
+          except Exception as e:
+              print(f"❌ Error: {e}", file=sys.stderr)
+              sys.exit(1)
+          PYTHON_EOF
 
           aws cloudfront update-distribution \
             --id "$CF_ID" \
             --distribution-config file:///tmp/cf-config-updated.json \
             --if-match "$ETAG"
-          echo " CloudFront updated with ALB origin: $ALB_DNS"
+          echo "✅ CloudFront updated with ALB origin: $ALB_DNS"
 
       - name: Render alertmanager config with secrets
         env:
@@ -241,12 +205,9 @@ jobs:
           ALERT_EMAIL_PASSWORD: ${{ secrets.ALERT_EMAIL_PASSWORD }}
         run: |
           if [ -n "$ALERT_EMAIL" ] && [ -n "$ALERT_EMAIL_PASSWORD" ]; then
-            aws eks update-kubeconfig \
-              --region ${{ steps.config.outputs.aws_region }} \
-              --name ${{ steps.config.outputs.project_name }}
             export ALERT_EMAIL ALERT_EMAIL_PASSWORD
             envsubst < k8s/base/monitoring/alertmanager-config.yaml | kubectl apply -f -
-            echo " Alertmanager config applied"
+            echo "✅ Alertmanager config applied"
           else
             echo "⚠️ ALERT_EMAIL or ALERT_EMAIL_PASSWORD not set, skipping alertmanager config"
           fi

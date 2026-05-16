@@ -1,11 +1,16 @@
-output "cluster_name" {
-  description = "EKS cluster name"
-  value       = module.eks.cluster_name
+output "vpc_id" {
+  description = "VPC ID for cluster state"
+  value       = module.vpc.vpc_id
 }
 
-output "cluster_endpoint" {
-  description = "EKS cluster endpoint"
-  value       = module.eks.cluster_endpoint
+output "public_subnet_ids" {
+  description = "Public subnet IDs for cluster state"
+  value       = module.vpc.public_subnet_ids
+}
+
+output "private_subnet_ids" {
+  description = "Private subnet IDs for cluster state"
+  value       = module.vpc.private_subnet_ids
 }
 
 output "ecr_backend_url" {
@@ -26,16 +31,6 @@ output "frontend_url" {
 output "cloudfront_distribution_id" {
   description = "CloudFront distribution ID để invalidate cache"
   value       = module.frontend.cloudfront_distribution_id
-}
-
-output "configure_kubectl" {
-  description = "Command to configure kubectl"
-  value       = "aws eks update-kubeconfig --region ${var.region} --name ${module.eks.cluster_name}"
-}
-
-output "eso_role_arn" {
-  description = "IAM role ARN for External Secrets Operator"
-  value       = module.iam.eso_role_arn
 }
 
 output "github_actions_role_arn" {

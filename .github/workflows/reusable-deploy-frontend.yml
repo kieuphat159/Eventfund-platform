@@ -2,6 +2,11 @@ name: Reusable – Deploy Frontend
 
 on:
   workflow_call:
+    inputs:
+      environment:
+        description: 'Environment (dev or prod)'
+        type: string
+        default: 'dev'
     secrets:
       AWS_ACCOUNT_ID:
         required: true
@@ -27,8 +32,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          SSM_PREFIX="/eventfund/${{ steps.config.outputs.environment }}/frontend"
+          ENVIRONMENT="${{ inputs.environment }}"
+          SSM_PREFIX="/eventfund/${ENVIRONMENT}/frontend"
           ENV_FILE="frontend/.env"
+          
+          echo "📥 Pulling frontend env from: $SSM_PREFIX"
+          
           aws ssm get-parameters-by-path \
             --path "$SSM_PREFIX" \
             --recursive \
@@ -42,6 +51,8 @@ jobs:
             echo "${KEY}=${value}" >> "$ENV_FILE"
           done < /tmp/ssm.tsv
           rm -f /tmp/ssm.json /tmp/ssm.tsv
+          
+          echo "✅ Frontend env loaded"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -60,9 +71,22 @@ jobs:
 
       - name: Upload to S3
         run: |
-          aws s3 sync frontend/dist/ s3://${{ steps.config.outputs.frontend_s3_bucket }} \
+          ENVIRONMENT="${{ inputs.environment }}"
+          
+          # Determine S3 bucket based on environment
+          if [ "$ENVIRONMENT" = "prod" ]; then
+            S3_BUCKET="eventfund-frontend-prod"
+          else
+            S3_BUCKET="eventfund-frontend-dev"
+          fi
+          
+          echo "📤 Uploading to S3 bucket: $S3_BUCKET (environment: $ENVIRONMENT)"
+          
+          aws s3 sync frontend/dist/ s3://${S3_BUCKET} \
             --delete \
             --region ${{ steps.config.outputs.aws_region }}
+          
+          echo "✅ Uploaded to s3://${S3_BUCKET}"
 
       - name: Invalidate CloudFront cache
         run: |

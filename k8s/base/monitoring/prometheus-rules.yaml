@@ -32,40 +32,40 @@ spec:
       interval: 30s
       rules:
         - alert: PodCrashLooping
-          expr: rate(kube_pod_container_status_restarts_total{namespace="eventfund-dev"}[5m]) * 300 > 3
+          expr: rate(kube_pod_container_status_restarts_total{namespace=~"eventfund-.*"}[5m]) * 300 > 3
           for: 5m
           labels:
             severity: critical
           annotations:
-            summary: "Pod {{ $labels.pod }} is crash looping"
+            summary: "Pod {{ $labels.pod }} in {{ $labels.namespace }} is crash looping"
             description: "Pod restarted {{ $value | humanize }} times in 5 minutes"
 
         - alert: PodNotReady
-          expr: kube_pod_status_phase{namespace="eventfund-dev", phase!~"Running|Succeeded"} > 0
+          expr: kube_pod_status_phase{namespace=~"eventfund-.*", phase!~"Running|Succeeded"} > 0
           for: 5m
           labels:
             severity: critical
           annotations:
-            summary: "Pod {{ $labels.pod }} not ready"
+            summary: "Pod {{ $labels.pod }} in {{ $labels.namespace }} not ready"
             description: "Pod has been in {{ $labels.phase }} for > 5 minutes"
 
     - name: eventfund-app-alerts
       interval: 30s
       rules:
         - alert: APIDown
-          expr: kube_deployment_status_replicas_available{namespace="eventfund-dev", deployment="api"} == 0
+          expr: kube_deployment_status_replicas_available{namespace=~"eventfund-.*", deployment="api"} == 0
           for: 2m
           labels:
             severity: critical
           annotations:
-            summary: "EventFund API is down"
+            summary: "EventFund API is down in {{ $labels.namespace }}"
             description: "No replicas available for api deployment"
 
         - alert: BlockchainIndexerDown
-          expr: kube_deployment_status_replicas_available{namespace="eventfund-dev", deployment=~"indexer-.*"} == 0
+          expr: kube_deployment_status_replicas_available{namespace=~"eventfund-.*", deployment=~"indexer-.*"} == 0
           for: 5m
           labels:
             severity: warning
           annotations:
-            summary: "Blockchain indexer {{ $labels.deployment }} is down"
+            summary: "Blockchain indexer {{ $labels.deployment }} is down in {{ $labels.namespace }}"
             description: "No replicas available for {{ $labels.deployment }}"

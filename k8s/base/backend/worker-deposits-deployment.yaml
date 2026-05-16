@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: worker-deposits
-  namespace: eventfund-dev
+
   labels:
     app: worker-deposits
     component: worker

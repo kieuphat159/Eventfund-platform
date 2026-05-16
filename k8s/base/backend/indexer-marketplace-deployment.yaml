@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: indexer-marketplace
-  namespace: eventfund-dev
+
   labels:
     app: indexer-marketplace
     component: blockchain

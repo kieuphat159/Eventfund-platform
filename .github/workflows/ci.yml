@@ -42,6 +42,8 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    with:
+      environment: ${{ github.ref_name == 'master' && 'prod' || 'dev' }}
     secrets:
       AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
 
@@ -56,6 +58,8 @@ jobs:
       contents: read
       id-token: write
       security-events: write
+    with:
+      environment: ${{ github.ref_name == 'master' && 'prod' || 'dev' }}
     secrets:
       AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
       RPC_URL: ${{ secrets.RPC_URL }}
