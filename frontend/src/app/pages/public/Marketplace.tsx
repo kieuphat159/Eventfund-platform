@@ -9,11 +9,9 @@ import {
   Zap,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { ethers } from "ethers";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
-import { Slider } from "../../components/ui/slider";
 import { Card, CardContent } from "../../components/ui/card";
 import {
   Select,
@@ -27,11 +25,26 @@ import { listingService, ApiListing } from "../../services/listings.service";
 import { ImageWithFallback } from "../../components/figma/ImageWithFallback";
 import { logger } from "../../lib/logger";
 
+const isPositiveWeiInteger = (value: string) => {
+  const trimmed = value.trim();
+  return /^[0-9]+$/.test(trimmed) && BigInt(trimmed) > 0n;
+};
+
+const formatWei = (value: string | number | bigint) => {
+  try {
+    return BigInt(String(value)).toLocaleString("en-US");
+  } catch {
+    return "0";
+  }
+};
+
 export const Marketplace: React.FC = () => {
   const [showFilters, setShowFilters] = React.useState(true);
   const [searchQuery, setSearchQuery] = React.useState("");
-  const [priceRange, setPriceRange] = React.useState([0.01, 10]);
-  const [appliedPriceRange, setAppliedPriceRange] = React.useState([0.01, 10]);
+  const [minPriceWei, setMinPriceWei] = React.useState("");
+  const [maxPriceWei, setMaxPriceWei] = React.useState("");
+  const [appliedMinPriceWei, setAppliedMinPriceWei] = React.useState("");
+  const [appliedMaxPriceWei, setAppliedMaxPriceWei] = React.useState("");
   const [selectedTicketType, setSelectedTicketType] = React.useState("all");
   const [selectedDate, setSelectedDate] = React.useState("all");
   const [sortBy, setSortBy] = React.useState("newest");
@@ -53,8 +66,8 @@ export const Marketplace: React.FC = () => {
         const res = await listingService.getAll({
           page: 1,
           limit: 20,
-          minPrice: ethers.parseEther(appliedPriceRange[0].toString()).toString(),
-          maxPrice: ethers.parseEther(appliedPriceRange[1].toString()).toString(),
+          minPrice: appliedMinPriceWei || undefined,
+          maxPrice: appliedMaxPriceWei || undefined,
           ...sortMap[sortBy],
         });
 
@@ -67,12 +80,14 @@ export const Marketplace: React.FC = () => {
     };
 
     fetchListings();
-  }, [appliedPriceRange, sortBy]);
+  }, [appliedMinPriceWei, appliedMaxPriceWei, sortBy]);
 
   const clearFilters = () => {
     setSearchQuery("");
-    setPriceRange([0.01, 10]);
-    setAppliedPriceRange([0.01, 10]);
+    setMinPriceWei("");
+    setMaxPriceWei("");
+    setAppliedMinPriceWei("");
+    setAppliedMaxPriceWei("");
     setSelectedTicketType("all");
     setSelectedDate("all");
     setSortBy("newest");
@@ -80,7 +95,7 @@ export const Marketplace: React.FC = () => {
 
   const activeFiltersCount = [
     searchQuery !== "",
-    appliedPriceRange[0] !== 0.01 || appliedPriceRange[1] !== 10,
+    appliedMinPriceWei !== "" || appliedMaxPriceWei !== "",
     selectedTicketType !== "all",
     selectedDate !== "all",
   ].filter(Boolean).length;
@@ -206,21 +221,58 @@ export const Marketplace: React.FC = () => {
                 <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
                   <div className="space-y-3 xl:col-span-2">
                     <Label className="font-medium text-slate-300">
-                      Price Range (ETH)
+                      Price Range (wei)
                     </Label>
                     <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-                      <Slider
-                        min={0.01}
-                        max={10}
-                        step={0.01}
-                        value={priceRange}
-                        onValueChange={setPriceRange}
-                        onValueCommit={(value) => setAppliedPriceRange(value)}
-                        className="w-full"
-                      />
-                      <div className="mt-4 flex items-center justify-between text-sm text-slate-400">
-                        <span>{priceRange[0].toFixed(2)} ETH</span>
-                        <span>{priceRange[1].toFixed(2)} ETH</span>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label className="text-xs text-slate-500">
+                            Min price (wei)
+                          </Label>
+                          <Input
+                            type="text"
+                            inputMode="numeric"
+                            placeholder="0"
+                            value={minPriceWei}
+                            onChange={(e) => setMinPriceWei(e.target.value)}
+                            className="border-slate-800 bg-slate-900 text-white placeholder:text-slate-600"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-xs text-slate-500">
+                            Max price (wei)
+                          </Label>
+                          <Input
+                            type="text"
+                            inputMode="numeric"
+                            placeholder="0"
+                            value={maxPriceWei}
+                            onChange={(e) => setMaxPriceWei(e.target.value)}
+                            className="border-slate-800 bg-slate-900 text-white placeholder:text-slate-600"
+                          />
+                        </div>
+                      </div>
+                      <div className="mt-4 flex justify-end">
+                        <Button
+                          size="sm"
+                          className="bg-purple-600 text-white hover:bg-purple-500"
+                          onClick={() => {
+                            const nextMin = minPriceWei.trim();
+                            const nextMax = maxPriceWei.trim();
+
+                            if (nextMin && !isPositiveWeiInteger(nextMin)) {
+                              return;
+                            }
+                            if (nextMax && !isPositiveWeiInteger(nextMax)) {
+                              return;
+                            }
+
+                            setAppliedMinPriceWei(nextMin);
+                            setAppliedMaxPriceWei(nextMax);
+                          }}
+                        >
+                          Apply
+                        </Button>
                       </div>
                     </div>
                   </div>
@@ -278,9 +330,10 @@ export const Marketplace: React.FC = () => {
                           Search: {searchQuery}
                         </Badge>
                       )}
-                      {(priceRange[0] !== 0.01 || priceRange[1] !== 10) && (
+                      {(appliedMinPriceWei !== "" || appliedMaxPriceWei !== "") && (
                         <Badge className="border-green-500/20 bg-green-600/10 text-green-400">
-                          {priceRange[0].toFixed(2)}-{priceRange[1].toFixed(2)} ETH
+                          {formatWei(appliedMinPriceWei || "0")}-
+                          {appliedMaxPriceWei ? formatWei(appliedMaxPriceWei) : "any"} wei
                         </Badge>
                       )}
                       {selectedTicketType !== "all" && (

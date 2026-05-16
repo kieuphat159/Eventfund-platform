@@ -26,6 +26,7 @@ const mockFund = {
 
 const mockTicket = {
   getAddress: jest.fn(),
+  eventOrganizer: jest.fn(),
   interface: {
     parseLog: jest.fn(),
   },
@@ -75,6 +76,9 @@ describe("admin.service updateEventStatus", () => {
       wait: jest.fn().mockResolvedValue({ status: 1, logs: [] }),
     });
     mockTicket.getAddress.mockResolvedValue(ticketAddress);
+    mockTicket.eventOrganizer.mockResolvedValue(
+      "0x1111111111111111111111111111111111111111",
+    );
     mockTicket.interface.parseLog.mockImplementation(() => {
       throw new Error("Unknown ticket log");
     });
@@ -223,11 +227,50 @@ describe("admin.service updateEventStatus", () => {
     });
   });
 
+  test("rejects ticketing when the Ticket organizer mapping does not match the Fund organizer", async () => {
+    const fundedEvent = {
+      _id: "507f1f77bcf86cd799439015",
+      title: "Organizer mismatch",
+      organizer: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      status: "funded",
+      fundingGoal: "0",
+      minStakeRequired: "5",
+      organizerStake: "5",
+      contractEventId: "9",
+      ticketPrice: 1,
+      totalTickets: 100,
+      ticketTiers: [{ name: "General", price: 1, totalSupply: 100 }],
+      ticketingStartAt: new Date("2026-04-26T10:00:00.000Z").toISOString(),
+      onChainOrganizer: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    };
+
+    mockTicket.eventOrganizer.mockResolvedValue(
+      "0x2222222222222222222222222222222222222222",
+    );
+
+    const repository = {
+      findById: jest.fn().mockResolvedValue(fundedEvent),
+      updateById: jest.fn().mockResolvedValue(fundedEvent),
+    };
+
+    await expect(
+      updateEventStatus(
+        fundedEvent._id,
+        "ticketing",
+        { quantity: 10, ticketType: 0 },
+        { eventRepo: repository },
+      ),
+    ).rejects.toThrow(/Ticket contract organizer mismatch/);
+
+    expect(mockFundWithSigner.startTicketing).not.toHaveBeenCalled();
+  });
+
   test("finalizes on-chain funding first when db is funded but chain is still funding", async () => {
     const fundedEvent = {
       _id: "507f1f77bcf86cd799439014",
       title: "Funded but not finalized yet",
       organizer: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      onChainOrganizer: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       status: "funded",
       fundingGoal: "1000",
       minStakeRequired: "5",
@@ -241,6 +284,9 @@ describe("admin.service updateEventStatus", () => {
     };
 
     mockFund.getEventStatus.mockResolvedValueOnce(1);
+    mockTicket.eventOrganizer.mockResolvedValue(
+      "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    );
 
     const repository = {
       findById: jest.fn().mockResolvedValue(fundedEvent),
