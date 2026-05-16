@@ -95,6 +95,7 @@ jobs:
 
       # Quality gate check (only after successful scan)
       - name: SonarQube Quality Gate check
+        id: quality_gate
         uses: SonarSource/sonarqube-quality-gate-action@v1.1.0
         timeout-minutes: 5
         env:
@@ -104,7 +105,7 @@ jobs:
       
       # Debug Quality Gate failure
       - name: Debug Quality Gate failure
-        if: failure()
+        if: steps.quality_gate.outcome == 'failure'
         shell: bash
         run: |
           echo "❌ Quality Gate check failed"
@@ -121,6 +122,11 @@ jobs:
           echo "  2. Token doesn't have permission to access project"
           echo "  3. Project key or organization is incorrect"
           echo "  4. SonarCloud/SonarQube server is unreachable"
+          echo ""
+          echo "🔧 How to fix:"
+          echo "  1. Go to SonarCloud → My Account → Security → Generate Token"
+          echo "  2. Use 'User Token' type (not Project Token)"
+          echo "  3. Update SONAR_TOKEN in GitHub Secrets"
 
       # Upload scan metadata as artifact for debugging
       - name: Upload scan metadata
