@@ -1,6 +1,12 @@
 name: Load Configuration
 description: Load configuration from centralized env.yml file
 
+inputs:
+  environment:
+    description: 'Environment to load config for (dev or prod)'
+    required: false
+    default: 'dev'
+
 outputs:
   project_name:
     description: 'Project name'
@@ -8,6 +14,12 @@ outputs:
   environment:
     description: 'Deployment environment'
     value: ${{ steps.load.outputs.environment }}
+  namespace:
+    description: 'Kubernetes namespace for the environment'
+    value: ${{ steps.load.outputs.namespace }}
+  frontend_branch:
+    description: 'Git branch for the environment'
+    value: ${{ steps.load.outputs.frontend_branch }}
   aws_region:
     description: 'AWS Region'
     value: ${{ steps.load.outputs.aws_region }}
@@ -29,12 +41,6 @@ outputs:
   argocd_repo_url:
     description: 'ArgoCD Git repo URL'
     value: ${{ steps.load.outputs.argocd_repo_url }}
-  argocd_target_revision:
-    description: 'ArgoCD Git branch/tag'
-    value: ${{ steps.load.outputs.argocd_target_revision }}
-  argocd_app_namespace:
-    description: 'ArgoCD app namespace'
-    value: ${{ steps.load.outputs.argocd_app_namespace }}
   s3_security_reports_bucket:
     description: 'S3 Security Reports Bucket'
     value: ${{ steps.load.outputs.s3_security_reports_bucket }}
@@ -111,15 +117,23 @@ runs:
         CONFIG_FILE="${{ github.action_path }}/../../config/env.yml"
 
         if [ ! -f "$CONFIG_FILE" ]; then
-          echo " Config file not found: $CONFIG_FILE"
+          echo "❌ Config file not found: $CONFIG_FILE"
           exit 1
         fi
 
-        echo " Loading configuration from: $CONFIG_FILE"
+        echo "📋 Loading configuration from: $CONFIG_FILE"
+
+        # Determine environment from input or default
+        ENVIRONMENT="${{ inputs.environment }}"
+        echo "🎯 Target environment: ${ENVIRONMENT}"
 
         # Project
         echo "project_name=$(yq '.project.name' $CONFIG_FILE)" >> $GITHUB_OUTPUT
-        echo "environment=$(yq '.project.environment' $CONFIG_FILE)" >> $GITHUB_OUTPUT
+        echo "environment=${ENVIRONMENT}" >> $GITHUB_OUTPUT
+
+        # Environment-specific configs
+        echo "namespace=$(yq ".environments.${ENVIRONMENT}.namespace" $CONFIG_FILE)" >> $GITHUB_OUTPUT
+        echo "frontend_branch=$(yq ".environments.${ENVIRONMENT}.branch" $CONFIG_FILE)" >> $GITHUB_OUTPUT
 
         # AWS
         echo "aws_region=$(yq '.aws.region' $CONFIG_FILE)" >> $GITHUB_OUTPUT
@@ -135,15 +149,17 @@ runs:
         # S3
         echo "s3_security_reports_bucket=$(yq '.s3.security_reports_bucket' $CONFIG_FILE)" >> $GITHUB_OUTPUT
         echo "s3_deploy_tmp_bucket_prefix=$(yq '.s3.deploy_tmp_bucket_prefix' $CONFIG_FILE)" >> $GITHUB_OUTPUT
-        echo "frontend_s3_bucket=$(yq '.s3.frontend_bucket' $CONFIG_FILE)" >> $GITHUB_OUTPUT
+        
+        # Environment-specific S3 bucket
+        FRONTEND_BUCKET=$(yq ".environments.${ENVIRONMENT}.frontend_bucket" $CONFIG_FILE)
+        echo "frontend_s3_bucket=${FRONTEND_BUCKET}" >> $GITHUB_OUTPUT
+        echo "✅ Using S3 bucket: ${FRONTEND_BUCKET}"
 
         # CloudFront
         echo "cloudfront_distribution_id=$(yq '.cloudfront.distribution_id' $CONFIG_FILE)" >> $GITHUB_OUTPUT
 
         # ArgoCD
         echo "argocd_repo_url=$(yq '.argocd.repo_url' $CONFIG_FILE)" >> $GITHUB_OUTPUT
-        echo "argocd_target_revision=$(yq '.argocd.target_revision' $CONFIG_FILE)" >> $GITHUB_OUTPUT
-        echo "argocd_app_namespace=$(yq '.argocd.app_namespace' $CONFIG_FILE)" >> $GITHUB_OUTPUT
 
         # Node
         echo "node_version=$(yq '.node.version' $CONFIG_FILE)" >> $GITHUB_OUTPUT
@@ -193,4 +209,4 @@ runs:
         echo "k8s_contracts_artifacts_dir=$(yq '.k8s.contracts_artifacts_dir' $CONFIG_FILE)" >> $GITHUB_OUTPUT
         echo "k8s_web3auth_network=$(yq '.k8s.web3auth_network' $CONFIG_FILE)" >> $GITHUB_OUTPUT
 
-        echo " Configuration loaded successfully"
+        echo "✅ Configuration loaded successfully for environment: ${ENVIRONMENT}"

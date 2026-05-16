@@ -2,6 +2,11 @@ name: Reusable – Frontend
 
 on:
   workflow_call:
+    inputs:
+      environment:
+        description: 'Environment (dev or prod)'
+        type: string
+        default: 'dev'
     secrets:
       AWS_ACCOUNT_ID:
         required: true
@@ -18,6 +23,8 @@ jobs:
       - name: Load config
         id: config
         uses: ./.github/actions/load-config
+        with:
+          environment: ${{ inputs.environment }}
 
       # Setup AWS (OIDC) - để pull từ SSM
       - name: Configure AWS
@@ -31,7 +38,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          SSM_PREFIX="/eventfund/dev/frontend"
+          ENVIRONMENT="${{ inputs.environment }}"
+          SSM_PREFIX="/eventfund/${ENVIRONMENT}/frontend"
           ENV_FILE="frontend/.env"
 
           echo "📥 Pulling frontend env from: $SSM_PREFIX"
@@ -49,10 +57,10 @@ jobs:
             # Extract key từ path: /eventfund/dev/frontend/VITE_API_BASE_URL → VITE_API_BASE_URL
             KEY=$(echo "$name" | sed "s|^$SSM_PREFIX/||")
             echo "${KEY}=${value}" >> "$ENV_FILE"
-            echo " Loaded: $KEY"
+            echo "✅ Loaded: $KEY"
           done
 
-          echo " Frontend env loaded"
+          echo "✅ Frontend env loaded"
 
       - name: Set up Node.js
         uses: actions/setup-node@v4

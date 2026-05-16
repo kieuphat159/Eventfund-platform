@@ -36,6 +36,7 @@ jobs:
     outputs:
       should_deploy: ${{ steps.check.outputs.should_deploy }}
       image_tag:     ${{ steps.check.outputs.image_tag }}
+      environment:   ${{ steps.determine_env.outputs.environment }}
       backend:       ${{ steps.changes.outputs.backend }}
       frontend:      ${{ steps.changes.outputs.frontend }}
     steps:
@@ -53,6 +54,20 @@ jobs:
             echo "should_deploy=false" >> $GITHUB_OUTPUT
             echo "image_tag=" >> $GITHUB_OUTPUT
           fi
+
+      - name: Determine environment from branch
+        id: determine_env
+        run: |
+          BRANCH="${{ github.ref_name }}"
+          
+          if [ "$BRANCH" = "master" ]; then
+            ENVIRONMENT="prod"
+          else
+            ENVIRONMENT="dev"
+          fi
+          
+          echo "environment=${ENVIRONMENT}" >> $GITHUB_OUTPUT
+          echo "✅ Determined environment: ${ENVIRONMENT} (branch: ${BRANCH})"
 
       # Checkout tại commit SHA của CI run (workflow_run) hoặc HEAD (workflow_dispatch)
       - uses: actions/checkout@v4
@@ -91,7 +106,7 @@ jobs:
       id-token: write
     with:
       image_tag: ${{ needs.check.outputs.image_tag }}
-      environment: dev
+      environment: ${{ needs.check.outputs.environment }}
     secrets:
       AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
 
@@ -104,5 +119,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    with:
+      environment: ${{ needs.check.outputs.environment }}
     secrets:
       AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}

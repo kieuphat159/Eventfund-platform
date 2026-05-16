@@ -92,7 +92,24 @@ resource "aws_iam_policy" "custom" {
       {
         Sid    = "EKSFull"
         Effect = "Allow"
-        Action = ["eks:*"]
+        Action = [
+          "eks:*"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "EKSAccessEntry"
+        Effect = "Allow"
+        Action = [
+          "eks:CreateAccessEntry",
+          "eks:DeleteAccessEntry",
+          "eks:DescribeAccessEntry",
+          "eks:ListAccessEntries",
+          "eks:UpdateAccessEntry",
+          "eks:AssociateAccessPolicy",
+          "eks:DisassociateAccessPolicy",
+          "eks:ListAssociatedAccessPolicies"
+        ]
         Resource = "*"
       },
       {

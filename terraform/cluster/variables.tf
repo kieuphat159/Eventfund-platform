@@ -8,25 +8,9 @@ variable "project_name" {
   description = "Name prefix for all resources"
 }
 
-# ─── VPC ─────────────────────────────────────────────────────────────────────
-variable "vpc_cidr" {
+variable "environment" {
   type        = string
-  description = "CIDR block for the VPC"
-}
-
-variable "public_subnets_cidr" {
-  type        = list(string)
-  description = "CIDR blocks for public subnets (ALB)"
-}
-
-variable "private_subnets_cidr" {
-  type        = list(string)
-  description = "CIDR blocks for private subnets (EKS nodes)"
-}
-
-variable "azs" {
-  type        = list(string)
-  description = "Availability zones"
+  description = "Deployment environment (dev, staging, prod)"
 }
 
 # ─── EKS ─────────────────────────────────────────────────────────────────────
@@ -127,64 +111,14 @@ variable "bootstrap_admin_permissions" {
   default     = true
 }
 
-# ─── ECR ─────────────────────────────────────────────────────────────────────
-variable "ecr_backend_repo" {
-  type        = string
-  description = "ECR repository name for backend"
+variable "admin_user_arns" {
+  type        = list(string)
+  description = "List of IAM user ARNs to grant cluster admin access (for local development)"
+  default     = []
 }
 
 # ─── SSM ─────────────────────────────────────────────────────────────────────
 variable "ssm_prefix" {
   type        = string
   description = "SSM Parameter Store prefix for backend secrets"
-}
-
-variable "environment" {
-  type        = string
-  description = "Deployment environment (dev, staging, prod)"
-}
-
-variable "github_actions_role_name" {
-  type        = string
-  description = "IAM role name for GitHub Actions OIDC"
-}
-
-variable "github_repos" {
-  type        = list(string)
-  description = "GitHub repos allowed to assume the GitHub Actions IAM role"
-}
-
-variable "security_reports_bucket" {
-  type        = string
-  description = "S3 bucket name for security scan reports"
-}
-
-variable "security_reports_retention_days" {
-  type        = number
-  description = "Days before security report objects are deleted"
-}
-
-# ─── ArgoCD ──────────────────────────────────────────────────────────────────
-variable "argocd_repo_url" {
-  type        = string
-  description = "GitHub repo URL for ArgoCD to sync"
-}
-
-variable "argocd_target_revision" {
-  type        = string
-  description = "Git branch/tag for ArgoCD to sync"
-  default     = "main"
-}
-
-variable "argocd_app_namespace" {
-  type        = string
-  description = "Kubernetes namespace to deploy app into"
-  default     = "eventfund-dev"
-}
-
-# ─── EKS Access ──────────────────────────────────────────────────────────────
-variable "admin_user_arns" {
-  type        = list(string)
-  description = "List of IAM user ARNs to grant cluster admin access (for local development)"
-  default     = []
 }

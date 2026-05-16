@@ -13,13 +13,21 @@ permissions:
   id-token: write
 
 jobs:
-  terraform-apply:
+  # Plan job - no approval needed, just generate plan
+  terraform-plan:
     runs-on: ubuntu-latest
     if: github.event.inputs.confirm == 'apply'
+    timeout-minutes: 30
+
+    outputs:
+      plan_exitcode_cluster: ${{ steps.plan_cluster.outputs.exitcode }}
+      plan_exitcode_services: ${{ steps.plan_services.outputs.exitcode }}
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Load config
         id: config
@@ -30,210 +38,324 @@ jobs:
         with:
           aws_account_id: ${{ secrets.AWS_ACCOUNT_ID }}
 
+      # Setup Terraform plugin cache properly
+      - name: Setup Terraform plugin cache directory
+        run: |
+          mkdir -p ~/.terraform.d/plugin-cache
+          echo 'plugin_cache_dir = "$HOME/.terraform.d/plugin-cache"' > ~/.terraformrc
+
+      - name: Cache Terraform plugins
+        uses: actions/cache@v4
+        with:
+          path: ~/.terraform.d/plugin-cache
+          key: terraform-plugins-${{ runner.os }}-${{ hashFiles('terraform/**/.terraform.lock.hcl') }}
+          restore-keys: |
+            terraform-plugins-${{ runner.os }}-
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ steps.config.outputs.terraform_version }}
+          terraform_wrapper: false
 
-      - name: Debug TF vars
-        run: |
-          echo "azs='$TF_VAR_azs'"
-          echo "public='$TF_VAR_public_subnets_cidr'"
-          echo "private='$TF_VAR_private_subnets_cidr'"
-        env:
-          TF_VAR_azs: ${{ steps.config.outputs.tf_azs }}
-          TF_VAR_public_subnets_cidr: ${{ steps.config.outputs.tf_public_subnets_cidr }}
-          TF_VAR_private_subnets_cidr: ${{ steps.config.outputs.tf_private_subnets_cidr }}
-
+      # Generate tfvars for all states
       - name: Generate terraform.auto.tfvars.json
-        working-directory: terraform
-        run: |
-          cat > terraform.auto.tfvars.json <<EOF
-          {
-            "region": "${{ steps.config.outputs.aws_region }}",
-            "project_name": "${{ steps.config.outputs.project_name }}",
-            "environment": "${{ steps.config.outputs.environment }}",
-            "vpc_cidr": "${{ steps.config.outputs.tf_vpc_cidr }}",
-            "public_subnets_cidr": ${{ steps.config.outputs.tf_public_subnets_cidr }},
-            "private_subnets_cidr": ${{ steps.config.outputs.tf_private_subnets_cidr }},
-            "azs": ${{ steps.config.outputs.tf_azs }},
-            "eks_version": "${{ steps.config.outputs.tf_eks_version }}",
-            "node_group_instance_types": ["${{ steps.config.outputs.tf_node_instance_type }}"],
-            "node_desired_capacity": ${{ steps.config.outputs.tf_node_desired_capacity }},
-            "node_min_capacity": ${{ steps.config.outputs.tf_node_min_capacity }},
-            "node_max_capacity": ${{ steps.config.outputs.tf_node_max_capacity }},
-            "node_capacity_type": "SPOT",
-            "ecr_backend_repo": "${{ steps.config.outputs.ecr_backend_repository }}",
-            "ssm_prefix": "/${{ steps.config.outputs.project_name }}/${{ steps.config.outputs.environment }}/backend",
-            "github_actions_role_name": "${{ steps.config.outputs.github_actions_role_name }}",
-            "github_repos": ["repo:${{ github.repository }}:*"],
-            "security_reports_bucket": "${{ steps.config.outputs.s3_security_reports_bucket }}",
-            "security_reports_retention_days": ${{ steps.config.outputs.security_reports_retention_days }},
-            "argocd_repo_url": "${{ steps.config.outputs.argocd_repo_url }}",
-            "argocd_target_revision": "${{ steps.config.outputs.argocd_target_revision }}",
-            "argocd_app_namespace": "${{ steps.config.outputs.argocd_app_namespace }}"
-          }
-          EOF
-          
-          echo " Generated terraform.auto.tfvars.json:"
-          cat terraform.auto.tfvars.json
+        uses: ./.github/actions/generate-terraform-tfvars
+        with:
+          aws_region: ${{ steps.config.outputs.aws_region }}
+          project_name: ${{ steps.config.outputs.project_name }}
+          environment: ${{ steps.config.outputs.environment }}
+          vpc_cidr: ${{ steps.config.outputs.tf_vpc_cidr }}
+          public_subnets_cidr: ${{ steps.config.outputs.tf_public_subnets_cidr }}
+          private_subnets_cidr: ${{ steps.config.outputs.tf_private_subnets_cidr }}
+          azs: ${{ steps.config.outputs.tf_azs }}
+          eks_version: ${{ steps.config.outputs.tf_eks_version }}
+          node_instance_type: ${{ steps.config.outputs.tf_node_instance_type }}
+          node_desired_capacity: ${{ steps.config.outputs.tf_node_desired_capacity }}
+          node_min_capacity: ${{ steps.config.outputs.tf_node_min_capacity }}
+          node_max_capacity: ${{ steps.config.outputs.tf_node_max_capacity }}
+          ecr_backend_repository: ${{ steps.config.outputs.ecr_backend_repository }}
+          github_actions_role_name: ${{ steps.config.outputs.github_actions_role_name }}
+          github_repository: ${{ github.repository }}
+          s3_security_reports_bucket: ${{ steps.config.outputs.s3_security_reports_bucket }}
+          security_reports_retention_days: ${{ steps.config.outputs.security_reports_retention_days }}
+          argocd_repo_url: ${{ steps.config.outputs.argocd_repo_url }}
+          argocd_target_revision: ${{ steps.config.outputs.argocd_target_revision }}
+          argocd_app_namespace: ${{ steps.config.outputs.argocd_app_namespace }}
 
-      - name: Terraform Init
-        working-directory: terraform
+      # ─── Plan Cluster State ──────────────────────────────────────────────────
+      - name: Terraform Init (Cluster)
+        working-directory: terraform/cluster
+        timeout-minutes: 10
         run: terraform init
 
-      - name: Terraform Plan
-        working-directory: terraform
-        run: terraform plan -out=tfplan
+      - name: Terraform Plan (Cluster)
+        id: plan_cluster
+        working-directory: terraform/cluster
+        timeout-minutes: 15
+        run: |
+          set +e
+          terraform plan -out=tfplan-cluster -detailed-exitcode
+          exitcode=$?
+          set -e
+          
+          echo "exitcode=$exitcode" >> $GITHUB_OUTPUT
+          
+          if [ $exitcode -eq 1 ]; then
+            echo "❌ Terraform plan (cluster) failed"
+            exit 1
+          fi
+          
+          exit 0
 
-      - name: Terraform Apply
-        working-directory: terraform
-        run: terraform apply tfplan
+      - name: Upload cluster plan artifact
+        if: steps.plan_cluster.outputs.exitcode == '2'
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan-cluster-${{ github.run_id }}
+          path: terraform/cluster/tfplan-cluster
+          retention-days: 1
 
+      # ─── Plan Services State ─────────────────────────────────────────────────
+      - name: Terraform Init (Services)
+        working-directory: terraform/services
+        timeout-minutes: 10
+        run: terraform init
+
+      - name: Terraform Plan (Services)
+        id: plan_services
+        working-directory: terraform/services
+        timeout-minutes: 15
+        run: |
+          set +e
+          terraform plan -out=tfplan-services -detailed-exitcode
+          exitcode=$?
+          set -e
+          
+          echo "exitcode=$exitcode" >> $GITHUB_OUTPUT
+          
+          if [ $exitcode -eq 1 ]; then
+            echo "❌ Terraform plan (services) failed"
+            exit 1
+          fi
+          
+          exit 0
+
+      - name: Upload services plan artifact
+        if: steps.plan_services.outputs.exitcode == '2'
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan-services-${{ github.run_id }}
+          path: terraform/services/tfplan-services
+          retention-days: 1
+
+      - name: Generate plan summary
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const clusterExitcode = '${{ steps.plan_cluster.outputs.exitcode }}';
+            const servicesExitcode = '${{ steps.plan_services.outputs.exitcode }}';
+            
+            let summary = '## 🏗️ Terraform Plan Summary (3-State Architecture)\n\n';
+            
+            // Cluster state
+            summary += '### 1️⃣ Cluster State (EKS, Node Group, NAT)\n';
+            if (clusterExitcode === '0') {
+              summary += '✅ **No changes detected** - Infrastructure is up to date\n\n';
+            } else if (clusterExitcode === '2') {
+              summary += '⚠️ **Changes detected** - Review required\n\n';
+            } else {
+              summary += '❌ **Plan failed** - Check logs for errors\n\n';
+            }
+            
+            // Services state
+            summary += '### 2️⃣ Services State (Helm releases)\n';
+            if (servicesExitcode === '0') {
+              summary += '✅ **No changes detected** - Infrastructure is up to date\n\n';
+            } else if (servicesExitcode === '2') {
+              summary += '⚠️ **Changes detected** - Review required\n\n';
+            } else {
+              summary += '❌ **Plan failed** - Check logs for errors\n\n';
+            }
+            
+            // Next steps
+            if (clusterExitcode === '2' || servicesExitcode === '2') {
+              summary += '---\n\n';
+              summary += '### ⚠️ Action Required\n';
+              summary += '1. Download plan artifacts to review changes\n';
+              summary += '2. Approve the `terraform-apply` job if changes look good\n';
+              summary += '3. Apply will execute the reviewed plans\n\n';
+            } else if (clusterExitcode === '0' && servicesExitcode === '0') {
+              summary += '> Apply job will be skipped (no changes)\n\n';
+            }
+            
+            summary += `---\n`;
+            summary += `**Run ID:** ${context.runId}\n`;
+            summary += `**Triggered by:** @${context.actor}\n`;
+            summary += `**Timestamp:** ${new Date().toISOString()}\n`;
+            
+            core.summary.addRaw(summary).write();
+
+  # Apply job - THIS is where approval gate should be
+  terraform-apply:
+    runs-on: ubuntu-latest
+    needs: terraform-plan
+    if: |
+      needs.terraform-plan.outputs.plan_exitcode_cluster == '2' ||
+      needs.terraform-plan.outputs.plan_exitcode_services == '2'
+    timeout-minutes: 45
+    
+    # ✅ APPROVAL GATE HERE - after plan is reviewed
+    environment:
+      name: production-infra
+      url: https://d2b6kmrshbsepx.cloudfront.net
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Load config
+        id: config
+        uses: ./.github/actions/load-config
+
+      - name: Configure AWS
+        uses: ./.github/actions/setup-aws
+        with:
+          aws_account_id: ${{ secrets.AWS_ACCOUNT_ID }}
+
+      - name: Setup Terraform plugin cache directory
+        run: |
+          mkdir -p ~/.terraform.d/plugin-cache
+          echo 'plugin_cache_dir = "$HOME/.terraform.d/plugin-cache"' > ~/.terraformrc
+
+      - name: Cache Terraform plugins
+        uses: actions/cache@v4
+        with:
+          path: ~/.terraform.d/plugin-cache
+          key: terraform-plugins-${{ runner.os }}-${{ hashFiles('terraform/**/.terraform.lock.hcl') }}
+          restore-keys: |
+            terraform-plugins-${{ runner.os }}-
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ steps.config.outputs.terraform_version }}
+          terraform_wrapper: false
+
+      - name: Generate terraform.auto.tfvars.json
+        uses: ./.github/actions/generate-terraform-tfvars
+        with:
+          aws_region: ${{ steps.config.outputs.aws_region }}
+          project_name: ${{ steps.config.outputs.project_name }}
+          environment: ${{ steps.config.outputs.environment }}
+          vpc_cidr: ${{ steps.config.outputs.tf_vpc_cidr }}
+          public_subnets_cidr: ${{ steps.config.outputs.tf_public_subnets_cidr }}
+          private_subnets_cidr: ${{ steps.config.outputs.tf_private_subnets_cidr }}
+          azs: ${{ steps.config.outputs.tf_azs }}
+          eks_version: ${{ steps.config.outputs.tf_eks_version }}
+          node_instance_type: ${{ steps.config.outputs.tf_node_instance_type }}
+          node_desired_capacity: ${{ steps.config.outputs.tf_node_desired_capacity }}
+          node_min_capacity: ${{ steps.config.outputs.tf_node_min_capacity }}
+          node_max_capacity: ${{ steps.config.outputs.tf_node_max_capacity }}
+          ecr_backend_repository: ${{ steps.config.outputs.ecr_backend_repository }}
+          github_actions_role_name: ${{ steps.config.outputs.github_actions_role_name }}
+          github_repository: ${{ github.repository }}
+          s3_security_reports_bucket: ${{ steps.config.outputs.s3_security_reports_bucket }}
+          security_reports_retention_days: ${{ steps.config.outputs.security_reports_retention_days }}
+          argocd_repo_url: ${{ steps.config.outputs.argocd_repo_url }}
+          argocd_target_revision: ${{ steps.config.outputs.argocd_target_revision }}
+          argocd_app_namespace: ${{ steps.config.outputs.argocd_app_namespace }}
+
+      # ─── Apply Cluster State ─────────────────────────────────────────────────
+      - name: Terraform Init (Cluster)
+        working-directory: terraform/cluster
+        timeout-minutes: 10
+        run: terraform init
+
+      - name: Download cluster plan artifact
+        if: needs.terraform-plan.outputs.plan_exitcode_cluster == '2'
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-plan-cluster-${{ github.run_id }}
+          path: terraform/cluster/
+
+      - name: "[1/2] Apply Cluster State (EKS, Node Group, NAT)"
+        if: needs.terraform-plan.outputs.plan_exitcode_cluster == '2'
+        working-directory: terraform/cluster
+        timeout-minutes: 30
+        run: |
+          # Check if plan file exists
+          if [ ! -f tfplan-cluster ]; then
+            echo "❌ Plan file not found"
+            exit 1
+          fi
+          
+          # Apply the reviewed plan
+          terraform apply tfplan-cluster
+
+      # ─── Apply Services State ────────────────────────────────────────────────
+      - name: Terraform Init (Services)
+        working-directory: terraform/services
+        timeout-minutes: 10
+        run: terraform init
+
+      - name: Download services plan artifact
+        if: needs.terraform-plan.outputs.plan_exitcode_services == '2'
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-plan-services-${{ github.run_id }}
+          path: terraform/services/
+
+      - name: "[2/2] Apply Services State (Helm releases)"
+        if: needs.terraform-plan.outputs.plan_exitcode_services == '2'
+        working-directory: terraform/services
+        timeout-minutes: 30
+        run: |
+          # Check if plan file exists
+          if [ ! -f tfplan-services ]; then
+            echo "❌ Plan file not found"
+            exit 1
+          fi
+          
+          # Apply the reviewed plan
+          terraform apply tfplan-services
+
+      # Pin kubectl version for consistency
       - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: 'v1.28.0'
+
+      - name: Configure kubectl for EKS
+        timeout-minutes: 5
         run: |
           aws eks update-kubeconfig \
             --region ${{ steps.config.outputs.aws_region }} \
             --name ${{ steps.config.outputs.project_name }}
 
+      # Use k8s-await-workloads action instead of kubectl wait
       - name: Wait for ArgoCD to be ready
-        run: |
-          echo "Waiting for ArgoCD to be ready..."
-          
-          for i in $(seq 1 60); do
-            # Check if ArgoCD server pod is running
-            ARGOCD_READY=$(kubectl get pods -n argocd -l app.kubernetes.io/name=argocd-server \
-              -o jsonpath='{.items[0].status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "")
-            
-            if [ "$ARGOCD_READY" = "True" ]; then
-              echo "✅ ArgoCD is ready"
-              break
-            fi
-            
-            echo "Waiting for ArgoCD... ($i/60)"
-            sleep 10
-          done
-          
-          if [ "$ARGOCD_READY" != "True" ]; then
-            echo "⚠️ ArgoCD not ready after 10 minutes, but continuing..."
-          fi
+        uses: jupyterhub/action-k8s-await-workloads@v3
+        timeout-minutes: 15
+        with:
+          workloads: "deployment/argocd-server"
+          namespace: "argocd"
+          timeout: 600
+          max-restarts: -1
 
-      # Chờ ArgoCD sync Ingress → ALB Controller tạo ALB → lấy DNS → update CloudFront origin
+      # Update CloudFront origin with ALB DNS using reusable action
       - name: Update CloudFront origin with ALB DNS
-        run: |
-          echo "Waiting for Ingress resources to be synced by ArgoCD..."
-          
-          # Đợi tối đa 5 phút cho ArgoCD sync Ingress resources
-          for i in $(seq 1 30); do
-            # Đếm số Ingress có annotation group.name=eventfund-shared
-            INGRESS_COUNT=$(kubectl get ingress -A \
-              -o json 2>/dev/null | jq -r '[.items[] | select(.metadata.annotations."alb.ingress.kubernetes.io/group.name" == "eventfund-shared")] | length' || echo "0")
-            
-            if [ "$INGRESS_COUNT" -gt 0 ]; then
-              echo "✅ Found $INGRESS_COUNT Ingress resource(s) with group.name=eventfund-shared"
-              
-              # Thử lấy ALB DNS từ bất kỳ Ingress nào
-              ALB_DNS=$(kubectl get ingress -A \
-                -o jsonpath="{.items[?(@.metadata.annotations.alb\.ingress\.kubernetes\.io/group\.name=='eventfund-shared')].status.loadBalancer.ingress[0].hostname}" 2>/dev/null || echo "")
-              
-              if [ -n "$ALB_DNS" ]; then
-                echo "✅ ALB DNS: $ALB_DNS"
-                break
-              else
-                echo "Ingress exists but ALB not provisioned yet, waiting..."
-              fi
-            else
-              echo "Waiting for ArgoCD to sync Ingress... ($i/30)"
-            fi
-            
-            sleep 10
-          done
-
-          if [ -z "$ALB_DNS" ]; then
-            echo ""
-            echo "⚠️ Could not get ALB DNS after 5 minutes"
-            echo ""
-            echo "Possible reasons:"
-            echo "1. ArgoCD hasn't synced Ingress resources yet"
-            echo "2. ALB Controller is still provisioning the ALB"
-            echo "3. There's an issue with the Ingress configuration"
-            echo ""
-            echo "Current Ingress resources:"
-            kubectl get ingress -A 2>/dev/null || echo "No Ingress resources found"
-            echo ""
-            echo "You can manually update CloudFront later with:"
-            echo "  kubectl get ingress -A"
-            echo "  ALB_DNS=\$(kubectl get ingress -n eventfund-dev api-ingress -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')"
-            echo "  aws cloudfront update-distribution --id <CF_ID> ..."
-            exit 0
-          fi
-
-          CF_ID=$(terraform -chdir=terraform output -raw cloudfront_distribution_id)
-          ETAG=$(aws cloudfront get-distribution-config --id "$CF_ID" --query 'ETag' --output text)
-
-          # Lấy config hiện tại và thêm ALB origin
-          aws cloudfront get-distribution-config --id "$CF_ID" \
-            --query 'DistributionConfig' --output json > /tmp/cf-config.json
-
-          # Thêm ALB origin nếu chưa có
-          python3 - <<EOF
-          import json, sys
-
-          with open('/tmp/cf-config.json') as f:
-              config = json.load(f)
-
-          alb_dns = "$ALB_DNS"
-          origin_id = "alb-internal"
-
-          # Kiểm tra origin đã tồn tại chưa
-          existing = [o for o in config['Origins']['Items'] if o['Id'] == origin_id]
-          if not existing:
-              config['Origins']['Items'].append({
-                  "Id": origin_id,
-                  "DomainName": alb_dns,
-                  "CustomOriginConfig": {
-                      "HTTPPort": 80,
-                      "HTTPSPort": 443,
-                      "OriginProtocolPolicy": "http-only",
-                      "OriginSslProtocols": {"Quantity": 1, "Items": ["TLSv1.2"]},
-                      "OriginReadTimeout": 30,
-                      "OriginKeepaliveTimeout": 5
-                  },
-                  "ConnectionAttempts": 3,
-                  "ConnectionTimeout": 10
-              })
-              config['Origins']['Quantity'] = len(config['Origins']['Items'])
-          else:
-              # Update DNS nếu ALB đã thay đổi
-              for o in config['Origins']['Items']:
-                  if o['Id'] == origin_id:
-                      o['DomainName'] = alb_dns
-
-          # Thêm cache behaviors cho /argocd/*, /grafana/*, và /api/*
-          behaviors = config.get('CacheBehaviors', {}).get('Items', [])
-          for path, origin in [('/argocd/*', origin_id), ('/grafana/*', origin_id), ('/api/*', origin_id)]:
-              if not any(b['PathPattern'] == path for b in behaviors):
-                  behaviors.append({
-                      "PathPattern": path,
-                      "TargetOriginId": origin_id,
-                      "ViewerProtocolPolicy": "redirect-to-https",
-                      "AllowedMethods": {"Quantity": 7, "Items": ["GET","HEAD","OPTIONS","PUT","POST","PATCH","DELETE"], "CachedMethods": {"Quantity": 2, "Items": ["GET","HEAD"]}},
-                      "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",  # CachingDisabled
-                      "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",  # AllViewer
-                      "Compress": True
-                  })
-          config['CacheBehaviors'] = {'Quantity': len(behaviors), 'Items': behaviors}
-
-          with open('/tmp/cf-config-updated.json', 'w') as f:
-              json.dump(config, f)
-          print(" CloudFront config updated")
-          EOF
-
-          aws cloudfront update-distribution \
-            --id "$CF_ID" \
-            --distribution-config file:///tmp/cf-config-updated.json \
-            --if-match "$ETAG"
-          echo " CloudFront updated with ALB origin: $ALB_DNS"
+        timeout-minutes: 10
+        uses: ./.github/actions/update-cloudfront-origin
+        with:
+          aws_region: ${{ steps.config.outputs.aws_region }}
+          project_name: ${{ steps.config.outputs.project_name }}
+          ingress_group_name: eventfund-shared
+          origin_id: alb-internal
+          timeout_minutes: '5'
 
       - name: Render alertmanager config with secrets
         env:
@@ -241,12 +363,9 @@ jobs:
           ALERT_EMAIL_PASSWORD: ${{ secrets.ALERT_EMAIL_PASSWORD }}
         run: |
           if [ -n "$ALERT_EMAIL" ] && [ -n "$ALERT_EMAIL_PASSWORD" ]; then
-            aws eks update-kubeconfig \
-              --region ${{ steps.config.outputs.aws_region }} \
-              --name ${{ steps.config.outputs.project_name }}
             export ALERT_EMAIL ALERT_EMAIL_PASSWORD
             envsubst < k8s/base/monitoring/alertmanager-config.yaml | kubectl apply -f -
-            echo " Alertmanager config applied"
+            echo "✅ Alertmanager config applied"
           else
             echo "⚠️ ALERT_EMAIL or ALERT_EMAIL_PASSWORD not set, skipping alertmanager config"
           fi

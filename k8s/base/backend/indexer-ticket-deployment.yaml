@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: indexer-ticket
-  namespace: eventfund-dev
+
   labels:
     app: indexer-ticket
     component: blockchain
