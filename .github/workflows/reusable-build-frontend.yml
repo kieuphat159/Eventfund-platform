@@ -23,6 +23,8 @@ jobs:
       - name: Load config
         id: config
         uses: ./.github/actions/load-config
+        with:
+          environment: ${{ inputs.environment }}
 
       # Setup AWS (OIDC) - để pull từ SSM
       - name: Configure AWS

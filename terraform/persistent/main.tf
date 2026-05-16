@@ -26,11 +26,19 @@ module "ecr" {
 }
 
 # ─── Frontend (Giữ lại - S3 + CloudFront) ────────────────────────────────────
-module "frontend" {
+# Create frontend resources for both dev and prod environments
+module "frontend_dev" {
   source = "../modules/frontend"
 
   project_name = var.project_name
-  environment  = var.environment
+  environment  = "dev"
+}
+
+module "frontend_prod" {
+  source = "../modules/frontend"
+
+  project_name = var.project_name
+  environment  = "prod"
 }
 
 # ─── GitHub Actions OIDC (Giữ lại - CI/CD) ───────────────────────────────────

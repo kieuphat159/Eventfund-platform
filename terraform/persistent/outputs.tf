@@ -18,19 +18,52 @@ output "ecr_backend_url" {
   value       = module.ecr.repository_urls[var.ecr_backend_repo]
 }
 
+# ─── Frontend Dev ────────────────────────────────────────────────────────────
+output "frontend_dev_s3_bucket" {
+  description = "S3 bucket để upload frontend build (dev)"
+  value       = module.frontend_dev.s3_bucket_name
+}
+
+output "frontend_dev_url" {
+  description = "CloudFront URL để truy cập frontend (dev)"
+  value       = module.frontend_dev.cloudfront_url
+}
+
+output "cloudfront_dev_distribution_id" {
+  description = "CloudFront distribution ID để invalidate cache (dev)"
+  value       = module.frontend_dev.cloudfront_distribution_id
+}
+
+# ─── Frontend Prod ───────────────────────────────────────────────────────────
+output "frontend_prod_s3_bucket" {
+  description = "S3 bucket để upload frontend build (prod)"
+  value       = module.frontend_prod.s3_bucket_name
+}
+
+output "frontend_prod_url" {
+  description = "CloudFront URL để truy cập frontend (prod)"
+  value       = module.frontend_prod.cloudfront_url
+}
+
+output "cloudfront_prod_distribution_id" {
+  description = "CloudFront distribution ID để invalidate cache (prod)"
+  value       = module.frontend_prod.cloudfront_distribution_id
+}
+
+# ─── Backward compatibility (deprecated) ─────────────────────────────────────
 output "frontend_s3_bucket" {
-  description = "S3 bucket để upload frontend build"
-  value       = module.frontend.s3_bucket_name
+  description = "[DEPRECATED] Use frontend_dev_s3_bucket instead"
+  value       = module.frontend_dev.s3_bucket_name
 }
 
 output "frontend_url" {
-  description = "CloudFront URL để truy cập frontend"
-  value       = module.frontend.cloudfront_url
+  description = "[DEPRECATED] Use frontend_dev_url instead"
+  value       = module.frontend_dev.cloudfront_url
 }
 
 output "cloudfront_distribution_id" {
-  description = "CloudFront distribution ID để invalidate cache"
-  value       = module.frontend.cloudfront_distribution_id
+  description = "[DEPRECATED] Use cloudfront_dev_distribution_id instead"
+  value       = module.frontend_dev.cloudfront_distribution_id
 }
 
 output "github_actions_role_arn" {

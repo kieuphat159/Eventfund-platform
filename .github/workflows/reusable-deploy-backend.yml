@@ -34,6 +34,8 @@ jobs:
       - name: Load config
         id: config
         uses: ./.github/actions/load-config
+        with:
+          environment: ${{ inputs.environment }}
 
       - name: Setup Kustomize
         uses: imranismail/setup-kustomize@v2
