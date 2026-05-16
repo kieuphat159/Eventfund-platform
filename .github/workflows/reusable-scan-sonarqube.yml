@@ -46,28 +46,12 @@ jobs:
           echo "url=${URL}" >> $GITHUB_OUTPUT
 
       # Run SonarQube Scan
-          echo "✅ Sonar server URL: ${URL}"
-          echo "✅ Project key: ${{ steps.config.outputs.sonarcloud_project_key }}"
-          echo "✅ Organization: ${{ steps.config.outputs.sonarcloud_organization }}"
-          
-          # Verify token has access (without exposing token value)
-          if [ -n "${{ secrets.SONAR_TOKEN }}" ]; then
-            echo "✅ SONAR_TOKEN is set (length: ${#SONAR_TOKEN})"
-          else
-            echo "❌ SONAR_TOKEN is empty!"
-            exit 1
-          fi
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-
-      # Run SonarQube Scan (unified action for both full and PR)
       - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@v7.1.0
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ steps.sonar_url.outputs.url }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SONAR_SCANNER_OPTS: "-Dsonar.log.level=DEBUG"
         with:
           args: >
             -Dsonar.projectKey=${{ steps.config.outputs.sonarcloud_project_key }}
@@ -79,72 +63,11 @@ jobs:
       # Quality gate check (only on master branch with full scan)
       - name: SonarQube Quality Gate check
         if: inputs.branch == 'master' && inputs.scan_mode == 'full'
-            ${{ github.event_name == 'pull_request' && format('-Dsonar.pullrequest.key={0} -Dsonar.pullrequest.branch={1} -Dsonar.pullrequest.base={2}', github.event.pull_request.number, github.head_ref, github.base_ref) || '' }}
-        continue-on-error: true
-      
-      # Check scan result
-      - name: Check scan result
-        if: always()
-        shell: bash
-        run: |
-          if [ -f ".scannerwork/report-task.txt" ]; then
-            echo "✅ SonarQube scan completed successfully"
-            echo "📊 Scan report:"
-            cat .scannerwork/report-task.txt
-          else
-            echo "❌ SonarQube scan failed - no report generated"
-            exit 1
-          fi
-
-      # Debug: Check if report-task.txt exists
-      - name: Verify scan report exists
-        if: always()
-        shell: bash
-        run: |
-          if [ -f ".scannerwork/report-task.txt" ]; then
-            echo "✅ Scan report found"
-            echo "📄 Report content:"
-            cat .scannerwork/report-task.txt
-          else
-            echo "❌ Scan report NOT found at .scannerwork/report-task.txt"
-            echo "📂 Contents of .scannerwork/:"
-            ls -la .scannerwork/ || echo "Directory does not exist"
-          fi
-
-      # Quality gate check (only after successful scan)
-      - name: SonarQube Quality Gate check
-        id: quality_gate
         uses: SonarSource/sonarqube-quality-gate-action@v1.1.0
         timeout-minutes: 5
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ steps.sonar_url.outputs.url }}
-        continue-on-error: true  # Don't fail the workflow, just log the error
-      
-      # Debug Quality Gate failure
-      - name: Debug Quality Gate failure
-        if: steps.quality_gate.outcome == 'failure'
-        shell: bash
-        run: |
-          echo "❌ Quality Gate check failed"
-          echo "🔍 Checking API connectivity..."
-          
-          # Test API endpoint (without auth to avoid exposing token)
-          SONAR_URL="${{ steps.sonar_url.outputs.url }}"
-          echo "Testing: ${SONAR_URL}/api/system/status"
-          curl -v "${SONAR_URL}/api/system/status" || true
-          
-          echo ""
-          echo "💡 Possible causes:"
-          echo "  1. SONAR_TOKEN is invalid or expired"
-          echo "  2. Token doesn't have permission to access project"
-          echo "  3. Project key or organization is incorrect"
-          echo "  4. SonarCloud/SonarQube server is unreachable"
-          echo ""
-          echo "🔧 How to fix:"
-          echo "  1. Go to SonarCloud → My Account → Security → Generate Token"
-          echo "  2. Use 'User Token' type (not Project Token)"
-          echo "  3. Update SONAR_TOKEN in GitHub Secrets"
 
       # Upload scan metadata as artifact for debugging
       - name: Upload scan metadata
@@ -154,5 +77,4 @@ jobs:
           name: sonarqube-scan-metadata-${{ github.run_id }}
           path: .scannerwork/report-task.txt
           if-no-files-found: ignore
-          path: .scannerwork/
           retention-days: 7

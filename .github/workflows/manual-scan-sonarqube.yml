@@ -16,10 +16,6 @@ on:
         required: false
         default: true
         type: boolean
-name: Manual – SonarQube Scan
-
-on:
-  workflow_dispatch:
 
 permissions:
   contents: read
