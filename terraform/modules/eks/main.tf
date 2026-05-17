@@ -228,3 +228,30 @@ resource "aws_eks_access_policy_association" "admin_users" {
 
   depends_on = [aws_eks_access_entry.admin_users]
 }
+
+# ─── EKS Access Entry: GitHub Actions Role (CI/CD) ───────────────────────────
+resource "aws_eks_access_entry" "github_actions" {
+  count = var.github_actions_role_arn != "" ? 1 : 0
+
+  cluster_name  = aws_eks_cluster.this.name
+  principal_arn = var.github_actions_role_arn
+  type          = "STANDARD"
+
+  tags = {
+    Name = "${var.cluster_name}-github-actions-access"
+  }
+}
+
+resource "aws_eks_access_policy_association" "github_actions" {
+  count = var.github_actions_role_arn != "" ? 1 : 0
+
+  cluster_name  = aws_eks_cluster.this.name
+  principal_arn = var.github_actions_role_arn
+  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+
+  access_scope {
+    type = "cluster"
+  }
+
+  depends_on = [aws_eks_access_entry.github_actions]
+}
