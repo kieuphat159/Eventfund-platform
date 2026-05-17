@@ -6,48 +6,26 @@ on:
     workflows: [CI]
     types: [completed]
     branches: [master, dev]
-  # Cho phép trigger thủ công
-  workflow_dispatch:
-    inputs:
-      image_tag:
-        description: 'Image tag to deploy (default: latest commit SHA)'
-        required: false
-      deploy_backend:
-        description: 'Deploy backend?'
-        required: false
-        default: 'true'
-        type: choice
-        options: ['true', 'false']
-      deploy_frontend:
-        description: 'Deploy frontend?'
-        required: false
-        default: 'true'
-        type: choice
-        options: ['true', 'false']
 
 concurrency:
   group: cd-${{ github.ref }}
   cancel-in-progress: false  # Không cancel deploy đang chạy
 
 jobs:
-  # Kiểm tra CI result và detect files changed trong commit đó
+  # Kiểm tra CI result và detect files changed
   check:
     runs-on: ubuntu-latest
     outputs:
       should_deploy: ${{ steps.check.outputs.should_deploy }}
       image_tag:     ${{ steps.check.outputs.image_tag }}
       environment:   ${{ steps.determine_env.outputs.environment }}
-      backend:       ${{ steps.override.outputs.backend || steps.changes.outputs.backend }}
-      frontend:      ${{ steps.override.outputs.frontend || steps.changes.outputs.frontend }}
+      backend:       ${{ steps.changes.outputs.backend }}
+      frontend:      ${{ steps.changes.outputs.frontend }}
     steps:
       - name: Check if should deploy
         id: check
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TAG="${{ github.event.inputs.image_tag }}"
-            echo "should_deploy=true" >> $GITHUB_OUTPUT
-            echo "image_tag=${TAG:-${{ github.sha }}}" >> $GITHUB_OUTPUT
-          elif [ "${{ github.event.workflow_run.conclusion }}" = "success" ]; then
+          if [ "${{ github.event.workflow_run.conclusion }}" = "success" ]; then
             echo "should_deploy=true" >> $GITHUB_OUTPUT
             echo "image_tag=${{ github.event.workflow_run.head_sha }}" >> $GITHUB_OUTPUT
           else
@@ -69,31 +47,30 @@ jobs:
           echo "environment=${ENVIRONMENT}" >> $GITHUB_OUTPUT
           echo "✅ Determined environment: ${ENVIRONMENT} (branch: ${BRANCH})"
 
-      # Checkout tại commit SHA của CI run (workflow_run) hoặc HEAD (workflow_dispatch)
+      # Checkout tại commit SHA của CI run
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
-          fetch-depth: 2
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0  # Fetch full history for paths-filter
+
+      # Get parent commit SHA
+      - name: Get parent commit
+        id: parent
+        run: |
+          PARENT_SHA=$(git rev-parse ${{ github.event.workflow_run.head_sha }}^)
+          echo "sha=${PARENT_SHA}" >> $GITHUB_OUTPUT
+          echo "✅ Parent commit: ${PARENT_SHA}"
 
       - name: Detect changed services
         uses: dorny/paths-filter@v3
         id: changes
         with:
-          # Compare with previous commit to detect changes
-          base: HEAD~1
+          base: ${{ steps.parent.outputs.sha }}
           filters: |
             backend:
               - 'backend/**'
             frontend:
               - 'frontend/**'
-
-      # Override changes với manual input khi workflow_dispatch
-      - name: Override changes for manual dispatch
-        if: github.event_name == 'workflow_dispatch'
-        run: |
-          echo "backend=${{ github.event.inputs.deploy_backend }}"   >> $GITHUB_OUTPUT
-          echo "frontend=${{ github.event.inputs.deploy_frontend }}" >> $GITHUB_OUTPUT
-        id: override
 
   deploy-backend:
     needs: check
