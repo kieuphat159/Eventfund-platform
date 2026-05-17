@@ -37,8 +37,8 @@ jobs:
       should_deploy: ${{ steps.check.outputs.should_deploy }}
       image_tag:     ${{ steps.check.outputs.image_tag }}
       environment:   ${{ steps.determine_env.outputs.environment }}
-      backend:       ${{ steps.changes.outputs.backend }}
-      frontend:      ${{ steps.changes.outputs.frontend }}
+      backend:       ${{ steps.override.outputs.backend || steps.changes.outputs.backend }}
+      frontend:      ${{ steps.override.outputs.frontend || steps.changes.outputs.frontend }}
     steps:
       - name: Check if should deploy
         id: check
