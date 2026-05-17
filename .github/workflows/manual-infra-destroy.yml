@@ -129,6 +129,13 @@ jobs:
         working-directory: terraform/services
         timeout-minutes: 20
         run: |
+          # Configure kubectl TRƯỚC KHI terraform init
+          # Vì Helm/Kubernetes provider cần connect ngay khi init
+          aws eks update-kubeconfig \
+            --region ${{ needs.setup.outputs.aws_region }} \
+            --name ${{ needs.setup.outputs.project_name }} \
+            2>/dev/null || echo "⚠️ Could not configure kubectl (cluster may not exist)"
+          
           terraform init
           terraform destroy -auto-approve
         continue-on-error: false
