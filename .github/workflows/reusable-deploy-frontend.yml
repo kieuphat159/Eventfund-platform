@@ -31,6 +31,7 @@ jobs:
         uses: ./.github/actions/setup-aws
         with:
           aws_account_id: ${{ secrets.AWS_ACCOUNT_ID }}
+          aws_region: ${{ steps.config.outputs.aws_region }}
 
       - name: Pull frontend env from SSM
         shell: bash
