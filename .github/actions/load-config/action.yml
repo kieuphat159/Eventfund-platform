@@ -155,8 +155,10 @@ runs:
         echo "frontend_s3_bucket=${FRONTEND_BUCKET}" >> $GITHUB_OUTPUT
         echo "✅ Using S3 bucket: ${FRONTEND_BUCKET}"
 
-        # CloudFront
-        echo "cloudfront_distribution_id=$(yq '.cloudfront.distribution_id' $CONFIG_FILE)" >> $GITHUB_OUTPUT
+        # Environment-specific CloudFront distribution ID
+        CLOUDFRONT_DIST_ID=$(yq ".environments.${ENVIRONMENT}.cloudfront_distribution_id" $CONFIG_FILE)
+        echo "cloudfront_distribution_id=${CLOUDFRONT_DIST_ID}" >> $GITHUB_OUTPUT
+        echo "✅ Using CloudFront distribution: ${CLOUDFRONT_DIST_ID}"
 
         # ArgoCD
         echo "argocd_repo_url=$(yq '.argocd.repo_url' $CONFIG_FILE)" >> $GITHUB_OUTPUT

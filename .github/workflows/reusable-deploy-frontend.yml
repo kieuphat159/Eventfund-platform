@@ -79,28 +79,10 @@ jobs:
             --region ${{ steps.config.outputs.aws_region }}
           echo "✅ Uploaded frontend to S3: ${{ steps.config.outputs.frontend_s3_bucket }}"
 
-      # Get CloudFront distribution ID by querying S3 bucket origin
-      - name: Get CloudFront distribution ID
-        id: cloudfront
-        shell: bash
-        run: |
-          BUCKET="${{ steps.config.outputs.frontend_s3_bucket }}"
-          DIST_ID=$(aws cloudfront list-distributions --output json | \
-            jq -r ".DistributionList.Items[] | select(.Origins.Items[].DomainName | contains(\"${BUCKET}\")) | .Id" | \
-            head -n 1)
-          
-          if [ -z "$DIST_ID" ]; then
-            echo "❌ CloudFront distribution not found for bucket: ${BUCKET}"
-            exit 1
-          fi
-          
-          echo "distribution_id=${DIST_ID}" >> $GITHUB_OUTPUT
-          echo "✅ Found distribution: ${DIST_ID}"
-
-      # Use CloudFront invalidation action
+      # Invalidate CloudFront cache using distribution ID from config
       - name: Invalidate CloudFront cache
         uses: chetan/invalidate-cloudfront-action@v2
         env:
-          DISTRIBUTION: ${{ steps.cloudfront.outputs.distribution_id }}
+          DISTRIBUTION: ${{ steps.config.outputs.cloudfront_distribution_id }}
           PATHS: "/*"
           AWS_REGION: ${{ steps.config.outputs.aws_region }}
