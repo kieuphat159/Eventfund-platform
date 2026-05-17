@@ -1,0 +1,88 @@
+name: Reusable – Deploy Frontend
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        type: string
+        default: 'dev'
+    secrets:
+      AWS_ACCOUNT_ID:
+        required: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Load config
+        id: config
+        uses: ./.github/actions/load-config
+        with:
+          environment: ${{ inputs.environment }}
+
+      - name: Configure AWS
+        uses: ./.github/actions/setup-aws
+        with:
+          aws_account_id: ${{ secrets.AWS_ACCOUNT_ID }}
+          aws_region: ${{ steps.config.outputs.aws_region }}
+
+      - name: Pull frontend env from SSM
+        shell: bash
+        run: |
+          set -euo pipefail
+          SSM_PREFIX="/eventfund/${{ steps.config.outputs.environment }}/frontend"
+          ENV_FILE="frontend/.env"
+          aws ssm get-parameters-by-path \
+            --path "$SSM_PREFIX" \
+            --recursive \
+            --with-decryption \
+            --region ${{ steps.config.outputs.aws_region }} \
+            --query 'Parameters[*].[Name,Value]' \
+            --output json > /tmp/ssm.json
+          jq -r '.[] | @tsv' /tmp/ssm.json > /tmp/ssm.tsv
+          while IFS=$(printf '\t') read -r name value; do
+            KEY=$(echo "$name" | sed "s|^$SSM_PREFIX/||")
+            echo "${KEY}=${value}" >> "$ENV_FILE"
+          done < /tmp/ssm.tsv
+          rm -f /tmp/ssm.json /tmp/ssm.tsv
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ steps.config.outputs.node_version }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+
+      # Upload to S3 using AWS CLI
+      - name: Upload to S3
+        shell: bash
+        run: |
+          aws s3 sync frontend/dist/ s3://${{ steps.config.outputs.frontend_s3_bucket }}/ \
+            --follow-symlinks \
+            --delete \
+            --cache-control "public,max-age=31536000,immutable" \
+            --region ${{ steps.config.outputs.aws_region }}
+          echo "✅ Uploaded frontend to S3: ${{ steps.config.outputs.frontend_s3_bucket }}"
+
+      # Invalidate CloudFront cache using distribution ID from config
+      - name: Invalidate CloudFront cache
+        uses: chetan/invalidate-cloudfront-action@v2
+        env:
+          DISTRIBUTION: ${{ steps.config.outputs.cloudfront_distribution_id }}
+          PATHS: "/*"
+          AWS_REGION: ${{ steps.config.outputs.aws_region }}

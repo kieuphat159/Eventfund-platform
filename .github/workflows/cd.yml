@@ -1,0 +1,102 @@
+name: CD
+
+on:
+  # Trigger sau khi CI pass trên main
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [master, dev]
+
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: false  # Không cancel deploy đang chạy
+
+jobs:
+  # Kiểm tra CI result và detect files changed
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      should_deploy: ${{ steps.check.outputs.should_deploy }}
+      image_tag:     ${{ steps.check.outputs.image_tag }}
+      environment:   ${{ steps.determine_env.outputs.environment }}
+      backend:       ${{ steps.changes.outputs.backend }}
+      frontend:      ${{ steps.changes.outputs.frontend }}
+    steps:
+      - name: Check if should deploy
+        id: check
+        run: |
+          if [ "${{ github.event.workflow_run.conclusion }}" = "success" ]; then
+            echo "should_deploy=true" >> $GITHUB_OUTPUT
+            echo "image_tag=${{ github.event.workflow_run.head_sha }}" >> $GITHUB_OUTPUT
+          else
+            echo "should_deploy=false" >> $GITHUB_OUTPUT
+            echo "image_tag=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Determine environment from branch
+        id: determine_env
+        run: |
+          BRANCH="${{ github.ref_name }}"
+          
+          if [ "$BRANCH" = "master" ]; then
+            ENVIRONMENT="prod"
+          else
+            ENVIRONMENT="dev"
+          fi
+          
+          echo "environment=${ENVIRONMENT}" >> $GITHUB_OUTPUT
+          echo "✅ Determined environment: ${ENVIRONMENT} (branch: ${BRANCH})"
+
+      # Checkout tại commit SHA của CI run
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0  # Fetch full history for paths-filter
+
+      # Get parent commit SHA
+      - name: Get parent commit
+        id: parent
+        run: |
+          PARENT_SHA=$(git rev-parse ${{ github.event.workflow_run.head_sha }}^)
+          echo "sha=${PARENT_SHA}" >> $GITHUB_OUTPUT
+          echo "✅ Parent commit: ${PARENT_SHA}"
+
+      - name: Detect changed services
+        uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          base: ${{ steps.parent.outputs.sha }}
+          filters: |
+            backend:
+              - 'backend/**'
+            frontend:
+              - 'frontend/**'
+
+  deploy-backend:
+    needs: check
+    if: |
+      needs.check.outputs.should_deploy == 'true' &&
+      needs.check.outputs.backend == 'true'
+    uses: ./.github/workflows/reusable-deploy-backend.yml
+    permissions:
+      contents: write
+      id-token: write
+    with:
+      image_tag: ${{ needs.check.outputs.image_tag }}
+      environment: ${{ needs.check.outputs.environment }}
+    secrets:
+      AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+
+  deploy-frontend:
+    needs: check
+    if: |
+      needs.check.outputs.should_deploy == 'true' &&
+      needs.check.outputs.frontend == 'true'
+    uses: ./.github/workflows/reusable-deploy-frontend.yml
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      environment: ${{ needs.check.outputs.environment }}
+    secrets:
+      AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}

@@ -1,0 +1,19 @@
+name: Manual – OWASP Dependency-Check
+
+on:
+  workflow_dispatch:
+    inputs:
+      path:
+        description: 'Path to scan (default: entire project)'
+        type: string
+        default: '.'
+
+permissions:
+  contents: read
+  security-events: write  # Required for uploading SARIF to Security tab
+
+jobs:
+  owasp-scan:
+    uses: ./.github/workflows/reusable-scan-owasp-deps.yml
+    with:
+      path: ${{ inputs.path }}

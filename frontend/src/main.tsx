@@ -1,3 +1,12 @@
+/**
+ * EventFund Platform - Frontend Application
+ * Main entry point for the React application
+ * 
+ * 
+ * 
+ * 
+ */
+
 // Must be first — patches process.nextTick and other Node globals before
 // Web3Auth / readable-stream bundles execute
 import './polyfills'

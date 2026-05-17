@@ -1,0 +1,23 @@
+region       = "ap-southeast-1"
+project_name = "eventfund"
+
+vpc_cidr             = "10.0.0.0/16"
+public_subnets_cidr  = ["10.0.0.0/20", "10.0.16.0/20"]
+private_subnets_cidr = ["10.0.128.0/20", "10.0.144.0/20"]
+azs                  = ["ap-southeast-1a", "ap-southeast-1b"]
+
+eks_version               = "1.31"
+node_group_instance_types = ["t3.large"]
+node_desired_capacity     = 2
+node_min_capacity         = 1
+node_max_capacity         = 4
+
+ecr_backend_repo  = "eventfund-backend"
+
+ssm_prefix = "/eventfund/dev/backend"
+
+environment                      = "dev"
+github_actions_role_name         = "GitHubActionsRole"
+github_repos                     = ["repo:YOUR_GITHUB_USERNAME/YOUR_REPO_NAME:*"]
+security_reports_bucket          = "eventfund-security-reports"
+security_reports_retention_days  = 15
