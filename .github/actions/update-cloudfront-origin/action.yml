@@ -1,4 +1,4 @@
-name: Update CloudFront Origin
+﻿name: Update CloudFront Origin
 description: Update CloudFront distribution with ALB origin from EKS Ingress
 
 inputs:
@@ -102,11 +102,12 @@ runs:
 
     - name: Update CloudFront distributions (Dev + Prod)
       shell: bash
+      env:
+        ALB_DNS: ${{ steps.get-alb.outputs.alb_dns }}
+        ORIGIN_ID: ${{ inputs.origin_id }}
       run: |
         CF_DEV_ID="${{ steps.get-cf.outputs.dev_distribution_id }}"
         CF_PROD_ID="${{ steps.get-cf.outputs.prod_distribution_id }}"
-        ALB_DNS="${{ steps.get-alb.outputs.alb_dns }}"
-        ORIGIN_ID="${{ inputs.origin_id }}"
         
         # Function to update a CloudFront distribution
         update_cloudfront() {
@@ -121,78 +122,7 @@ runs:
             --query 'DistributionConfig' --output json > /tmp/cf-config-${ENV_NAME}.json
 
           # Update config using Python
-          python3 - <<'PYTHON_EOF'
-import json
-import os
-import sys
-
-env_name = os.environ['ENV_NAME']
-with open(f'/tmp/cf-config-{env_name}.json') as f:
-    config = json.load(f)
-
-alb_dns = os.environ['ALB_DNS']
-origin_id = os.environ['ORIGIN_ID']
-
-# Check if origin already exists
-existing = [o for o in config['Origins']['Items'] if o['Id'] == origin_id]
-
-if not existing:
-    # Add new origin
-    config['Origins']['Items'].append({
-        "Id": origin_id,
-        "DomainName": alb_dns,
-        "CustomOriginConfig": {
-            "HTTPPort": 80,
-            "HTTPSPort": 443,
-            "OriginProtocolPolicy": "http-only",
-            "OriginSslProtocols": {"Quantity": 1, "Items": ["TLSv1.2"]},
-            "OriginReadTimeout": 30,
-            "OriginKeepaliveTimeout": 5
-        },
-        "ConnectionAttempts": 3,
-        "ConnectionTimeout": 10
-    })
-    config['Origins']['Quantity'] = len(config['Origins']['Items'])
-    print(f"✅ Added new origin: {origin_id}")
-else:
-    # Update existing origin DNS
-    for o in config['Origins']['Items']:
-        if o['Id'] == origin_id:
-            o['DomainName'] = alb_dns
-    print(f"✅ Updated origin DNS: {origin_id} -> {alb_dns}")
-
-# Add cache behaviors for /argocd/*, /grafana/*, /api/*
-behaviors = config.get('CacheBehaviors', {}).get('Items', [])
-paths_to_add = [
-    ('/argocd/*', origin_id),
-    ('/grafana/*', origin_id),
-    ('/api/*', origin_id)
-]
-
-for path, target_origin in paths_to_add:
-    if not any(b['PathPattern'] == path for b in behaviors):
-        behaviors.append({
-            "PathPattern": path,
-            "TargetOriginId": target_origin,
-            "ViewerProtocolPolicy": "redirect-to-https",
-            "AllowedMethods": {
-                "Quantity": 7,
-                "Items": ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"],
-                "CachedMethods": {"Quantity": 2, "Items": ["GET", "HEAD"]}
-            },
-            "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",  # CachingDisabled
-            "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3",  # AllViewer
-            "Compress": True
-        })
-        print(f"✅ Added cache behavior: {path}")
-
-config['CacheBehaviors'] = {'Quantity': len(behaviors), 'Items': behaviors}
-
-with open(f'/tmp/cf-config-{env_name}-updated.json', 'w') as f:
-    json.dump(config, f, indent=2)
-
-print(f"✅ CloudFront {env_name} config updated")
-PYTHON_EOF
+          python3 -c 'import json; import os; env_name = os.environ["ENV_NAME"]; config = json.load(open(f"/tmp/cf-config-{env_name}.json")); alb_dns = os.environ["ALB_DNS"]; origin_id = os.environ["ORIGIN_ID"]; existing = [o for o in config["Origins"]["Items"] if o["Id"] == origin_id]; config["Origins"]["Items"].append({"Id": origin_id, "DomainName": alb_dns, "CustomOriginConfig": {"HTTPPort": 80, "HTTPSPort": 443, "OriginProtocolPolicy": "http-only", "OriginSslProtocols": {"Quantity": 1, "Items": ["TLSv1.2"]}, "OriginReadTimeout": 30, "OriginKeepaliveTimeout": 5}, "ConnectionAttempts": 3, "ConnectionTimeout": 10}) if not existing else None; config["Origins"]["Quantity"] = len(config["Origins"]["Items"]) if not existing else config["Origins"]["Quantity"]; [o.update({"DomainName": alb_dns}) for o in config["Origins"]["Items"] if o["Id"] == origin_id] if existing else None; print(f"Added new origin: {origin_id}") if not existing else print(f"Updated origin DNS: {origin_id} -> {alb_dns}"); behaviors = config.get("CacheBehaviors", {}).get("Items", []); [behaviors.append({"PathPattern": path, "TargetOriginId": target_origin, "ViewerProtocolPolicy": "redirect-to-https", "AllowedMethods": {"Quantity": 7, "Items": ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"], "CachedMethods": {"Quantity": 2, "Items": ["GET", "HEAD"]}}, "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad", "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3", "Compress": True}) or print(f"Added cache behavior: {path}") for path, target_origin in [("/argocd/*", origin_id), ("/grafana/*", origin_id), ("/api/*", origin_id)] if not any(b["PathPattern"] == path for b in behaviors)]; config.update({"CacheBehaviors": {"Quantity": len(behaviors), "Items": behaviors}}); json.dump(config, open(f"/tmp/cf-config-{env_name}-updated.json", "w"), indent=2); print(f"CloudFront {env_name} config updated")'
           
           # Apply updated config
           aws cloudfront update-distribution \
@@ -215,6 +145,3 @@ PYTHON_EOF
         
         echo ""
         echo "✅ Both CloudFront distributions updated successfully"
-      env:
-        ALB_DNS: ${{ steps.get-alb.outputs.alb_dns }}
-        ORIGIN_ID: ${{ inputs.origin_id }}
