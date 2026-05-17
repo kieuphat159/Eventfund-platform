@@ -229,6 +229,19 @@ jobs:
           argocd_target_revision: ${{ steps.config.outputs.argocd_target_revision }}
           argocd_app_namespace: ${{ steps.config.outputs.argocd_app_namespace }}
 
+      # ─── Apply Persistent State ──────────────────────────────────────────────
+      - name: Terraform Init (Persistent)
+        working-directory: terraform/persistent
+        timeout-minutes: 10
+        run: terraform init
+
+      - name: "[0/3] Apply Persistent State (VPC, ECR, S3, CloudFront, IAM)"
+        working-directory: terraform/persistent
+        timeout-minutes: 20
+        run: |
+          terraform apply -auto-approve
+          echo "✅ Persistent resources applied"
+
       # ─── Apply Cluster State ─────────────────────────────────────────────────
       - name: Terraform Init (Cluster)
         working-directory: terraform/cluster
@@ -242,7 +255,7 @@ jobs:
           name: terraform-plan-cluster-${{ github.run_id }}
           path: terraform/cluster/
 
-      - name: "[1/2] Apply Cluster State (EKS, Node Group, NAT)"
+      - name: "[1/3] Apply Cluster State (EKS, Node Group, NAT)"
         if: needs.terraform-plan.outputs.plan_exitcode_cluster == '2'
         working-directory: terraform/cluster
         timeout-minutes: 30
@@ -288,7 +301,7 @@ jobs:
           
           exit 0
 
-      - name: "[2/2] Apply Services State (Helm releases)"
+      - name: "[2/3] Apply Services State (Helm releases)"
         if: steps.plan_services.outputs.exitcode == '2'
         working-directory: terraform/services
         timeout-minutes: 30
