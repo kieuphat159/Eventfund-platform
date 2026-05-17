@@ -1,4 +1,4 @@
-﻿name: Update CloudFront Origin
+name: Update CloudFront Origin
 description: Update CloudFront distribution with ALB origin from EKS Ingress
 
 inputs:
@@ -7,6 +7,12 @@ inputs:
     required: true
   project_name:
     description: 'Project name for EKS cluster'
+    required: true
+  cloudfront_dev_distribution_id:
+    description: 'CloudFront Dev distribution ID'
+    required: true
+  cloudfront_prod_distribution_id:
+    description: 'CloudFront Prod distribution ID'
     required: true
   ingress_group_name:
     description: 'ALB Ingress group name'
@@ -80,34 +86,16 @@ runs:
         echo "  ALB_DNS=\$(kubectl get ingress -n eventfund-dev api-ingress -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')"
         exit 1
 
-    - name: Get CloudFront distribution IDs
-      id: get-cf
-      shell: bash
-      run: |
-        # Get both dev and prod CloudFront distribution IDs
-        CF_DEV_ID=$(terraform -chdir=terraform/persistent output -raw cloudfront_dev_distribution_id 2>/dev/null || echo "")
-        CF_PROD_ID=$(terraform -chdir=terraform/persistent output -raw cloudfront_prod_distribution_id 2>/dev/null || echo "")
-        
-        if [ -z "$CF_DEV_ID" ] || [ -z "$CF_PROD_ID" ]; then
-          echo "❌ Could not get CloudFront distribution IDs from Terraform output"
-          echo "Dev ID: $CF_DEV_ID"
-          echo "Prod ID: $CF_PROD_ID"
-          exit 1
-        fi
-        
-        echo "dev_distribution_id=$CF_DEV_ID" >> $GITHUB_OUTPUT
-        echo "prod_distribution_id=$CF_PROD_ID" >> $GITHUB_OUTPUT
-        echo "✅ CloudFront Dev distribution ID: $CF_DEV_ID"
-        echo "✅ CloudFront Prod distribution ID: $CF_PROD_ID"
-
     - name: Update CloudFront distributions (Dev + Prod)
       shell: bash
       env:
         ALB_DNS: ${{ steps.get-alb.outputs.alb_dns }}
         ORIGIN_ID: ${{ inputs.origin_id }}
+        CF_DEV_ID: ${{ inputs.cloudfront_dev_distribution_id }}
+        CF_PROD_ID: ${{ inputs.cloudfront_prod_distribution_id }}
       run: |
-        CF_DEV_ID="${{ steps.get-cf.outputs.dev_distribution_id }}"
-        CF_PROD_ID="${{ steps.get-cf.outputs.prod_distribution_id }}"
+        echo "CloudFront Dev ID: $CF_DEV_ID"
+        echo "CloudFront Prod ID: $CF_PROD_ID"
         
         # Function to update a CloudFront distribution
         update_cloudfront() {

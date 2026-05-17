@@ -38,9 +38,21 @@ outputs:
   cloudfront_distribution_id:
     description: 'CloudFront distribution ID for frontend'
     value: ${{ steps.load.outputs.cloudfront_distribution_id }}
+  cloudfront_dev_distribution_id:
+    description: 'CloudFront Dev distribution ID'
+    value: ${{ steps.load.outputs.cloudfront_dev_distribution_id }}
+  cloudfront_prod_distribution_id:
+    description: 'CloudFront Prod distribution ID'
+    value: ${{ steps.load.outputs.cloudfront_prod_distribution_id }}
   argocd_repo_url:
     description: 'ArgoCD Git repo URL'
     value: ${{ steps.load.outputs.argocd_repo_url }}
+  argocd_target_revision:
+    description: 'ArgoCD target revision (branch)'
+    value: ${{ steps.load.outputs.argocd_target_revision }}
+  argocd_app_namespace:
+    description: 'ArgoCD application namespace'
+    value: ${{ steps.load.outputs.argocd_app_namespace }}
   s3_security_reports_bucket:
     description: 'S3 Security Reports Bucket'
     value: ${{ steps.load.outputs.s3_security_reports_bucket }}
@@ -160,8 +172,18 @@ runs:
         echo "cloudfront_distribution_id=${CLOUDFRONT_DIST_ID}" >> $GITHUB_OUTPUT
         echo "✅ Using CloudFront distribution: ${CLOUDFRONT_DIST_ID}"
 
+        # Both dev and prod CloudFront distribution IDs (for update-cloudfront-origin action)
+        CLOUDFRONT_DEV_ID=$(yq ".environments.dev.cloudfront_distribution_id" $CONFIG_FILE)
+        CLOUDFRONT_PROD_ID=$(yq ".environments.prod.cloudfront_distribution_id" $CONFIG_FILE)
+        echo "cloudfront_dev_distribution_id=${CLOUDFRONT_DEV_ID}" >> $GITHUB_OUTPUT
+        echo "cloudfront_prod_distribution_id=${CLOUDFRONT_PROD_ID}" >> $GITHUB_OUTPUT
+        echo "✅ CloudFront Dev ID: ${CLOUDFRONT_DEV_ID}"
+        echo "✅ CloudFront Prod ID: ${CLOUDFRONT_PROD_ID}"
+
         # ArgoCD
         echo "argocd_repo_url=$(yq '.argocd.repo_url' $CONFIG_FILE)" >> $GITHUB_OUTPUT
+        echo "argocd_target_revision=$(yq '.argocd.target_revision' $CONFIG_FILE)" >> $GITHUB_OUTPUT
+        echo "argocd_app_namespace=$(yq '.argocd.app_namespace' $CONFIG_FILE)" >> $GITHUB_OUTPUT
 
         # Node
         echo "node_version=$(yq '.node.version' $CONFIG_FILE)" >> $GITHUB_OUTPUT
