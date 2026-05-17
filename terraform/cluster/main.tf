@@ -43,7 +43,6 @@ module "eks" {
   authentication_mode             = var.authentication_mode
   bootstrap_admin_permissions     = var.bootstrap_admin_permissions
   admin_user_arns                 = var.admin_user_arns
-  github_actions_role_arn         = data.terraform_remote_state.persistent.outputs.github_actions_role_arn
 }
 
 # ─── Chờ EKS API server sẵn sàng ─────────────────────────────────────────────
