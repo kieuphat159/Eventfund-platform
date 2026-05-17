@@ -79,8 +79,8 @@ jobs:
         uses: dorny/paths-filter@v3
         id: changes
         with:
-          # workflow_dispatch: deploy cả hai theo input; workflow_run: detect từ diff
-          base: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || '' }}
+          # Compare with previous commit to detect changes
+          base: HEAD~1
           filters: |
             backend:
               - 'backend/**'
