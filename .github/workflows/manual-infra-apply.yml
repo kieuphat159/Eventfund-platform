@@ -235,6 +235,14 @@ jobs:
         timeout-minutes: 10
         run: terraform init
 
+      - name: Fix OAC state if needed
+        working-directory: terraform/persistent
+        run: |
+          # Remove OAC from state to let Terraform recreate with correct names
+          # This handles the case where OAC names changed in code
+          terraform state rm module.frontend_dev.aws_cloudfront_origin_access_control.frontend 2>/dev/null || echo "OAC dev not in state"
+          terraform state rm module.frontend_prod.aws_cloudfront_origin_access_control.frontend 2>/dev/null || echo "OAC prod not in state"
+
       - name: "[0/3] Apply Persistent State (VPC, ECR, S3, CloudFront, IAM)"
         working-directory: terraform/persistent
         timeout-minutes: 20
