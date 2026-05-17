@@ -281,53 +281,6 @@ jobs:
           timeout: 600
           max-restarts: -1
 
-      - name: Wait for ArgoCD Applications to sync
-        timeout-minutes: 10
-        run: |
-          echo "Waiting for ArgoCD Applications to sync (created by Terraform)..."
-          
-          # Wait for dev application to be synced
-          for i in {1..60}; do
-            STATUS=$(kubectl get application eventfund-dev -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "Unknown")
-            HEALTH=$(kubectl get application eventfund-dev -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || echo "Unknown")
-            
-            echo "[$i/60] Dev app - Sync: $STATUS, Health: $HEALTH"
-            
-            if [ "$STATUS" = "Synced" ]; then
-              echo "✅ Dev application synced"
-              break
-            fi
-            
-            if [ $i -eq 60 ]; then
-              echo "⚠️ Dev application not synced after 10 minutes, continuing anyway..."
-            fi
-            
-            sleep 10
-          done
-          
-          # Wait for prod application to be synced
-          for i in {1..60}; do
-            STATUS=$(kubectl get application eventfund-prod -n argocd -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "Unknown")
-            HEALTH=$(kubectl get application eventfund-prod -n argocd -o jsonpath='{.status.health.status}' 2>/dev/null || echo "Unknown")
-            
-            echo "[$i/60] Prod app - Sync: $STATUS, Health: $HEALTH"
-            
-            if [ "$STATUS" = "Synced" ]; then
-              echo "✅ Prod application synced"
-              break
-            fi
-            
-            if [ $i -eq 60 ]; then
-              echo "⚠️ Prod application not synced after 10 minutes, continuing anyway..."
-            fi
-            
-            sleep 10
-          done
-          
-          echo ""
-          echo "ArgoCD Applications status:"
-          kubectl get applications -n argocd
-
       - name: Update CloudFront origin with ALB DNS
         timeout-minutes: 10
         uses: ./.github/actions/update-cloudfront-origin
@@ -338,7 +291,7 @@ jobs:
           cloudfront_prod_distribution_id: ${{ steps.config.outputs.cloudfront_prod_distribution_id }}
           ingress_group_name: eventfund-shared
           origin_id: alb-internal
-          timeout_minutes: '5'
+          timeout_minutes: '8'
 
       - name: Render alertmanager config with secrets
         env:
