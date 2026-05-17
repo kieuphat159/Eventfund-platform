@@ -68,15 +68,16 @@ jobs:
         working-directory: frontend
         run: npm run build
 
-      # Use S3 sync action with optimizations
+      # Upload to S3 using AWS CLI
       - name: Upload to S3
-        uses: jakejarvis/s3-sync-action@v0.5.1
-        with:
-          args: --follow-symlinks --delete --cache-control "public,max-age=31536000,immutable"
-        env:
-          AWS_S3_BUCKET: ${{ steps.config.outputs.frontend_s3_bucket }}
-          AWS_REGION: ${{ steps.config.outputs.aws_region }}
-          SOURCE_DIR: frontend/dist
+        shell: bash
+        run: |
+          aws s3 sync frontend/dist/ s3://${{ steps.config.outputs.frontend_s3_bucket }}/ \
+            --follow-symlinks \
+            --delete \
+            --cache-control "public,max-age=31536000,immutable" \
+            --region ${{ steps.config.outputs.aws_region }}
+          echo "✅ Uploaded frontend to S3: ${{ steps.config.outputs.frontend_s3_bucket }}"
 
       # Get CloudFront distribution ID by querying S3 bucket origin
       - name: Get CloudFront distribution ID
