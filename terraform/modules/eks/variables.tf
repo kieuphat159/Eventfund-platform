@@ -90,9 +90,3 @@ variable "admin_user_arns" {
   description = "List of IAM user ARNs to grant cluster admin access (for local development)"
   default     = []
 }
-
-variable "github_actions_role_arn" {
-  type        = string
-  description = "IAM role ARN for GitHub Actions (CI/CD access)"
-  default     = ""
-}
