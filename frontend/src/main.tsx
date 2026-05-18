@@ -1,5 +1,5 @@
 // Must be first — patches process.nextTick and other Node globals before
-// Web3Auth / readable-stream bundles execute
+// Web3Auth / readable-stream bundles execute aa
 import './polyfills'
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from 'react-router-dom';
