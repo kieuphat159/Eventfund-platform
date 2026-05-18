@@ -9,7 +9,7 @@ import { dbErrorHandler } from "./utils/dbErrorHandler.js";
 
 const app = express();
 
-// Security middleware
+// Security middleware aa
 app.use(helmet());
 
 const allowedOrigins = (config.allowedOrigins ?? 'http://localhost:5173')
