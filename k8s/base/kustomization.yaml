@@ -25,5 +25,4 @@ resources:
   - monitoring/prometheus-rules.yaml
   # alertmanager-config.yaml được apply riêng trong manual-infra-apply workflow
   # không đưa vào ArgoCD sync để tránh conflict với Prometheus Helm
-  - monitoring/grafana-ingress.yaml
-  - argocd/argocd-ingress.yaml
+  # ArgoCD và Grafana Ingress được tạo riêng trong namespace của chúng, không qua kustomize overlay
