@@ -96,89 +96,33 @@ runs:
       run: |
         echo "CloudFront Dev ID: $CF_DEV_ID"
         echo "CloudFront Prod ID: $CF_PROD_ID"
+        echo "New ALB DNS: $ALB_DNS"
         
-        # Function to update a CloudFront distribution
+        # Function to update CloudFront origin DomainName
         update_cloudfront() {
           local CF_ID=$1
           local ENV_NAME=$2
           
+          echo ""
           echo "Updating CloudFront $ENV_NAME ($CF_ID)..."
           
           # Get current distribution config
-          aws cloudfront get-distribution-config --id "$CF_ID" --output json > /tmp/cf-full-${ENV_NAME}.json
-          ETAG=$(jq -r '.ETag' /tmp/cf-full-${ENV_NAME}.json)
-          jq '.DistributionConfig' /tmp/cf-full-${ENV_NAME}.json > /tmp/cf-config-${ENV_NAME}.json
+          aws cloudfront get-distribution-config --id "$CF_ID" --output json > /tmp/cf-${ENV_NAME}.json
+          ETAG=$(jq -r '.ETag' /tmp/cf-${ENV_NAME}.json)
           
-          # Check if origin exists, if yes update DomainName, if no add new origin
-          ORIGIN_EXISTS=$(jq --arg id "$ORIGIN_ID" '.Origins.Items | any(.Id == $id)' /tmp/cf-config-${ENV_NAME}.json)
-          
-          if [ "$ORIGIN_EXISTS" = "true" ]; then
-            echo "Updating existing origin: $ORIGIN_ID"
-            jq --arg id "$ORIGIN_ID" --arg dns "$ALB_DNS" \
-              '(.Origins.Items[] | select(.Id == $id) | .DomainName) = $dns' \
-              /tmp/cf-config-${ENV_NAME}.json > /tmp/cf-config-${ENV_NAME}-updated.json
-          else
-            echo "Adding new origin: $ORIGIN_ID"
-            jq --arg id "$ORIGIN_ID" --arg dns "$ALB_DNS" \
-              '.Origins.Items += [{
-                "Id": $id,
-                "DomainName": $dns,
-                "OriginPath": "",
-                "CustomHeaders": {"Quantity": 0, "Items": []},
-                "CustomOriginConfig": {
-                  "HTTPPort": 80,
-                  "HTTPSPort": 443,
-                  "OriginProtocolPolicy": "http-only",
-                  "OriginSslProtocols": {"Quantity": 1, "Items": ["TLSv1.2"]},
-                  "OriginReadTimeout": 30,
-                  "OriginKeepaliveTimeout": 5
-                },
-                "ConnectionAttempts": 3,
-                "ConnectionTimeout": 10,
-                "OriginShield": {"Enabled": false}
-              }] | .Origins.Quantity = (.Origins.Items | length)' \
-              /tmp/cf-config-${ENV_NAME}.json > /tmp/cf-config-${ENV_NAME}-updated.json
-          fi
-          
-          # Add cache behaviors if not exist
-          for path in "/argocd/*" "/grafana/*" "/api/*"; do
-            BEHAVIOR_EXISTS=$(jq --arg path "$path" '.CacheBehaviors.Items // [] | any(.PathPattern == $path)' /tmp/cf-config-${ENV_NAME}-updated.json)
-            if [ "$BEHAVIOR_EXISTS" = "false" ]; then
-              echo "Adding cache behavior: $path"
-              jq --arg path "$path" --arg id "$ORIGIN_ID" \
-                '.CacheBehaviors.Items += [{
-                  "PathPattern": $path,
-                  "TargetOriginId": $id,
-                  "ViewerProtocolPolicy": "redirect-to-https",
-                  "TrustedSigners": {"Enabled": false, "Quantity": 0},
-                  "TrustedKeyGroups": {"Enabled": false, "Quantity": 0},
-                  "AllowedMethods": {
-                    "Quantity": 7,
-                    "Items": ["GET","HEAD","OPTIONS","PUT","POST","PATCH","DELETE"],
-                    "CachedMethods": {"Quantity": 2, "Items": ["GET","HEAD"]}
-                  },
-                  "SmoothStreaming": false,
-                  "Compress": true,
-                  "LambdaFunctionAssociations": {"Quantity": 0},
-                  "FunctionAssociations": {"Quantity": 0},
-                  "FieldLevelEncryptionId": "",
-                  "RealtimeLogConfigArn": "",
-                  "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
-                  "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3"
-                }] | .CacheBehaviors.Quantity = (.CacheBehaviors.Items | length)' \
-                /tmp/cf-config-${ENV_NAME}-updated.json > /tmp/cf-config-${ENV_NAME}-temp.json
-              mv /tmp/cf-config-${ENV_NAME}-temp.json /tmp/cf-config-${ENV_NAME}-updated.json
-            fi
-          done
+          # Update origin DomainName
+          jq --arg dns "$ALB_DNS" --arg id "$ORIGIN_ID" \
+            '.DistributionConfig | (.Origins.Items[] | select(.Id == $id) | .DomainName) = $dns' \
+            /tmp/cf-${ENV_NAME}.json > /tmp/cf-config-${ENV_NAME}.json
           
           # Apply updated config
           aws cloudfront update-distribution \
             --id "$CF_ID" \
-            --distribution-config file:///tmp/cf-config-${ENV_NAME}-updated.json \
             --if-match "$ETAG" \
+            --distribution-config file:///tmp/cf-config-${ENV_NAME}.json \
             --region us-east-1 > /dev/null
           
-          echo "✅ CloudFront $ENV_NAME updated with ALB origin: $ALB_DNS"
+          echo "✅ CloudFront $ENV_NAME updated: origin '$ORIGIN_ID' now points to $ALB_DNS"
         }
         
         # Update both dev and prod CloudFront distributions
