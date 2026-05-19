@@ -133,16 +133,9 @@ resource "aws_iam_policy" "alb_controller" {
         Resource = "*"
       },
       {
-        Effect    = "Allow"
-        Action    = ["ec2:CreateTags"]
-        Resource  = "arn:aws:ec2:*:*:security-group/*"
-        Condition = { StringEquals = { "ec2:CreateAction" = "CreateSecurityGroup" }, Null = { "aws:RequestedRegion" = "false" } }
-      },
-      {
-        Effect    = "Allow"
-        Action    = ["ec2:CreateTags", "ec2:DeleteTags"]
-        Resource  = "arn:aws:ec2:*:*:security-group/*"
-        Condition = { Null = { "aws:RequestTag/elbv2.k8s.aws/cluster" = "false", "aws:ResourceTag/elbv2.k8s.aws/cluster" = "false" } }
+        Effect   = "Allow"
+        Action   = ["ec2:CreateTags", "ec2:DeleteTags"]
+        Resource = "arn:aws:ec2:*:*:security-group/*"
       },
       {
         Effect    = "Allow"
