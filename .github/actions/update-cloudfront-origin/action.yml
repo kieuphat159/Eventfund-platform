@@ -96,39 +96,37 @@ runs:
       run: |
         echo "CloudFront Dev ID: $CF_DEV_ID"
         echo "CloudFront Prod ID: $CF_PROD_ID"
+        echo "New ALB DNS: $ALB_DNS"
         
-        # Function to update a CloudFront distribution
+        # Function to update CloudFront origin DomainName
         update_cloudfront() {
           local CF_ID=$1
           local ENV_NAME=$2
           
+          echo ""
           echo "Updating CloudFront $ENV_NAME ($CF_ID)..."
           
           # Get current distribution config
-          ETAG=$(aws cloudfront get-distribution-config --id "$CF_ID" --query 'ETag' --output text)
-          aws cloudfront get-distribution-config --id "$CF_ID" \
-            --query 'DistributionConfig' --output json > /tmp/cf-config-${ENV_NAME}.json
-
-          # Update config using Python
-          python3 -c 'import json; import os; env_name = os.environ["ENV_NAME"]; config = json.load(open(f"/tmp/cf-config-{env_name}.json")); alb_dns = os.environ["ALB_DNS"]; origin_id = os.environ["ORIGIN_ID"]; existing = [o for o in config["Origins"]["Items"] if o["Id"] == origin_id]; config["Origins"]["Items"].append({"Id": origin_id, "DomainName": alb_dns, "CustomOriginConfig": {"HTTPPort": 80, "HTTPSPort": 443, "OriginProtocolPolicy": "http-only", "OriginSslProtocols": {"Quantity": 1, "Items": ["TLSv1.2"]}, "OriginReadTimeout": 30, "OriginKeepaliveTimeout": 5}, "ConnectionAttempts": 3, "ConnectionTimeout": 10}) if not existing else None; config["Origins"]["Quantity"] = len(config["Origins"]["Items"]) if not existing else config["Origins"]["Quantity"]; [o.update({"DomainName": alb_dns}) for o in config["Origins"]["Items"] if o["Id"] == origin_id] if existing else None; print(f"Added new origin: {origin_id}") if not existing else print(f"Updated origin DNS: {origin_id} -> {alb_dns}"); behaviors = config.get("CacheBehaviors", {}).get("Items", []); [behaviors.append({"PathPattern": path, "TargetOriginId": target_origin, "ViewerProtocolPolicy": "redirect-to-https", "AllowedMethods": {"Quantity": 7, "Items": ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"], "CachedMethods": {"Quantity": 2, "Items": ["GET", "HEAD"]}}, "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad", "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3", "Compress": True}) or print(f"Added cache behavior: {path}") for path, target_origin in [("/argocd/*", origin_id), ("/grafana/*", origin_id), ("/api/*", origin_id)] if not any(b["PathPattern"] == path for b in behaviors)]; config.update({"CacheBehaviors": {"Quantity": len(behaviors), "Items": behaviors}}); json.dump(config, open(f"/tmp/cf-config-{env_name}-updated.json", "w"), indent=2); print(f"CloudFront {env_name} config updated")'
+          aws cloudfront get-distribution-config --id "$CF_ID" --output json > /tmp/cf-${ENV_NAME}.json
+          ETAG=$(jq -r '.ETag' /tmp/cf-${ENV_NAME}.json)
+          
+          # Update origin DomainName
+          jq --arg dns "$ALB_DNS" --arg id "$ORIGIN_ID" \
+            '.DistributionConfig | (.Origins.Items[] | select(.Id == $id) | .DomainName) = $dns' \
+            /tmp/cf-${ENV_NAME}.json > /tmp/cf-config-${ENV_NAME}.json
           
           # Apply updated config
           aws cloudfront update-distribution \
             --id "$CF_ID" \
-            --distribution-config file:///tmp/cf-config-${ENV_NAME}-updated.json \
             --if-match "$ETAG" \
-            --region us-east-1
+            --distribution-config file:///tmp/cf-config-${ENV_NAME}.json \
+            --region us-east-1 > /dev/null
           
-          echo "✅ CloudFront $ENV_NAME updated with ALB origin: $ALB_DNS"
+          echo "✅ CloudFront $ENV_NAME updated: origin '$ORIGIN_ID' now points to $ALB_DNS"
         }
         
         # Update both dev and prod CloudFront distributions
-        export ALB_DNS ORIGIN_ID
-        
-        export ENV_NAME="dev"
         update_cloudfront "$CF_DEV_ID" "dev"
-        
-        export ENV_NAME="prod"
         update_cloudfront "$CF_PROD_ID" "prod"
         
         echo ""

@@ -56,4 +56,4 @@ patches:
     patch: |-
       - op: add
         path: /metadata/annotations/alb.ingress.kubernetes.io~1tags
-        value: "Environment=prod,ManagedBy=kustomize"
+        value: "ManagedBy=kustomize"
