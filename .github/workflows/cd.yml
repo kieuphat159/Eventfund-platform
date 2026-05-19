@@ -84,6 +84,7 @@ jobs:
     with:
       image_tag: ${{ needs.check.outputs.image_tag }}
       environment: ${{ needs.check.outputs.environment }}
+      branch: ${{ github.event.workflow_run.head_branch }}
     secrets:
       AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
 
@@ -98,5 +99,6 @@ jobs:
       id-token: write
     with:
       environment: ${{ needs.check.outputs.environment }}
+      branch: ${{ github.event.workflow_run.head_branch }}
     secrets:
       AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
