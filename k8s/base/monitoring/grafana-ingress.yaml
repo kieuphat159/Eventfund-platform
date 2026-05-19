@@ -15,8 +15,8 @@ spec:
   rules:
     - http:
         paths:
-          - path: /grafana
-            pathType: Prefix
+          - path: /grafana/*
+            pathType: ImplementationSpecific
             backend:
               service:
                 name: prometheus-grafana

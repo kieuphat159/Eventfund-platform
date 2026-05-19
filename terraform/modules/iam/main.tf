@@ -45,7 +45,10 @@ resource "aws_iam_policy" "eso_ssm" {
           "ssm:GetParameters",
           "ssm:GetParametersByPath"
         ]
-        Resource = "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter${var.ssm_prefix}/*"
+        Resource = [
+          "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/eventfund/dev/backend/*",
+          "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/eventfund/prod/backend/*"
+        ]
       },
       {
         # ssm:DescribeParameters không support resource-level permission
