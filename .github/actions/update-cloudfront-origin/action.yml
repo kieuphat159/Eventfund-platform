@@ -110,7 +110,78 @@ runs:
             --query 'DistributionConfig' --output json > /tmp/cf-config-${ENV_NAME}.json
 
           # Update config using Python
-          python3 -c 'import json; import os; env_name = os.environ["ENV_NAME"]; config = json.load(open(f"/tmp/cf-config-{env_name}.json")); alb_dns = os.environ["ALB_DNS"]; origin_id = os.environ["ORIGIN_ID"]; existing = [o for o in config["Origins"]["Items"] if o["Id"] == origin_id]; config["Origins"]["Items"].append({"Id": origin_id, "DomainName": alb_dns, "OriginPath": "", "CustomOriginConfig": {"HTTPPort": 80, "HTTPSPort": 443, "OriginProtocolPolicy": "http-only", "OriginSslProtocols": {"Quantity": 1, "Items": ["TLSv1.2"]}, "OriginReadTimeout": 30, "OriginKeepaliveTimeout": 5}, "ConnectionAttempts": 3, "ConnectionTimeout": 10, "CustomHeaders": {"Quantity": 0, "Items": []}}) if not existing else None; config["Origins"]["Quantity"] = len(config["Origins"]["Items"]) if not existing else config["Origins"]["Quantity"]; [o.update({"DomainName": alb_dns}) for o in config["Origins"]["Items"] if o["Id"] == origin_id] if existing else None; print(f"Added new origin: {origin_id}") if not existing else print(f"Updated origin DNS: {origin_id} -> {alb_dns}"); behaviors = config.get("CacheBehaviors", {}).get("Items", []); [behaviors.append({"PathPattern": path, "TargetOriginId": target_origin, "ViewerProtocolPolicy": "redirect-to-https", "AllowedMethods": {"Quantity": 7, "Items": ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"], "CachedMethods": {"Quantity": 2, "Items": ["GET", "HEAD"]}}, "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad", "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3", "Compress": True}) or print(f"Added cache behavior: {path}") for path, target_origin in [("/argocd/*", origin_id), ("/grafana/*", origin_id), ("/api/*", origin_id)] if not any(b["PathPattern"] == path for b in behaviors)]; config.update({"CacheBehaviors": {"Quantity": len(behaviors), "Items": behaviors}}); json.dump(config, open(f"/tmp/cf-config-{env_name}-updated.json", "w"), indent=2); print(f"CloudFront {env_name} config updated")'
+          python3 -c '
+import json
+import os
+
+env_name = os.environ["ENV_NAME"]
+config = json.load(open(f"/tmp/cf-config-{env_name}.json"))
+alb_dns = os.environ["ALB_DNS"]
+origin_id = os.environ["ORIGIN_ID"]
+
+# Check if origin exists
+existing_origin = next((o for o in config["Origins"]["Items"] if o["Id"] == origin_id), None)
+
+if not existing_origin:
+    # Add new origin by copying structure from existing origin and modifying
+    template_origin = config["Origins"]["Items"][0].copy()
+    new_origin = {
+        "Id": origin_id,
+        "DomainName": alb_dns,
+        "OriginPath": "",
+        "CustomHeaders": {"Quantity": 0, "Items": []},
+        "CustomOriginConfig": {
+            "HTTPPort": 80,
+            "HTTPSPort": 443,
+            "OriginProtocolPolicy": "http-only",
+            "OriginSslProtocols": {"Quantity": 1, "Items": ["TLSv1.2"]},
+            "OriginReadTimeout": 30,
+            "OriginKeepaliveTimeout": 5
+        },
+        "ConnectionAttempts": 3,
+        "ConnectionTimeout": 10,
+        "OriginShield": {"Enabled": False}
+    }
+    config["Origins"]["Items"].append(new_origin)
+    config["Origins"]["Quantity"] = len(config["Origins"]["Items"])
+    print(f"Added new origin: {origin_id}")
+else:
+    # Update existing origin DNS
+    existing_origin["DomainName"] = alb_dns
+    print(f"Updated origin DNS: {origin_id} -> {alb_dns}")
+
+# Add cache behaviors by copying DefaultCacheBehavior structure
+default_behavior = config["DefaultCacheBehavior"]
+behaviors = config.get("CacheBehaviors", {}).get("Items", [])
+
+for path in ["/argocd/*", "/grafana/*", "/api/*"]:
+    if not any(b["PathPattern"] == path for b in behaviors):
+        # Copy default behavior and modify
+        new_behavior = {k: v for k, v in default_behavior.items()}
+        new_behavior["PathPattern"] = path
+        new_behavior["TargetOriginId"] = origin_id
+        # Use cache policy instead of ForwardedValues
+        new_behavior["CachePolicyId"] = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
+        new_behavior["OriginRequestPolicyId"] = "216adef6-5c7f-47e4-b989-5492eafa07d3"
+        # Remove ForwardedValues, MinTTL, DefaultTTL, MaxTTL when using CachePolicyId
+        new_behavior.pop("ForwardedValues", None)
+        new_behavior.pop("MinTTL", None)
+        new_behavior.pop("DefaultTTL", None)
+        new_behavior.pop("MaxTTL", None)
+        # Allow all methods for API
+        new_behavior["AllowedMethods"] = {
+            "Quantity": 7,
+            "Items": ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"],
+            "CachedMethods": {"Quantity": 2, "Items": ["GET", "HEAD"]}
+        }
+        behaviors.append(new_behavior)
+        print(f"Added cache behavior: {path}")
+
+config["CacheBehaviors"] = {"Quantity": len(behaviors), "Items": behaviors}
+
+json.dump(config, open(f"/tmp/cf-config-{env_name}-updated.json", "w"), indent=2)
+print(f"CloudFront {env_name} config updated")
+'
           
           # Apply updated config
           aws cloudfront update-distribution \
