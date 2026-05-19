@@ -8,7 +8,6 @@ images:
 
 resources:
   - namespace/namespace.yaml
-  - secrets/secretstore.yaml
   - secrets/externalsecret-backend.yaml
   - backend/configmap.yaml
   - backend/api-deployment.yaml
