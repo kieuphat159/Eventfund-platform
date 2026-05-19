@@ -11,6 +11,10 @@ on:
         description: 'Environment to deploy to'
         type: string
         default: 'dev'
+      branch:
+        description: 'Branch to checkout and commit to'
+        type: string
+        required: true
     secrets:
       AWS_ACCOUNT_ID:
         required: true
@@ -23,6 +27,7 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.branch }}
           token: ${{ secrets.GITHUB_TOKEN }}
           persist-credentials: true
 
