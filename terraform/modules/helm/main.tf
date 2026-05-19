@@ -339,7 +339,7 @@ spec:
   project: default
   source:
     repoURL: ${var.argocd_repo_url}
-    targetRevision: test-ci/cd
+    targetRevision: master
     path: k8s/shared
   destination:
     server: https://kubernetes.default.svc
