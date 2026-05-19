@@ -2,7 +2,9 @@
  * EventFund Platform - Frontend Application
  * Main entry point for the React application
  * 
- * gg
+ * 
+ * 
+ * 
  * 
  * 
  */
