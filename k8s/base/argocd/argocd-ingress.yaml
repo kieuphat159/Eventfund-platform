@@ -15,8 +15,8 @@ spec:
   rules:
     - http:
         paths:
-          - path: /argocd
-            pathType: Prefix
+          - path: /argocd/*
+            pathType: ImplementationSpecific
             backend:
               service:
                 name: argocd-server
