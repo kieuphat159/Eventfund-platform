@@ -7,6 +7,10 @@ on:
         description: 'Environment to deploy to'
         type: string
         default: 'dev'
+      branch:
+        description: 'Branch to checkout'
+        type: string
+        required: true
     secrets:
       AWS_ACCOUNT_ID:
         required: true
@@ -19,6 +23,7 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.branch }}
           persist-credentials: false
 
       - name: Load config
