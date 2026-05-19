@@ -18,6 +18,7 @@ import {
   type GetHistoryParams,
 } from "../../services/listings.service";
 import { formatEther } from "ethers";
+import { logger } from "../../lib/logger";
 
 export const MarketplaceManagement: React.FC = () => {
   const [loading, setLoading] = useState(true);
@@ -76,8 +77,10 @@ export const MarketplaceManagement: React.FC = () => {
         const result = await getMarketplaceHistory(params);
         setHistoryData(result.docs || []);
       } catch (err) {
-        console.error(
-          err instanceof Error ? err.message : "Failed to load history",
+        logger.error(
+          "marketplace-admin",
+          "Failed to load marketplace history",
+          err instanceof Error ? err.message : err,
         );
       } finally {
         setHistoryLoading(false);

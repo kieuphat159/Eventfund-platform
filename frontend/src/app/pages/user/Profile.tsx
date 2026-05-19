@@ -1,12 +1,5 @@
 import React, { useState, useEffect } from "react";
-import {
-  User,
-  Mail,
-  MapPin,
-  Calendar,
-  Camera,
-  Loader2,
-} from "lucide-react";
+import { User, Mail, MapPin, Calendar, Camera, Loader2 } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -25,14 +18,43 @@ import {
   UserProfile,
   UserStats,
 } from "../../services/user.service";
+import { logger } from "../../lib/logger";
+import { notifySuccess, notifyError } from "../../components/shared/notify";
+
+const createDraftProfile = (profile?: UserProfile | null): UserProfile => ({
+  walletAddress: profile?.walletAddress ?? "",
+  username: profile?.username ?? "",
+  email: profile?.email ?? "",
+  role: profile?.role ?? "user",
+  bio: profile?.bio ?? "",
+  location: profile?.location ?? "",
+  avatarUrl: profile?.avatarUrl ?? "",
+  createdAt: profile?.createdAt,
+});
 
 export const Profile: React.FC = () => {
   const { user: authUser, refreshProfile } = useAuth();
   const { show: showLoading, hide: hideLoading } = useLoading();
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [draftProfile, setDraftProfile] =
+    useState<UserProfile>(createDraftProfile());
   const [stats, setStats] = useState<UserStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+
+  const buildUpdatePayload = () => {
+    const payload: Partial<UserProfile> = {
+      bio: draftProfile.bio,
+      location: draftProfile.location,
+    };
+
+    const trimmedUsername = draftProfile.username.trim();
+    if (trimmedUsername.length > 0) {
+      payload.username = trimmedUsername;
+    }
+
+    return payload;
+  };
 
   useEffect(() => {
     const loadInitialData = async () => {
@@ -43,7 +65,7 @@ export const Profile: React.FC = () => {
 
       try {
         setIsLoading(true);
-        showLoading('Loading profile...');
+        showLoading("Loading profile...");
 
         const [profileData, statsData] = await Promise.all([
           userService.getProfile(),
@@ -51,9 +73,14 @@ export const Profile: React.FC = () => {
         ]);
 
         setProfile(profileData);
+        setDraftProfile(createDraftProfile(profileData));
         setStats(statsData);
       } catch (error: any) {
-        console.error("Failed to fetch profile data:", error?.message, error?.data);
+        logger.error(
+          "profile",
+          "Failed to fetch profile data",
+          error?.message || error,
+        );
       } finally {
         setIsLoading(false);
         hideLoading();
@@ -64,24 +91,19 @@ export const Profile: React.FC = () => {
   }, [authUser]);
 
   const handleSave = async () => {
-    if (!profile) return;
-
     try {
       setIsSaving(true);
-      showLoading('Saving profile...');
+      showLoading("Saving profile...");
 
-      const updated = await userService.updateProfile({
-        username: profile.username,
-        bio: profile.bio,
-        location: profile.location,
-      });
+      const updated = await userService.updateProfile(buildUpdatePayload());
 
       setProfile(updated);
+      setDraftProfile(createDraftProfile(updated));
       await refreshProfile();
-      alert("Profile updated successfully!");
-    } catch (error) {
-      console.error("Save profile error:", error);
-      alert("An error occurred while saving changes.");
+      notifySuccess("Profile updated successfully!");
+    } catch (error: any) {
+      logger.error("profile", "Failed to save profile", error);
+      notifyError(error?.message || "An error occurred while saving changes.");
     } finally {
       setIsSaving(false);
       hideLoading();
@@ -111,9 +133,9 @@ export const Profile: React.FC = () => {
           <div className="flex flex-col md:flex-row items-center md:items-start space-y-6 md:space-y-0 md:space-x-6">
             <div className="relative">
               <div className="w-24 h-24 bg-gradient-to-br from-purple-500 to-blue-500 rounded-full flex items-center justify-center border-4 border-slate-800 shadow-xl overflow-hidden">
-                {profile?.avatarUrl ? (
+                {draftProfile.avatarUrl ? (
                   <img
-                    src={profile.avatarUrl}
+                    src={draftProfile.avatarUrl}
                     alt="avatar"
                     className="w-full h-full object-cover"
                   />
@@ -130,12 +152,13 @@ export const Profile: React.FC = () => {
               <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
                 <div>
                   <h2 className="text-2xl font-bold text-white mb-1">
-                    {profile?.username || "Anonymous User"}
+                    {draftProfile.username || "Anonymous User"}
                   </h2>
                   <div className="flex items-center gap-2">
                     <code className="text-sm text-blue-400 bg-blue-500/10 px-3 py-1 rounded border border-blue-500/20">
-                      {profile?.walletAddress?.slice(0, 6)}...
-                      {profile?.walletAddress?.slice(-4)}
+                      {draftProfile.walletAddress
+                        ? `${draftProfile.walletAddress.slice(0, 6)}...${draftProfile.walletAddress.slice(-4)}`
+                        : "Wallet not connected"}
                     </code>
                   </div>
                 </div>
@@ -145,7 +168,10 @@ export const Profile: React.FC = () => {
                 {[
                   { label: "Events Created", value: stats?.eventsCreated ?? 0 },
                   { label: "Tickets Owned", value: stats?.ticketsOwned ?? 0 },
-                  { label: "Investments", value: stats?.totalInvestments ?? "0 ETH" },
+                  {
+                    label: "Investments",
+                    value: stats?.totalInvestments ?? "0 ETH",
+                  },
                   { label: "Member Since", value: stats?.memberSince ?? "N/A" },
                 ].map((s, i) => (
                   <div
@@ -167,18 +193,16 @@ export const Profile: React.FC = () => {
       <Card className="bg-slate-900 border-slate-800">
         <CardHeader>
           <CardTitle className="text-white">Personal Information</CardTitle>
-          <CardDescription>
-            Update your off-chain information
-          </CardDescription>
+          <CardDescription>Update your off-chain information</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="grid md:grid-cols-2 gap-6">
             <div className="space-y-2">
               <Label className="text-slate-300">Display Name</Label>
               <Input
-                value={profile?.username || ""}
+                value={draftProfile.username}
                 onChange={(e) =>
-                  setProfile((p) => (p ? { ...p, username: e.target.value } : null))
+                  setDraftProfile((p) => ({ ...p, username: e.target.value }))
                 }
                 className="bg-slate-800/50 border-slate-700 text-white"
               />
@@ -189,7 +213,7 @@ export const Profile: React.FC = () => {
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                 <Input
-                  value={profile?.email || "N/A"}
+                  value={draftProfile.email || "N/A"}
                   readOnly
                   className="pl-10 bg-slate-800/20 border-slate-800 text-slate-500"
                 />
@@ -200,9 +224,9 @@ export const Profile: React.FC = () => {
           <div className="space-y-2">
             <Label className="text-slate-300">Bio</Label>
             <Textarea
-              value={profile?.bio || ""}
+              value={draftProfile.bio}
               onChange={(e) =>
-                setProfile((p) => (p ? { ...p, bio: e.target.value } : null))
+                setDraftProfile((p) => ({ ...p, bio: e.target.value }))
               }
               className="bg-slate-800/50 border-slate-700 text-white min-h-[100px]"
             />
@@ -214,11 +238,9 @@ export const Profile: React.FC = () => {
               <div className="relative">
                 <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
                 <Input
-                  value={profile?.location || ""}
+                  value={draftProfile.location}
                   onChange={(e) =>
-                    setProfile((p) =>
-                      p ? { ...p, location: e.target.value } : null,
-                    )
+                    setDraftProfile((p) => ({ ...p, location: e.target.value }))
                   }
                   className="pl-10 bg-slate-800/50 border-slate-700 text-white"
                 />

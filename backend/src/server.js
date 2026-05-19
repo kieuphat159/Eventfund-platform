@@ -11,12 +11,12 @@ import app from './app.js';
 import config from './config/env.js';
 import logger from './config/logger.js';
 import { connectDB, disconnectDB } from './config/mongoDB.js';
+import { initializeRedis, disconnectRedis } from './config/redis.js';
 import {
   startAutoEventLifecycleService,
   stopAutoEventLifecycleService,
 } from "./services/events/autoLifecycle.service.js";
 const PORT = config.port;
-import "./config/env.js";
 
 // Store server instance for graceful shutdown
 let server;
@@ -38,12 +38,19 @@ async function startServer() {
     await connectDB();
     logger.info('MongoDB connected successfully');
 
-    startAutoEventLifecycleService({ logger });
+    // Connect to Redis Cloud
+    logger.info('Connecting to Redis Cloud...');
+    try {
+      await initializeRedis();
+      logger.info('Redis Cloud connected successfully');
+    } catch (error) {
+      logger.warn('Redis Cloud connection failed - caching will be disabled', {
+        error: error.message
+      });
+      // Continue without Redis - app will work without cache
+    }
 
-    // TODO: Connect to Redis when rate limiting is implemented
-    // logger.info('Connecting to Redis...');
-    // await connectRedis();
-    // logger.info('Redis connected successfully');
+    startAutoEventLifecycleService({ logger });
 
     // Start Express server
     server = app.listen(PORT, () => {
@@ -88,10 +95,14 @@ async function gracefulShutdown(signal) {
     await disconnectDB();
     logger.info('MongoDB disconnected');
 
-    // TODO: Disconnect from Redis when implemented
-    // logger.info('Disconnecting from Redis...');
-    // await disconnectRedis();
-    // logger.info('Redis disconnected');
+    // Disconnect from Redis
+    logger.info('Disconnecting from Redis...');
+    try {
+      await disconnectRedis();
+      logger.info('Redis disconnected');
+    } catch (error) {
+      logger.warn('Error disconnecting Redis', { error: error.message });
+    }
 
     logger.info('Graceful shutdown completed');
     process.exit(0);

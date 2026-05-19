@@ -15,7 +15,6 @@ import {
 import { User } from "../types/roles";
 import { getWalletAddresses } from "../services/walletService";
 import { userService } from "../services/user.service";
-import { WEB3AUTH_SEPOLIA_CHAIN_ID } from "../web3auth.config";
 import { watchAndCleanWeb3AuthModal, forceCloseWeb3AuthModal } from "../lib/web3authModalCleanup";
 
 const RAW_API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -39,8 +38,11 @@ const AuthContext = createContext<AuthContextType>({
   refreshProfile: async () => {},
 });
 
-
-
+/**
+ * Unified login — works for both social (Google/Facebook) and external wallets
+ * (MetaMask). Web3Auth issues an idToken for both; the backend distinguishes
+ * them by presence of `email` in the JWT payload.
+ */
 async function loginToBackend(
   idToken: string,
   smartAccountAddress: string,
@@ -65,6 +67,16 @@ async function loginToBackend(
   localStorage.setItem("walletAddress", returnedAddress);
   localStorage.setItem("smartAccountAddress", smartAccountAddress);
 
+  // Decode Web3Auth idToken (not app JWT) to determine wallet type for providerService.
+  // Social login idToken always has `email`; MetaMask idToken never does.
+  try {
+    const parts = idToken.split(".");
+    const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+    localStorage.setItem("walletType", payload?.email ? "social" : "external");
+  } catch {
+    localStorage.setItem("walletType", "social"); // safe fallback
+  }
+
   return { returnedAddress };
 }
 
@@ -84,6 +96,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     localStorage.removeItem("jwtToken");
     localStorage.removeItem("walletAddress");
     localStorage.removeItem("smartAccountAddress");
+    localStorage.removeItem("walletType");
     setUser({ role: "public" });
   }, []);
 
@@ -96,7 +109,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
     try {
       const profile = await userService.getProfile();
-
       setUser({
         walletAddress: profile.walletAddress,
         smartAccountAddress:
@@ -133,51 +145,60 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     bootstrap();
   }, [refreshProfile, clearAuth]);
 
-const connectWallet = useCallback(async () => {
-  setIsLoading(true);
-  setError(null);
+  const connectWallet = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
 
-  // Start watching before opening the modal
-  const stopWatching = watchAndCleanWeb3AuthModal();
+    const stopWatching = watchAndCleanWeb3AuthModal();
 
-  try {
-    await connect();
+    try {
+      await connect();
 
-    // connect() resolves → force close immediately
-    forceCloseWeb3AuthModal();
-    stopWatching();
+      forceCloseWeb3AuthModal();
+      stopWatching();
 
-    if (web3Auth) {
-      await web3Auth.switchChain({ chainId: WEB3AUTH_SEPOLIA_CHAIN_ID });
+      const activeProvider = web3Auth?.provider;
+      if (!activeProvider) throw new Error("Provider not ready");
+
+      const idToken = await getIdentityToken();
+      if (!idToken) throw new Error("Web3Auth did not return an idToken");
+
+      const { smartAccountAddress, eoaAddress } =
+        await getWalletAddresses(activeProvider as any, idToken);
+
+      await loginToBackend(idToken, smartAccountAddress, eoaAddress);
+
+      await refreshProfile();
+    } catch (err: any) {
+      forceCloseWeb3AuthModal();
+      stopWatching();
+      console.error("[Auth] connectWallet error:", err);
+      setError(err.message || "Login failed");
+      clearAuth();
+    } finally {
+      setIsLoading(false);
     }
-
-    const activeProvider = web3Auth?.provider;
-    if (!activeProvider) throw new Error("Provider not ready");
-
-    const { smartAccountAddress, eoaAddress } = await getWalletAddresses(activeProvider as any);
-
-    const idToken = await getIdentityToken();
-    if (!idToken) throw new Error("Identity token not available");
-
-    await loginToBackend(idToken, smartAccountAddress, eoaAddress);
-    await refreshProfile();
-  } catch (err: any) {
-    forceCloseWeb3AuthModal(); // cleanup even on error
-    stopWatching();
-    setError(err.message || "Login failed");
-    clearAuth();
-  } finally {
-    setIsLoading(false);
-  }
-}, [connect, getIdentityToken, web3Auth, refreshProfile, clearAuth]);
+  }, [connect, getIdentityToken, web3Auth, refreshProfile, clearAuth]);
 
   const disconnectWallet = useCallback(async () => {
     try {
-      if (isConnected) await disconnect();
+      // web3Auth.logout({ cleanup: true }) clears the cross-origin iframe session
+      // at wallet.web3auth.io, preventing "Invalid token specified" errors when
+      // switching between MetaMask and social login.
+      if (web3Auth) {
+        try {
+          await web3Auth.logout({ cleanup: true });
+        } catch (err) {
+          console.warn("[Auth] logout({ cleanup: true }) failed, falling back to disconnect():", err);
+          try { await disconnect(); } catch { /* ignore */ }
+        }
+      }
+    } catch (err) {
+      console.warn("[Auth] logout error (non-fatal):", err);
     } finally {
       clearAuth();
     }
-  }, [disconnect, isConnected, clearAuth]);
+  }, [web3Auth, disconnect, clearAuth]);
 
   return (
     <AuthContext.Provider
