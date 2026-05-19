@@ -315,3 +315,50 @@ MANIFEST
 
   depends_on = [helm_release.argocd, helm_release.eso]
 }
+
+resource "null_resource" "argocd_app_shared" {
+  triggers = {
+    cluster_name    = var.cluster_name
+    region          = var.region
+    repo_url        = var.argocd_repo_url
+  }
+
+  provisioner "local-exec" {
+    on_failure = continue
+    command    = <<-EOT
+      aws eks update-kubeconfig --region ${var.region} --name ${var.cluster_name}
+      kubectl apply -f - <<'MANIFEST'
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: eventfund-shared
+  namespace: argocd
+  labels:
+    environment: shared
+spec:
+  project: default
+  source:
+    repoURL: ${var.argocd_repo_url}
+    targetRevision: test-ci/cd
+    path: k8s/shared
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+MANIFEST
+    EOT
+  }
+
+  provisioner "local-exec" {
+    when       = destroy
+    on_failure = continue
+    command    = <<-EOT
+      aws eks update-kubeconfig --region ${self.triggers.region} --name ${self.triggers.cluster_name} 2>/dev/null || exit 0
+      kubectl delete application eventfund-shared -n argocd --ignore-not-found=true 2>/dev/null || true
+    EOT
+  }
+
+  depends_on = [helm_release.argocd, helm_release.eso]
+}

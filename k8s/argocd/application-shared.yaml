@@ -1,0 +1,20 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: eventfund-shared
+  namespace: argocd
+  labels:
+    environment: shared
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/kieuphat159/Eventfund-platform.git
+    targetRevision: master
+    path: k8s/shared
+  destination:
+    server: https://kubernetes.default.svc
+    # Không chỉ định namespace, để mỗi resource dùng namespace của chính nó
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
