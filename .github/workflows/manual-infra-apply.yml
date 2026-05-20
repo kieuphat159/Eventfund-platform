@@ -293,5 +293,15 @@ jobs:
           origin_id: alb-internal
           timeout_minutes: '8'
 
-      # NOTE: Alertmanager config is now managed by ArgoCD via k8s/root/monitoring.yaml
-      # using kube-prometheus-stack Helm chart. Configure alerting via Helm values instead.
+      - name: Render alertmanager config with secrets
+        env:
+          ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
+          ALERT_EMAIL_PASSWORD: ${{ secrets.ALERT_EMAIL_PASSWORD }}
+        run: |
+          if [ -n "$ALERT_EMAIL" ] && [ -n "$ALERT_EMAIL_PASSWORD" ]; then
+            export ALERT_EMAIL ALERT_EMAIL_PASSWORD
+            envsubst < k8s/base/monitoring/alertmanager-config.yaml | kubectl apply -f -
+            echo "✅ Alertmanager config applied"
+          else
+            echo "⚠️ ALERT_EMAIL or ALERT_EMAIL_PASSWORD not set, skipping alertmanager config"
+          fi

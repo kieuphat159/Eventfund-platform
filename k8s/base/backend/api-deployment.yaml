@@ -17,6 +17,7 @@ spec:
         app: api
         component: backend
     spec:
+      # Spread pods across nodes
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: kubernetes.io/hostname
@@ -27,14 +28,14 @@ spec:
       containers:
         - name: api
           image: eventfund-backend:latest
-          command: ["nod", "src/server.js"]
+          command: ["node", "src/server.js"]
           ports:
             - containerPort: 4000
           envFrom:
             - configMapRef:
                 name: eventfund-backend-config
             - secretRef:
-                name: eventfeund-backend-secret
+                name: eventfund-backend-secret
           resources:
             requests:
               cpu: "100m"

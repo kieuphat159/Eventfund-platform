@@ -5,22 +5,18 @@ metadata:
   namespace: argocd
   labels:
     environment: prod
-    managed-by: root-app
 spec:
   project: default
-  
   source:
     repoURL: https://github.com/kieuphat159/Eventfund-platform.git
-    targetRevision: master
+    targetRevision: master  # Prod environment uses master branch
     path: k8s/overlays/prod
-  
   destination:
     server: https://kubernetes.default.svc
     namespace: eventfund-prod
-  
   syncPolicy:
     automated:
-      prune: true
-      selfHeal: true
+      prune: true      # xóa resource không còn trong Git
+      selfHeal: true   # tự fix nếu ai đó sửa trực tiếp trên cluster
     syncOptions:
       - CreateNamespace=true

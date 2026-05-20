@@ -193,3 +193,38 @@ resource "aws_eks_node_group" "this" {
     aws_iam_role_policy_attachment.nodes_ecr_policy,
   ]
 }
+
+# ─── EKS Access Entry: GitHub Actions ────────────────────────────────────────
+# NOTE: GitHubActionsRole access entry is automatically created by AWS EKS
+# when bootstrap_cluster_creator_admin_permissions = true
+# No need to create it manually via Terraform to avoid ResourceInUseException
+#
+# The cluster creator (GitHubActionsRole) automatically gets admin access
+# through the bootstrap process when the cluster is created.
+
+# ─── EKS Access Entry: Admin Users (Local Development) ───────────────────────
+resource "aws_eks_access_entry" "admin_users" {
+  for_each = toset(var.admin_user_arns)
+
+  cluster_name  = aws_eks_cluster.this.name
+  principal_arn = each.value
+  type          = "STANDARD"
+
+  tags = {
+    Name = "${var.cluster_name}-admin-user-access"
+  }
+}
+
+resource "aws_eks_access_policy_association" "admin_users" {
+  for_each = toset(var.admin_user_arns)
+
+  cluster_name  = aws_eks_cluster.this.name
+  principal_arn = each.value
+  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+
+  access_scope {
+    type = "cluster"
+  }
+
+  depends_on = [aws_eks_access_entry.admin_users]
+}

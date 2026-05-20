@@ -1,0 +1,71 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: eventfund-alerts
+  namespace: monitoring
+  labels:
+    release: prometheus  # match với helm release name
+spec:
+  groups:
+    - name: node-alerts
+      interval: 30s
+      rules:
+        - alert: HighNodeCPU
+          expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High CPU on {{ $labels.instance }}"
+            description: "CPU > 80% ({{ $value | humanize }}%)"
+
+        - alert: HighNodeMemory
+          expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 80
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High memory on {{ $labels.instance }}"
+            description: "Memory > 80% ({{ $value | humanize }}%)"
+
+    - name: pod-alerts
+      interval: 30s
+      rules:
+        - alert: PodCrashLooping
+          expr: rate(kube_pod_container_status_restarts_total{namespace=~"eventfund-.*"}[5m]) * 300 > 3
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Pod {{ $labels.pod }} in {{ $labels.namespace }} is crash looping"
+            description: "Pod restarted {{ $value | humanize }} times in 5 minutes"
+
+        - alert: PodNotReady
+          expr: kube_pod_status_phase{namespace=~"eventfund-.*", phase!~"Running|Succeeded"} > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Pod {{ $labels.pod }} in {{ $labels.namespace }} not ready"
+            description: "Pod has been in {{ $labels.phase }} for > 5 minutes"
+
+    - name: eventfund-app-alerts
+      interval: 30s
+      rules:
+        - alert: APIDown
+          expr: kube_deployment_status_replicas_available{namespace=~"eventfund-.*", deployment="api"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "EventFund API is down in {{ $labels.namespace }}"
+            description: "No replicas available for api deployment"
+
+        - alert: BlockchainIndexerDown
+          expr: kube_deployment_status_replicas_available{namespace=~"eventfund-.*", deployment=~"indexer-.*"} == 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Blockchain indexer {{ $labels.deployment }} is down in {{ $labels.namespace }}"
+            description: "No replicas available for {{ $labels.deployment }}"
