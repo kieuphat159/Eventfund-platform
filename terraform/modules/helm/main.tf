@@ -148,9 +148,34 @@ resource "helm_release" "argocd" {
 }
 
 # ─── Prometheus + Grafana ─────────────────────────────────────────────────────
-# MOVED TO ARGOCD MANAGEMENT via App of Apps pattern
-# Prometheus/Grafana được quản lý bởi ArgoCD qua k8s/root/monitoring.yaml
-# Không dùng helm_release.prometheus trực tiếp để tránh phình to Terraform state
+resource "helm_release" "prometheus" {
+  name             = "prometheus"
+  namespace        = "monitoring"
+  repository       = "https://prometheus-community.github.io/helm-charts"
+  chart            = "kube-prometheus-stack"
+  version          = "58.2.0"
+  create_namespace = true
+  timeout          = 600
+  wait             = true
+  cleanup_on_fail  = true
+
+  set {
+    name  = "prometheus.prometheusSpec.retention"
+    value = "7d"
+  }
+
+  # Grafana subpath — cần thiết khi serve từ /grafana qua CloudFront
+  set {
+    name  = "grafana.grafana\\.ini.server.root_url"
+    value = "%(protocol)s://%(domain)s/grafana"
+  }
+  set {
+    name  = "grafana.grafana\\.ini.server.serve_from_sub_path"
+    value = "true"
+  }
+
+  depends_on = [helm_release.alb_controller]
+}
 
 # ─── Cleanup ALBs trước khi destroy ──────────────────────────────────────────
 # Khi terraform destroy:
@@ -188,63 +213,151 @@ resource "null_resource" "cleanup_ingress_on_destroy" {
   depends_on = [helm_release.alb_controller]
 }
 
-# ─── ArgoCD Root Application (App of Apps Pattern) ───────────────────────────
-# Đây là Application GỐC duy nhất được tạo bởi Terraform
-# Nó trỏ đến k8s/root/ trên Git, nơi chứa các Child Application YAMLs
-# ArgoCD sẽ tự động đọc tất cả YAML files trong k8s/root/ và tạo Applications tương ứng
-resource "helm_release" "argocd_root_application" {
-  name       = "root-apps"
-  namespace  = "argocd"
-  repository = "https://argoproj.github.io/argo-helm"
-  chart      = "argocd-apps"
-  version    = "2.0.2"
-  timeout    = 300
-  wait       = true
+# ─── ArgoCD Applications (Dev & Prod) ─────────────────────────────────────────
+# Deploy both dev and prod ArgoCD applications
+# Dev uses 'dev' branch, Prod uses 'master' branch
+resource "null_resource" "argocd_app_dev" {
+  triggers = {
+    cluster_name    = var.cluster_name
+    region          = var.region
+    repo_url        = var.argocd_repo_url
+  }
 
-  # Root Application config
-  set {
-    name  = "applications[0].name"
-    value = "root-infrastructure"
+  provisioner "local-exec" {
+    on_failure = continue
+    command    = <<-EOT
+      aws eks update-kubeconfig --region ${var.region} --name ${var.cluster_name}
+      kubectl apply -f - <<'MANIFEST'
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: eventfund-dev
+  namespace: argocd
+  labels:
+    environment: dev
+spec:
+  project: default
+  source:
+    repoURL: ${var.argocd_repo_url}
+    targetRevision: dev
+    path: k8s/overlays/dev
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: eventfund-dev
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+MANIFEST
+    EOT
   }
-  set {
-    name  = "applications[0].namespace"
-    value = "argocd"
+
+  provisioner "local-exec" {
+    when       = destroy
+    on_failure = continue
+    command    = <<-EOT
+      aws eks update-kubeconfig --region ${self.triggers.region} --name ${self.triggers.cluster_name} 2>/dev/null || exit 0
+      kubectl delete application eventfund-dev -n argocd --ignore-not-found=true 2>/dev/null || true
+    EOT
   }
-  set {
-    name  = "applications[0].project"
-    value = "default"
+
+  depends_on = [helm_release.argocd, helm_release.eso]
+}
+
+resource "null_resource" "argocd_app_prod" {
+  triggers = {
+    cluster_name    = var.cluster_name
+    region          = var.region
+    repo_url        = var.argocd_repo_url
   }
-  set {
-    name  = "applications[0].source.repoURL"
-    value = var.argocd_repo_url
+
+  provisioner "local-exec" {
+    on_failure = continue
+    command    = <<-EOT
+      aws eks update-kubeconfig --region ${var.region} --name ${var.cluster_name}
+      kubectl apply -f - <<'MANIFEST'
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: eventfund-prod
+  namespace: argocd
+  labels:
+    environment: prod
+spec:
+  project: default
+  source:
+    repoURL: ${var.argocd_repo_url}
+    targetRevision: master
+    path: k8s/overlays/prod
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: eventfund-prod
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+MANIFEST
+    EOT
   }
-  set {
-    name  = "applications[0].source.targetRevision"
-    value = "master"
+
+  provisioner "local-exec" {
+    when       = destroy
+    on_failure = continue
+    command    = <<-EOT
+      aws eks update-kubeconfig --region ${self.triggers.region} --name ${self.triggers.cluster_name} 2>/dev/null || exit 0
+      kubectl delete application eventfund-prod -n argocd --ignore-not-found=true 2>/dev/null || true
+    EOT
   }
-  set {
-    name  = "applications[0].source.path"
-    value = "k8s/root"
+
+  depends_on = [helm_release.argocd, helm_release.eso]
+}
+
+resource "null_resource" "argocd_app_shared" {
+  triggers = {
+    cluster_name    = var.cluster_name
+    region          = var.region
+    repo_url        = var.argocd_repo_url
   }
-  set {
-    name  = "applications[0].source.directory.recurse"
-    value = "true"
+
+  provisioner "local-exec" {
+    on_failure = continue
+    command    = <<-EOT
+      aws eks update-kubeconfig --region ${var.region} --name ${var.cluster_name}
+      kubectl apply -f - <<'MANIFEST'
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: eventfund-shared
+  namespace: argocd
+  labels:
+    environment: shared
+spec:
+  project: default
+  source:
+    repoURL: ${var.argocd_repo_url}
+    targetRevision: master
+    path: k8s/shared
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+MANIFEST
+    EOT
   }
-  set {
-    name  = "applications[0].destination.server"
-    value = "https://kubernetes.default.svc"
-  }
-  set {
-    name  = "applications[0].destination.namespace"
-    value = "argocd"
-  }
-  set {
-    name  = "applications[0].syncPolicy.automated.prune"
-    value = "true"
-  }
-  set {
-    name  = "applications[0].syncPolicy.automated.selfHeal"
-    value = "true"
+
+  provisioner "local-exec" {
+    when       = destroy
+    on_failure = continue
+    command    = <<-EOT
+      aws eks update-kubeconfig --region ${self.triggers.region} --name ${self.triggers.cluster_name} 2>/dev/null || exit 0
+      kubectl delete application eventfund-shared -n argocd --ignore-not-found=true 2>/dev/null || true
+    EOT
   }
 
   depends_on = [helm_release.argocd, helm_release.eso]
