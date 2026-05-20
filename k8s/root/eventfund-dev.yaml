@@ -5,18 +5,22 @@ metadata:
   namespace: argocd
   labels:
     environment: dev
+    managed-by: root-app
 spec:
   project: default
+  
   source:
     repoURL: https://github.com/kieuphat159/Eventfund-platform.git
-    targetRevision: dev  # Dev environment uses dev branch
+    targetRevision: dev
     path: k8s/overlays/dev
+  
   destination:
     server: https://kubernetes.default.svc
     namespace: eventfund-dev
+  
   syncPolicy:
     automated:
-      prune: true      # xóa resource không còn trong Git
-      selfHeal: true   # tự fix nếu ai đó sửa trực tiếp trên cluster
+      prune: true
+      selfHeal: true
     syncOptions:
       - CreateNamespace=true

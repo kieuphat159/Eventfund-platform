@@ -3,7 +3,7 @@ kind: ConfigMap
 metadata:
   name: eventfund-backend-config
 data:
-  NODE_ENV: "DEV"  # Will be overridden by overlay
+  NODE_ENV: "DEV"  
   PORT: ""
   LOG_LEVEL: ""
   AWS_REGION: "ap-southeast-1"

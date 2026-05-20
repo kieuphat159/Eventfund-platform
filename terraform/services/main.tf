@@ -7,7 +7,7 @@ locals {
   }
 }
 
-# ─── Helm Releases (Xóa - Phụ thuộc cluster) ─────────────────────────────────
+# ─── Helm Releases (Add-ons + ArgoCD Root Application) ───────────────────────
 module "helm" {
   source = "../modules/helm"
 

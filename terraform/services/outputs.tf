@@ -6,6 +6,6 @@ output "helm_releases" {
     metrics_server     = "metrics-server"
     cluster_autoscaler = "cluster-autoscaler"
     argocd             = "argocd"
-    prometheus         = "prometheus"
+    argocd_root_app    = "root-apps"
   }
 }
