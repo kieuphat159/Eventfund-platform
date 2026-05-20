@@ -8,7 +8,7 @@ metadata:
     component: blockchain
 spec:
   revisionHistoryLimit: 1
-  replicas: 1  # KHÔNG scale > 1, checkpoint state trong MongoDB
+  replicas: 1  
   selector:
     matchLabels:
       app: indexer-fund
