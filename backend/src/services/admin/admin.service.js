@@ -48,6 +48,15 @@ function getBackendSigner() {
   return new ethers.Wallet(privateKey, provider);
 }
 
+function normalizeAddress(value) {
+  if (!value) return null;
+  try {
+    return ethers.getAddress(String(value).trim()).toLowerCase();
+  } catch {
+    return String(value).trim().toLowerCase();
+  }
+}
+
 async function sendCreateEventWithInvestmentTx(
   fundContract,
   fundWithSigner,
@@ -1200,6 +1209,9 @@ export async function updateEventStatus(
 
   if (newStatus === "ticketing") {
     isWithinTicketingWindow(event);
+    const knownOnChainOrganizer = normalizeAddress(
+      event.onChainOrganizer || event.organizer,
+    );
 
     // Ticketing is a one-way transition. If the event is already ticketing,
     // do not mint again or we will duplicate inventory records.
@@ -1221,6 +1233,9 @@ export async function updateEventStatus(
       event = await eventRepository.updateById(eventId, {
         status: "funded",
       });
+      if (!event.onChainOrganizer && knownOnChainOrganizer) {
+        event.onChainOrganizer = knownOnChainOrganizer;
+      }
     }
 
     if (onChainStatus === "funding") {
@@ -1261,6 +1276,9 @@ export async function updateEventStatus(
       event = await eventRepository.updateById(eventId, {
         status: finalizedStatus,
       });
+      if (!event.onChainOrganizer && knownOnChainOrganizer) {
+        event.onChainOrganizer = knownOnChainOrganizer;
+      }
 
       if (finalizedStatus !== "funded") {
         throw new BadRequestError(
@@ -1271,12 +1289,32 @@ export async function updateEventStatus(
       event = await eventRepository.updateById(eventId, {
         status: "funded",
       });
+      if (!event.onChainOrganizer && knownOnChainOrganizer) {
+        event.onChainOrganizer = knownOnChainOrganizer;
+      }
     }
 
     const ticket = getTicket();
     const ticketAddress = await ticket.getAddress();
     const chainEventIdString = String(event.contractEventId);
     const mintBatchSize = getTicketingMintBatchSize();
+    const expectedOrganizer = normalizeAddress(
+      event.onChainOrganizer || event.organizer,
+    );
+    const ticketOrganizer = normalizeAddress(
+      await ticket.eventOrganizer(chainEventId),
+    );
+
+    if (
+      ticketOrganizer &&
+      ticketOrganizer !== ethers.ZeroAddress &&
+      expectedOrganizer &&
+      ticketOrganizer !== expectedOrganizer
+    ) {
+      throw new BadRequestError(
+        `Ticket contract organizer mismatch for event ${eventId}: expected ${expectedOrganizer}, got ${ticketOrganizer}. This on-chain event is stale and must be redeployed or reset before ticketing can start.`,
+      );
+    }
 
     const mintPlan = buildTicketMintPlan(event, options);
     const supportsStartTicketingWithPrice =

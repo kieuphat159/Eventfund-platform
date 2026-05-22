@@ -6,6 +6,7 @@
 import app from './app.js';
 import config from './config/env.js';
 import logger from './config/logger.js';
+import { ethers } from 'ethers';
 import { connectDB, disconnectDB } from './config/mongoDB.js';
 import { initializeRedis, disconnectRedis } from './config/redis.js';
 import {
@@ -17,6 +18,15 @@ const PORT = config.port;
 // Store server instance for graceful shutdown
 let server;
 
+function deriveWalletAddress(privateKey) {
+  if (!privateKey) return null;
+  try {
+    return new ethers.Wallet(privateKey).address;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Start the server
  */
@@ -27,6 +37,11 @@ async function startServer() {
       nodeVersion: process.version,
       environment: config.nodeEnv,
       port: PORT
+    });
+
+    logger.info('Blockchain roles configured', {
+      backendSignerAddress: deriveWalletAddress(process.env.BACKEND_SIGNER_PRIVATE_KEY),
+      relayerAddress: deriveWalletAddress(process.env.RELAYER_PRIVATE_KEY),
     });
 
     // Connect to MongoDB
