@@ -17,6 +17,7 @@ import {
   type TransactionHistory,
   type GetHistoryParams,
 } from "../../services/listings.service";
+import { formatEther } from "ethers";
 import { logger } from "../../lib/logger";
 
 export const MarketplaceManagement: React.FC = () => {
@@ -89,11 +90,13 @@ export const MarketplaceManagement: React.FC = () => {
     fetchHistory();
   }, []);
 
-  const formatWei = (weiValue: string) => {
+  const formatWeiToEth = (weiValue: string) => {
     try {
-      return `${BigInt(weiValue).toLocaleString("en-US")} wei`;
+      return `${Number(formatEther(weiValue))
+        .toFixed(3)
+        .replace(/\.?0+$/, "")} ETH`;
     } catch {
-      return "0 wei";
+      return "0 ETH";
     }
   };
 
@@ -219,7 +222,7 @@ export const MarketplaceManagement: React.FC = () => {
                 </div>
                 <div className="flex items-center justify-between pt-3 border-t border-slate-700">
                   <span className="text-lg font-bold text-purple-400">
-                    {formatWei(listing.price)}
+                    {formatWeiToEth(listing.price)}
                   </span>
                   {/* <Button
                     variant="outline"
@@ -301,7 +304,7 @@ export const MarketplaceManagement: React.FC = () => {
                       {sale.tier || "N/A"}
                     </td>
                     <td className="py-4 px-4 text-sm text-purple-400 font-medium">
-                      {formatWei(sale.price)}
+                      {formatWeiToEth(sale.price)}
                     </td>
                     <td className="py-4 px-4">
                       <code className="text-xs text-slate-300 bg-slate-800 px-2 py-1 rounded">

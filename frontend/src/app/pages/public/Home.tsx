@@ -3,13 +3,11 @@ import { Link } from 'react-router-dom';
 import { Wallet, Ticket, TrendingUp, Shield, ArrowRight, Zap } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { useAuth } from '../../contexts/AuthContext';
-import { useLoading } from '../../components/ui/loadingContext';
 import { ImageWithFallback } from '../../components/figma/ImageWithFallback';
 import { getEvents, type EventItem } from '../../services/events.service';
 
 export const Home: React.FC = () => {
   const { connectWallet, isLoading, user } = useAuth();
-  const { show: showLoading, hide: hideLoading } = useLoading();
   const [events, setEvents] = useState<EventItem[]>([]);
   const [eventsLoading, setEventsLoading] = useState(true);
 
@@ -39,20 +37,29 @@ export const Home: React.FC = () => {
   ];
 
   useEffect(() => {
+    let mounted = true;
+
     const fetchEvents = async () => {
       try {
-        showLoading('Loading events...');
         const data = await getEvents();
-        setEvents(data);
+        if (mounted) {
+          setEvents(data);
+        }
       } catch {
-        setEvents([]);
+        if (mounted) {
+          setEvents([]);
+        }
       } finally {
-        setEventsLoading(false);
-        hideLoading();
+        if (mounted) {
+          setEventsLoading(false);
+        }
       }
     };
 
     fetchEvents();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const featuredEvents = useMemo(() => {
@@ -214,43 +221,61 @@ export const Home: React.FC = () => {
           </div>
 
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {featuredEvents.map((event) => {
-              const eventId = event._id || event.id || '';
-              const coverImage = event.imageUrls?.[0] || '';
-              const eventDate = event.startDate ? new Date(event.startDate) : null;
-
-              return (
-              <Link
-                key={eventId}
-                to={`/events/${eventId}`}
-                className="group relative bg-gradient-to-br from-slate-900/80 to-slate-950 backdrop-blur-sm border border-slate-800/50 rounded-xl overflow-hidden hover:border-purple-500/50 transition-all duration-300"
-              >
-                {/* Card Hover Glow */}
-                <div className="absolute inset-0 bg-gradient-to-t from-purple-600/0 via-transparent to-transparent group-hover:from-purple-600/10 transition-all duration-300 pointer-events-none" />
-                <div className="aspect-[4/3] overflow-hidden">
-                  <ImageWithFallback
-                    src={coverImage}
-                    alt={event.title || 'Event'}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                  />
-                </div>
-                <div className="p-4">
-                  <h3 className="font-semibold text-white mb-2 group-hover:text-purple-400 transition-colors">
-                    {event.title || 'Untitled event'}
-                  </h3>
-                  <p className="text-sm text-slate-400 mb-3 line-clamp-2">
-                    {event.description || 'No description available yet.'}
-                  </p>
-                  <div className="flex items-center justify-between text-xs text-slate-500">
-                    <span>{event.venue?.address || 'Unknown location'}</span>
-                    <span>
-                      {eventDate ? eventDate.toLocaleDateString() : 'TBA'}
-                    </span>
+            {eventsLoading
+              ? Array.from({ length: 4 }).map((_, index) => (
+                  <div
+                    key={`featured-event-skeleton-${index}`}
+                    className="overflow-hidden rounded-xl border border-slate-800/50 bg-gradient-to-br from-slate-900/80 to-slate-950"
+                  >
+                    <div className="aspect-[4/3] animate-pulse bg-slate-800" />
+                    <div className="space-y-3 p-4">
+                      <div className="h-5 w-3/4 animate-pulse rounded bg-slate-800" />
+                      <div className="h-4 w-full animate-pulse rounded bg-slate-800" />
+                      <div className="h-4 w-2/3 animate-pulse rounded bg-slate-800" />
+                      <div className="flex items-center justify-between pt-2">
+                        <div className="h-3 w-24 animate-pulse rounded bg-slate-800" />
+                        <div className="h-3 w-16 animate-pulse rounded bg-slate-800" />
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </Link>
-              );
-            })}
+                ))
+              : featuredEvents.map((event) => {
+                  const eventId = event._id || event.id || '';
+                  const coverImage = event.imageUrls?.[0] || '';
+                  const eventDate = event.startDate ? new Date(event.startDate) : null;
+
+                  return (
+                  <Link
+                    key={eventId}
+                    to={`/events/${eventId}`}
+                    className="group relative bg-gradient-to-br from-slate-900/80 to-slate-950 backdrop-blur-sm border border-slate-800/50 rounded-xl overflow-hidden hover:border-purple-500/50 transition-all duration-300"
+                  >
+                    {/* Card Hover Glow */}
+                    <div className="absolute inset-0 bg-gradient-to-t from-purple-600/0 via-transparent to-transparent group-hover:from-purple-600/10 transition-all duration-300 pointer-events-none" />
+                    <div className="aspect-[4/3] overflow-hidden">
+                      <ImageWithFallback
+                        src={coverImage}
+                        alt={event.title || 'Event'}
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                      />
+                    </div>
+                    <div className="p-4">
+                      <h3 className="font-semibold text-white mb-2 group-hover:text-purple-400 transition-colors">
+                        {event.title || 'Untitled event'}
+                      </h3>
+                      <p className="text-sm text-slate-400 mb-3 line-clamp-2">
+                        {event.description || 'No description available yet.'}
+                      </p>
+                      <div className="flex items-center justify-between text-xs text-slate-500">
+                        <span>{event.venue?.address || 'Unknown location'}</span>
+                        <span>
+                          {eventDate ? eventDate.toLocaleDateString() : 'TBA'}
+                        </span>
+                      </div>
+                    </div>
+                  </Link>
+                  );
+                })}
           </div>
           {!eventsLoading && featuredEvents.length === 0 && (
             <div className="mt-6 rounded-xl border border-slate-800 bg-slate-900/60 p-6 text-center text-slate-400">

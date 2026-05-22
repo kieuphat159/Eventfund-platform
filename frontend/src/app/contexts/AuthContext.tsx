@@ -172,44 +172,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     } catch (err: any) {
       forceCloseWeb3AuthModal();
       stopWatching();
-
-      const isUserCancelled =
-        err?.message?.includes("user closed") ||
-        err?.message?.includes("cancelled") ||
-        err?.message?.includes("Popup closed") ||
-        err?.message?.includes("User cancelled") ||
-        err?.message?.includes("user_rejected") ||
-        err?.message?.includes("USER_DENIED_REQUEST");
-
-      try { await disconnect(); } catch { /* ignore */ }
-
-      // Remount Web3Auth to reset internal state so popup works again
-      window.dispatchEvent(new CustomEvent("web3auth:remount"));
-
-      if (isUserCancelled) {
-        setError(null);
-      } else {
-        console.error("[Auth] connectWallet error:", err);
-        setError(err.message || "Login failed");
-      }
+      console.error("[Auth] connectWallet error:", err);
+      setError(err.message || "Login failed");
       clearAuth();
     } finally {
       setIsLoading(false);
     }
-  }, [connect, disconnect, getIdentityToken, web3Auth, refreshProfile, clearAuth]);
+  }, [connect, getIdentityToken, web3Auth, refreshProfile, clearAuth]);
 
   const disconnectWallet = useCallback(async () => {
     try {
+      // web3Auth.logout({ cleanup: true }) clears the cross-origin iframe session
+      // at wallet.web3auth.io, preventing "Invalid token specified" errors when
+      // switching between MetaMask and social login.
       if (web3Auth) {
-        await web3Auth.logout({ cleanup: true }).catch(() => {});
+        try {
+          await web3Auth.logout({ cleanup: true });
+        } catch (err) {
+          console.warn("[Auth] logout({ cleanup: true }) failed, falling back to disconnect():", err);
+          try { await disconnect(); } catch { /* ignore */ }
+        }
       }
-      try { await disconnect(); } catch { /* ignore */ }
     } catch (err) {
       console.warn("[Auth] logout error (non-fatal):", err);
     } finally {
       clearAuth();
-      // Remount Web3AuthProvider to reset all internal state without page reload
-      window.dispatchEvent(new CustomEvent("web3auth:remount"));
     }
   }, [web3Auth, disconnect, clearAuth]);
 

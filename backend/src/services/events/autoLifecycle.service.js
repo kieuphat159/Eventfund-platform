@@ -110,60 +110,6 @@ function getTicketSalesThresholdCount(eventDoc) {
   return Math.floor(raw);
 }
 
-async function getMintedTicketCountForEvent(eventDoc, options = {}) {
-  const scopedLogger = options.logger || logger;
-  const ticketContract = options.ticketContract || getTicket();
-  const ticketRepository = options.repositories?.ticketRepo || ticketRepo;
-  const chainEventId = Number(eventDoc?.contractEventId);
-
-  if (Number.isInteger(chainEventId) && chainEventId > 0) {
-    try {
-      const ticketInfo = await ticketContract.getEventTicketInfo(
-        BigInt(chainEventId),
-      );
-      const chainMinted = Number(ticketInfo?.totalMinted ?? 0n);
-      if (Number.isFinite(chainMinted) && chainMinted >= 0) {
-        return {
-          mintedCount: Math.floor(chainMinted),
-          source: "chain",
-        };
-      }
-    } catch (error) {
-      scopedLogger.warn?.(
-        `[auto-lifecycle] failed to read on-chain minted count for event ${eventDoc?._id}: ${error?.message || error}`,
-      );
-    }
-  }
-
-  const dbMinted = await ticketRepository.countTickets({
-    eventId: eventDoc._id,
-  });
-
-  return {
-    mintedCount: Math.max(0, Math.floor(Number(dbMinted || 0))),
-    source: "db",
-  };
-}
-
-async function getTicketOrganizerForEvent(eventDoc, options = {}) {
-  const scopedLogger = options.logger || logger;
-  const ticketContract = options.ticketContract || getTicket();
-  const chainEventId = Number(eventDoc?.contractEventId);
-
-  if (Number.isInteger(chainEventId) && chainEventId > 0) {
-    try {
-      const organizer = await ticketContract.eventOrganizer(BigInt(chainEventId));
-      return String(organizer || "").trim().toLowerCase();
-    } catch (error) {
-      scopedLogger.warn?.(
-        `[auto-lifecycle] failed to read on-chain ticket organizer for event ${eventDoc?._id}: ${error?.message || error}`,
-      );
-    }
-  }
-
-  return null;
-}
-
 function toEventKey(eventDoc) {
   if (eventDoc?._id) return String(eventDoc._id);
   if (eventDoc?.contractEventId) return `chain:${eventDoc.contractEventId}`;
@@ -288,45 +234,20 @@ export async function autoStartTicketing(eventDoc, options = {}) {
     };
   }
 
-  const expectedOrganizer = String(
-    eventDoc.organizer || eventDoc.onChainOrganizer || "",
-  )
-    .trim()
-    .toLowerCase();
-  const ticketOrganizer = await getTicketOrganizerForEvent(eventDoc, options);
-  if (
-    ticketOrganizer &&
-    ticketOrganizer !== "0x0000000000000000000000000000000000000000" &&
-    expectedOrganizer &&
-    ticketOrganizer !== expectedOrganizer
-  ) {
-    scopedLogger.warn(
-      `[auto-lifecycle] skipping ticketing for event ${eventDoc._id}: ticket contract organizer mismatch (expected=${expectedOrganizer}, onChain=${ticketOrganizer})`,
-    );
-    return {
-      skipped: true,
-      reason: "ticket_organizer_mismatch",
-      expectedOrganizer,
-      ticketOrganizer,
-    };
-  }
-
-  const { mintedCount, source } = await getMintedTicketCountForEvent(
-    eventDoc,
-    options,
-  );
+  const mintedCount = await ticketRepository.countTickets({
+    eventId: eventDoc._id,
+  });
   const remaining = maxTickets - mintedCount;
 
   if (remaining <= 0) {
     scopedLogger.warn(
-      `[auto-lifecycle] skipping ticketing for event ${eventDoc._id}: no tickets left to mint (source=${source}, minted=${mintedCount}, max=${maxTickets})`,
+      `[auto-lifecycle] skipping ticketing for event ${eventDoc._id}: no tickets left to mint`,
     );
     return {
       skipped: true,
       reason: "no_remaining_tickets",
       mintedCount,
       maxTickets,
-      source,
     };
   }
 
@@ -348,7 +269,6 @@ export async function autoStartTicketing(eventDoc, options = {}) {
     eventId: String(eventDoc._id),
     status: result?.status || null,
     mintedQuantity: remaining,
-    source,
   };
 }
 

@@ -265,6 +265,22 @@ export const TicketDetail: React.FC = () => {
   // Gallery images
 
   const galleryImages = event?.imageUrls?.length ? event.imageUrls : [];
+  const selectedGalleryImage =
+    galleryImages[selectedImage] || event?.imageUrls?.[0] || "";
+
+  const handleShowPreviousImage = () => {
+    if (galleryImages.length <= 1) return;
+    setSelectedImage((current) =>
+      current === 0 ? galleryImages.length - 1 : current - 1,
+    );
+  };
+
+  const handleShowNextImage = () => {
+    if (galleryImages.length <= 1) return;
+    setSelectedImage((current) =>
+      current === galleryImages.length - 1 ? 0 : current + 1,
+    );
+  };
 
   const handleCopyAddress = (address: string) => {
     navigator.clipboard.writeText(address);
@@ -397,99 +413,101 @@ export const TicketDetail: React.FC = () => {
       )}
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* Back Button */}
         <Button
           variant="ghost"
           onClick={() => navigate("/marketplace")}
-          className="text-slate-400 hover:text-white mb-6"
+          className="mb-6 text-slate-400 hover:text-white"
         >
           <ArrowLeft className="w-4 h-4 mr-2" />
           Back to Marketplace
         </Button>
 
-        {/* Main Content Grid */}
-        <div className="grid lg:grid-cols-2 gap-8 mb-12">
-          {/* Left Side - Images */}
-          <div className="space-y-4">
-            {/* Main Image */}
-            <div className="aspect-video rounded-2xl overflow-hidden bg-slate-900 border border-slate-800">
-              <ImageWithFallback
-                src={galleryImages[selectedImage] || ""}
-                alt={event?.title || "Event image"}
-                className="w-full h-full object-cover"
-              />
-            </div>
+        <div className="mb-5">
+          <div className="mb-3 flex flex-wrap gap-2">
+            <Badge className="border-purple-500/20 bg-purple-600/10 text-purple-400">
+              {event?.contractEventId || event?.status || "On-chain event"}
+            </Badge>
+            <Badge className="border-cyan-400/20 bg-cyan-500/10 text-cyan-300">
+              {listingStatusLabel}
+            </Badge>
+          </div>
+          <h1 className="bg-gradient-to-r from-purple-400 via-blue-300 to-cyan-300 bg-clip-text text-3xl font-semibold tracking-tight text-transparent sm:text-4xl">
+            {event?.title || `Ticket ${listing.tokenId}`}
+          </h1>
+          <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300 sm:text-base">
+            Marketplace purchase for ticket #{ticket?.tokenId || listing.tokenId}
+          </p>
+        </div>
 
-            {/* Gallery Thumbnails */}
-            <div className="grid grid-cols-4 gap-3">
-              {galleryImages.map((img, idx) => (
+        <div className="mb-6 overflow-hidden rounded-[2rem] border border-slate-800 bg-slate-900/60 shadow-2xl shadow-cyan-950/20">
+          <div className="relative aspect-[16/9]">
+            {galleryImages.length > 1 ? (
+              <>
                 <button
-                  key={idx}
-                  onClick={() => setSelectedImage(idx)}
-                  className={`aspect-video rounded-lg overflow-hidden border-2 transition-all ${
-                    selectedImage === idx
-                      ? "border-purple-500 ring-2 ring-purple-500/20"
-                      : "border-slate-800 hover:border-slate-700"
-                  }`}
+                  type="button"
+                  onClick={handleShowPreviousImage}
+                  className="absolute left-4 top-1/2 z-10 -translate-y-1/2 rounded-full border border-slate-700 bg-slate-950/80 px-4 py-2 text-sm font-medium text-white backdrop-blur transition hover:border-cyan-400 hover:text-cyan-200"
                 >
-                  <ImageWithFallback
-                    src={img}
-                    alt={`Gallery ${idx + 1}`}
-                    className="w-full h-full object-cover"
-                  />
+                  Prev
                 </button>
-              ))}
-            </div>
+                <button
+                  type="button"
+                  onClick={handleShowNextImage}
+                  className="absolute right-4 top-1/2 z-10 -translate-y-1/2 rounded-full border border-slate-700 bg-slate-950/80 px-4 py-2 text-sm font-medium text-white backdrop-blur transition hover:border-cyan-400 hover:text-cyan-200"
+                >
+                  Next
+                </button>
+              </>
+            ) : null}
 
-            {/* Quick Info Cards - Mobile Only */}
-            <div className="lg:hidden grid grid-cols-2 gap-3">
-              <Card className="bg-slate-900/50 border-slate-800">
-                <CardContent className="p-4 text-center">
-                  <Calendar className="w-5 h-5 text-blue-400 mx-auto mb-2" />
-                  <p className="text-xs text-slate-500 mb-1">Event Date</p>
-                  <p className="text-sm text-white font-medium">
-                    {eventDate ? eventDate.toLocaleDateString() : "N/A"}
-                  </p>
-                </CardContent>
-              </Card>
-              <Card className="bg-slate-900/50 border-slate-800">
-                <CardContent className="p-4 text-center">
-                  <MapPin className="w-5 h-5 text-orange-400 mx-auto mb-2" />
-                  <p className="text-xs text-slate-500 mb-1">Location</p>
-                  <p className="text-sm text-white font-medium">
-                    {event?.venue?.address || "N/A"}
-                  </p>
-                </CardContent>
-              </Card>
+            <ImageWithFallback
+              src={selectedGalleryImage}
+              alt={event?.title || "Event image"}
+              className="h-full w-full object-cover"
+            />
+
+            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-slate-950 via-slate-950/70 to-transparent p-5 sm:p-6">
+              <div className="flex items-end justify-between gap-4">
+                <div className="text-xs uppercase tracking-[0.25em] text-slate-300">
+                  Ticket Gallery
+                </div>
+                <div className="rounded-full bg-slate-950/80 px-3 py-1 text-xs font-medium text-white backdrop-blur">
+                  {galleryImages.length > 0 ? selectedImage + 1 : 0} / {galleryImages.length || 1}
+                </div>
+              </div>
+
+              {galleryImages.length > 1 && (
+                <div className="mt-4 flex gap-2 overflow-x-auto pb-2">
+                  {galleryImages.map((img, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => setSelectedImage(idx)}
+                      className={`group relative h-14 w-20 flex-none overflow-hidden rounded-xl border transition-all duration-200 sm:h-16 sm:w-24 ${
+                        selectedImage === idx
+                          ? "border-cyan-400 ring-2 ring-cyan-400/30"
+                          : "border-slate-700 hover:border-slate-500"
+                      }`}
+                    >
+                      <ImageWithFallback
+                        src={img}
+                        alt={`Gallery ${idx + 1}`}
+                        className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+                      />
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
+        </div>
 
-          {/* Right Side - Details */}
-          <div className="space-y-6">
-            {/* Title & Category */}
-            <div>
-              <div className="mb-3 flex flex-wrap gap-2">
-                <Badge className="bg-purple-600/10 text-purple-400 border-purple-500/20">
-                  {event?.contractEventId || event?.status || "On-chain event"}
-                </Badge>
-                <Badge className="bg-cyan-500/10 text-cyan-300 border-cyan-400/20">
-                  {listingStatusLabel}
-                </Badge>
-              </div>
-              <h1 className="text-3xl md:text-4xl font-bold text-white mb-2">
-                {event?.title || `Ticket ${listing.tokenId}`}
-              </h1>
-              <p className="text-slate-400">
-                Marketplace purchase for ticket #{ticket?.tokenId || listing.tokenId}
-              </p>
-            </div>
-
-            {/* Ticket Type */}
-            <Card className="bg-gradient-to-br from-purple-900/20 to-blue-900/20 border-purple-500/20">
+        <div className="mb-12 grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+          <div className="space-y-4">
+            <Card className="border-slate-800 bg-gradient-to-br from-purple-900/20 to-blue-900/20">
               <CardContent className="p-5">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-xs text-slate-500 mb-1">Ticket Type</p>
+                    <p className="mb-1 text-xs text-slate-500">Ticket Type</p>
                     <p className="text-xl font-bold text-white">
                       {formatTicketType(ticket?.ticketType)}
                     </p>
@@ -499,7 +517,112 @@ export const TicketDetail: React.FC = () => {
               </CardContent>
             </Card>
 
-            {/* Purchase Summary */}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Card className="border-slate-800 bg-slate-900/60">
+                <CardContent className="p-4">
+                  <div className="mb-2 flex items-center gap-3">
+                    <Calendar className="w-5 h-5 text-blue-400" />
+                    <p className="text-xs text-slate-500">Date & Time</p>
+                  </div>
+                  <p className="text-sm font-medium text-white">
+                    {eventDate?.toLocaleDateString("en-US", {
+                      month: "long",
+                      day: "numeric",
+                      year: "numeric",
+                    }) || "N/A"}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    {eventDate?.toLocaleTimeString("en-US", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      hour12: true,
+                    }) || "N/A"}
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card className="border-slate-800 bg-slate-900/60">
+                <CardContent className="p-4">
+                  <div className="mb-2 flex items-center gap-3">
+                    <MapPin className="w-5 h-5 text-orange-400" />
+                    <p className="text-xs text-slate-500">Location</p>
+                  </div>
+                  <p className="text-sm font-medium text-white">
+                    {event?.venue?.address || "N/A"}
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card className="border-slate-800 bg-slate-900/60">
+                <CardContent className="p-4">
+                  <div className="mb-2 flex items-center gap-3">
+                    <Ticket className="w-5 h-5 text-green-400" />
+                    <p className="text-xs text-slate-500">Token</p>
+                  </div>
+                  <p className="text-sm font-medium text-white">
+                    Ticket #{ticket?.tokenId || listing.tokenId}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-400">1 of 1 active listing</p>
+                </CardContent>
+              </Card>
+
+              <Card className="border-slate-800 bg-slate-900/60">
+                <CardContent className="p-4">
+                  <div className="mb-2 flex items-center gap-3">
+                    <Clock className="w-5 h-5 text-cyan-400" />
+                    <p className="text-xs text-slate-500">Listed</p>
+                  </div>
+                  <p className="text-sm font-medium text-white">
+                    {getRelativeTime(listing.listedAt)}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    {listedAtDate?.toLocaleString() || "N/A"}
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
+
+            <Card className="border-slate-800 bg-slate-900">
+              <CardContent className="p-5">
+                <div className="mb-3 flex items-center justify-between">
+                  <p className="text-sm text-slate-500">Seller</p>
+                  <Badge className="border-green-500/20 bg-green-600/10 text-green-400">
+                    <BadgeCheck className="w-3 h-3 mr-1" />
+                    Verified
+                  </Badge>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-purple-600 to-blue-600">
+                      <Wallet className="w-5 h-5 text-white" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-mono text-white">
+                        {shortenAddress(listing.seller)}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        Listed {getRelativeTime(listing.listedAt)}
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleCopyAddress(listing.seller)}
+                    className="text-slate-400 hover:text-white"
+                  >
+                    {copiedAddress ? (
+                      <CheckCircle2 className="w-4 h-4 text-green-400" />
+                    ) : (
+                      <Copy className="w-4 h-4" />
+                    )}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="space-y-4">
             <Card className="overflow-hidden border-slate-800 bg-slate-900">
               <div className="border-b border-slate-800 bg-gradient-to-r from-amber-500/10 via-purple-500/10 to-cyan-500/10 px-5 py-4">
                 <div className="flex items-center gap-2 text-sm font-medium text-amber-300">
@@ -552,113 +675,7 @@ export const TicketDetail: React.FC = () => {
               </CardContent>
             </Card>
 
-            {/* Event Details Grid */}
-            <div className="grid grid-cols-2 gap-4">
-              <Card className="bg-slate-900/50 border-slate-800">
-                <CardContent className="p-4">
-                  <div className="flex items-center gap-3 mb-2">
-                    <Calendar className="w-5 h-5 text-blue-400" />
-                    <p className="text-xs text-slate-500">Date & Time</p>
-                  </div>
-                  <p className="text-sm text-white font-medium">
-                    {eventDate?.toLocaleDateString("en-US", {
-                      month: "long",
-                      day: "numeric",
-                      year: "numeric",
-                    }) || "N/A"}
-                  </p>
-                  <p className="text-xs text-slate-400 mt-1">
-                    {eventDate?.toLocaleTimeString("en-US", {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                      hour12: true,
-                    }) || "N/A"}
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card className="bg-slate-900/50 border-slate-800">
-                <CardContent className="p-4">
-                  <div className="flex items-center gap-3 mb-2">
-                    <MapPin className="w-5 h-5 text-orange-400" />
-                    <p className="text-xs text-slate-500">Location</p>
-                  </div>
-                  <p className="text-sm text-white font-medium">
-                    {event?.venue?.address || "N/A"}
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card className="bg-slate-900/50 border-slate-800">
-                <CardContent className="p-4">
-                  <div className="flex items-center gap-3 mb-2">
-                    <Ticket className="w-5 h-5 text-green-400" />
-                    <p className="text-xs text-slate-500">Remaining</p>
-                  </div>
-                  <p className="text-sm text-white font-medium">1 of 1</p>
-                  <p className="text-xs text-slate-400 mt-1">
-                    {ticket?.tokenId || listing.tokenId}
-                  </p>
-                </CardContent>
-              </Card>
-
-              <Card className="bg-slate-900/50 border-slate-800">
-                <CardContent className="p-4">
-                  <div className="flex items-center gap-3 mb-2">
-                    <Clock className="w-5 h-5 text-cyan-400" />
-                    <p className="text-xs text-slate-500">Listed</p>
-                  </div>
-                  <p className="text-sm text-white font-medium">
-                    {getRelativeTime(listing.listedAt)}
-                  </p>
-                  <p className="text-xs text-slate-400 mt-1">
-                    {listedAtDate?.toLocaleString() || "N/A"}
-                  </p>
-                </CardContent>
-              </Card>
-            </div>
-
             {/* Seller Info */}
-            <Card className="bg-slate-900 border-slate-800">
-              <CardContent className="p-5">
-                <div className="flex items-center justify-between mb-3">
-                  <p className="text-sm text-slate-500">Seller</p>
-                  <Badge className="bg-green-600/10 text-green-400 border-green-500/20">
-                    <BadgeCheck className="w-3 h-3 mr-1" />
-                    Verified
-                  </Badge>
-                </div>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-600 to-blue-600 flex items-center justify-center">
-                      <Wallet className="w-5 h-5 text-white" />
-                    </div>
-                    <div>
-                      <p className="text-sm text-white font-mono">
-                        {shortenAddress(listing.seller)}
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        Listed {getRelativeTime(listing.listedAt)}
-                      </p>
-                    </div>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleCopyAddress(listing.seller)}
-                    className="text-slate-400 hover:text-white"
-                  >
-                    {copiedAddress ? (
-                      <CheckCircle2 className="w-4 h-4 text-green-400" />
-                    ) : (
-                      <Copy className="w-4 h-4" />
-                    )}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Purchase Action */}
             <Card className="border-slate-800 bg-slate-900/90">
               <CardContent className="space-y-4 p-5">
                 <div className="flex items-start justify-between gap-3">
@@ -730,7 +747,6 @@ export const TicketDetail: React.FC = () => {
               </CardContent>
             </Card>
 
-            {/* Security Notice */}
             <Card className="bg-blue-900/10 border-blue-500/20">
               <CardContent className="p-4">
                 <div className="flex gap-3">

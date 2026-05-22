@@ -132,8 +132,6 @@ export const EditEvent: React.FC = () => {
 
         setLoading(true);
         setError("");
-        // show global loader
-        showLoading("Loading event...");
 
         const data = await getEventById(id);
         if (!data) {
@@ -173,7 +171,6 @@ export const EditEvent: React.FC = () => {
         );
       } finally {
         setLoading(false);
-        hideLoading();
       }
     };
 

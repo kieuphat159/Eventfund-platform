@@ -1,8 +1,7 @@
 {
-  "name": "@eventfund/frontend",
+  "name": "@figma/my-make-file",
   "private": true,
   "version": "0.0.1",
-  "description": "EventFund Platform Frontend Application",
   "type": "module",
   "scripts": {
     "build": "vite build",

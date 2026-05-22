@@ -14,12 +14,10 @@ import { ImageWithFallback } from '../../components/figma/ImageWithFallback';
 import { StatusBadge } from '../../components/StatusBadge';
 import { getEvents, type EventItem } from '../../services/events.service';
 import { useAuth } from '../../contexts/AuthContext';
-import { useLoading } from '../../components/ui/loadingContext';
 
 export const Explore: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { show: showLoading, hide: hideLoading } = useLoading();
 
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [searchQuery, setSearchQuery] = useState('');
@@ -31,22 +29,33 @@ export const Explore: React.FC = () => {
   const [error, setError] = useState('');
 
   useEffect(() => {
+    let mounted = true;
+
     const fetchEvents = async () => {
       try {
-        setLoading(true);
-        setError('');
-        showLoading('Loading events...');
+        if (mounted) {
+          setLoading(true);
+          setError('');
+        }
         const data = await getEvents();
-        setEvents(data);
+        if (mounted) {
+          setEvents(data);
+        }
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load events');
+        if (mounted) {
+          setError(err instanceof Error ? err.message : 'Failed to load events');
+        }
       } finally {
-        setLoading(false);
-        hideLoading();
+        if (mounted) {
+          setLoading(false);
+        }
       }
     };
 
     fetchEvents();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const publicEvents = useMemo(() => {
@@ -114,10 +123,6 @@ export const Explore: React.FC = () => {
         return category.charAt(0).toUpperCase() + category.slice(1);
     }
   };
-
-  if (loading) {
-    return <div className="min-h-screen bg-slate-950 py-8 text-white">Loading events...</div>;
-  }
 
   if (error) {
     return <div className="min-h-screen bg-slate-950 py-8 text-red-400">{error}</div>;
@@ -287,7 +292,28 @@ export const Explore: React.FC = () => {
           )}
         </div>
 
-        {filteredEvents.length === 0 ? (
+        {loading ? (
+          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {Array.from({ length: 6 }).map((_, index) => (
+              <div
+                key={`explore-skeleton-${index}`}
+                className="overflow-hidden rounded-xl border border-slate-800 bg-slate-900"
+              >
+                <div className="aspect-video animate-pulse bg-slate-800" />
+                <div className="space-y-3 p-5">
+                  <div className="h-6 w-3/4 animate-pulse rounded bg-slate-800" />
+                  <div className="h-5 w-24 animate-pulse rounded-full bg-slate-800" />
+                  <div className="h-4 w-full animate-pulse rounded bg-slate-800" />
+                  <div className="h-4 w-2/3 animate-pulse rounded bg-slate-800" />
+                  <div className="flex items-center justify-between pt-2">
+                    <div className="h-3 w-24 animate-pulse rounded bg-slate-800" />
+                    <div className="h-3 w-20 animate-pulse rounded bg-slate-800" />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : filteredEvents.length === 0 ? (
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-10 text-center text-slate-400">
             No events found.
           </div>

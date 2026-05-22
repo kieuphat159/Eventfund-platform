@@ -28,6 +28,7 @@ import {
   listTicketOnchain,
 } from "@/app/services/listings.service";
 import { QRCodeCanvas } from "qrcode.react";
+import { formatEther } from "ethers";
 import { logger } from "../../lib/logger";
 import { InsufficientBalanceDialog } from "../../components/shared/InsufficientBalanceDialog";
 import { resolveTransactionProvider } from "../../services/providerService";
@@ -173,7 +174,11 @@ export const MyTickets: React.FC = () => {
     if (!wei || wei === "0" || wei === "0x0") return "0";
 
     try {
-      return BigInt(wei.toString()).toLocaleString("en-US");
+      const ethString = formatEther(wei.toString());
+
+      return parseFloat(ethString)
+        .toFixed(3)
+        .replace(/\.?0+$/, "");
     } catch (error) {
       logger.debug("tickets", "Failed to format ticket value", error);
       return "0";
@@ -319,7 +324,7 @@ export const MyTickets: React.FC = () => {
           <CardContent className="p-6">
             <p className="text-sm text-slate-400 mb-1">Total Value</p>
             <p className="text-3xl font-bold text-white">
-              {formatWei(totalValue)} wei
+              {formatWei(totalValue)} ETH
             </p>
           </CardContent>
         </Card>
@@ -402,7 +407,7 @@ export const MyTickets: React.FC = () => {
                       Purchase Price
                     </span>
                     <span className="text-sm font-semibold text-purple-400">
-                      {formatWei(purchasePrice)} wei
+                      {formatWei(purchasePrice)} ETH
                     </span>
                   </div>
                 </div>
@@ -546,8 +551,8 @@ export const MyTickets: React.FC = () => {
               const maxAllowedWei = (originalPriceWei * 150n) / 100n;
               return (
                 <div className="mb-3 rounded-md border border-slate-700 bg-slate-800/60 p-3 text-xs text-slate-300">
-                  <p>Original price: {formatWei(originalPriceWei)} wei</p>
-                  <p>Max resale (150% cap): {formatWei(maxAllowedWei)} wei</p>
+                  <p>Original price: {formatWei(originalPriceWei)} ETH</p>
+                  <p>Max resale (150% cap): {formatWei(maxAllowedWei)} ETH</p>
                 </div>
               );
             })()}

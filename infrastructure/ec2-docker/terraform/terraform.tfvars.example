@@ -1,0 +1,14 @@
+aws_region    = "ap-southeast-1"
+project_name  = "eventfund"
+environment   = "dev"
+instance_type = "t3.micro"
+
+# https://dashboard.ngrok.com/get-started/your-authtoken
+ngrok_authtoken = "YOUR_NGROK_AUTHTOKEN"
+
+# https://dashboard.ngrok.com/cloud-edge/domains
+ngrok_domain = "xxxx.ngrok-free.app"
+
+# Git repo
+repo_url    = "https://github.com/kieuphat159/Eventfund-platform.git"
+repo_branch = "cd/cd"

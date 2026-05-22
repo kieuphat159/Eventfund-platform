@@ -8,7 +8,7 @@ import {
   Ticket,
   Zap,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
@@ -50,7 +50,6 @@ export const Marketplace: React.FC = () => {
   const [sortBy, setSortBy] = React.useState("newest");
   const [listings, setListings] = React.useState<ApiListing[]>([]);
   const [loading, setLoading] = React.useState(true);
-  const navigate = useNavigate();
 
   React.useEffect(() => {
     const fetchListings = async () => {
@@ -99,12 +98,6 @@ export const Marketplace: React.FC = () => {
     selectedTicketType !== "all",
     selectedDate !== "all",
   ].filter(Boolean).length;
-
-  if (loading) {
-    return (
-      <div className="p-10 text-center text-white">Loading marketplace...</div>
-    );
-  }
 
   const filteredListings = listings.filter((listing) => {
     const eventTitle = listing.eventId?.title?.toLowerCase() || "";
@@ -267,6 +260,10 @@ export const Marketplace: React.FC = () => {
                               return;
                             }
 
+                            if (nextMin && nextMax && BigInt(nextMin) > BigInt(nextMax)) {
+                              return;
+                            }
+
                             setAppliedMinPriceWei(nextMin);
                             setAppliedMaxPriceWei(nextMax);
                           }}
@@ -370,7 +367,31 @@ export const Marketplace: React.FC = () => {
         </div>
 
         <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-          {filteredListings.map((listing) => {
+          {loading
+            ? Array.from({ length: 6 }).map((_, index) => (
+                <div
+                  key={`marketplace-skeleton-${index}`}
+                  className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/90"
+                >
+                  <div className="aspect-video animate-pulse bg-slate-800" />
+                  <div className="space-y-4 p-5 sm:p-6">
+                    <div className="h-6 w-3/4 animate-pulse rounded bg-slate-800" />
+                    <div className="h-4 w-1/3 animate-pulse rounded bg-slate-800" />
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="w-1/2 space-y-2">
+                        <div className="h-3 w-16 animate-pulse rounded bg-slate-800" />
+                        <div className="h-4 w-full animate-pulse rounded bg-slate-800" />
+                      </div>
+                      <div className="w-24 space-y-2">
+                        <div className="ml-auto h-3 w-10 animate-pulse rounded bg-slate-800" />
+                        <div className="ml-auto h-6 w-20 animate-pulse rounded bg-slate-800" />
+                      </div>
+                    </div>
+                    <div className="h-10 w-full animate-pulse rounded bg-slate-800" />
+                  </div>
+                </div>
+              ))
+            : filteredListings.map((listing) => {
             const listingId = listing.id || listing._id;
             const eventTitle = listing.eventId?.title || "Untitled event";
             const eventImage =
@@ -380,9 +401,9 @@ export const Marketplace: React.FC = () => {
             const seller = listing.seller || "Unknown seller";
 
             return (
-              <div
+              <Link
                 key={listingId}
-                onClick={() => navigate(`/tickets/${listingId}`)}
+                to={`/tickets/${listingId}`}
                 className="cursor-pointer overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/90 transition-all hover:-translate-y-1 hover:border-purple-500/50 hover:shadow-lg hover:shadow-purple-500/10"
               >
                 <div className="relative aspect-video overflow-hidden">
@@ -421,22 +442,21 @@ export const Marketplace: React.FC = () => {
                   </div>
 
                   <Button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      navigate(`/tickets/${listingId}`);
-                    }}
+                    asChild
                     className="w-full bg-gradient-to-r from-purple-600 to-blue-600 text-white hover:from-purple-700 hover:to-blue-700"
                   >
-                    <ShoppingCart className="mr-2 h-4 w-4" />
-                    Buy Now
+                    <span>
+                      <ShoppingCart className="mr-2 h-4 w-4" />
+                      Buy Now
+                    </span>
                   </Button>
                 </div>
-              </div>
+              </Link>
             );
           })}
         </div>
 
-        {filteredListings.length === 0 && (
+        {!loading && filteredListings.length === 0 && (
           <div className="py-20 text-center">
             <ShoppingCart className="mx-auto mb-4 h-16 w-16 text-slate-700" />
             <h3 className="mb-2 text-xl font-semibold text-white">

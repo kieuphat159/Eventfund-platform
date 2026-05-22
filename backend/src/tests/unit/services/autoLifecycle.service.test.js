@@ -5,9 +5,7 @@ const mockFundGetAddress = jest.fn();
 const mockGetTicket = jest.fn();
 const mockScheduleAutoRefundsForTerminalEvent = jest.fn();
 const mockTicketContract = {
-  getEventTicketInfo: jest.fn(),
   getUsageStats: jest.fn(),
-  eventOrganizer: jest.fn(),
 };
 const mockGetFund = jest.fn(() => ({
   getAddress: mockFundGetAddress,
@@ -53,12 +51,7 @@ describe("autoLifecycle.service", () => {
       "0x6ae84B87203186108395F46aBcAE4cFf44ae0Bd7",
     );
     mockGetTicket.mockReturnValue(mockTicketContract);
-    mockTicketContract.getEventTicketInfo.mockReset();
     mockTicketContract.getUsageStats.mockReset();
-    mockTicketContract.eventOrganizer.mockReset();
-    mockTicketContract.eventOrganizer.mockResolvedValue(
-      "0x0000000000000000000000000000000000000000",
-    );
     mockScheduleAutoRefundsForTerminalEvent.mockReset();
   });
 
@@ -100,9 +93,6 @@ describe("autoLifecycle.service", () => {
       _id: "evt-ticketing",
       status: "ticketing",
     });
-    mockTicketContract.getEventTicketInfo.mockResolvedValue({
-      totalMinted: 20n,
-    });
 
     const result = await autoStartTicketing(
       {
@@ -115,7 +105,7 @@ describe("autoLifecycle.service", () => {
         logger,
         repositories: {
           ticketRepo: {
-            countTickets: jest.fn().mockResolvedValue(999),
+            countTickets: jest.fn().mockResolvedValue(20),
           },
         },
       },
@@ -136,43 +126,6 @@ describe("autoLifecycle.service", () => {
       eventId: "evt-ticketing",
       status: "ticketing",
       mintedQuantity: 100,
-      source: "chain",
-    });
-  });
-
-  test("skips auto-start ticketing when the ticket organizer mismatches the event organizer", async () => {
-    process.env.AUTO_EVENT_TICKETING_ENABLED = "true";
-    mockTicketContract.getEventTicketInfo.mockResolvedValue({
-      totalMinted: 0n,
-    });
-    mockTicketContract.eventOrganizer.mockResolvedValue(
-      "0x53FaA0D59Abed9468BC1C8aca95F58F522dCc702",
-    );
-
-    const result = await autoStartTicketing(
-      {
-        _id: "evt-mismatch",
-        contractEventId: "14",
-        organizer: "0xe364802f1c5f5f69e4ae6394e6b9e5cc2851ace8",
-        maxTickets: 3,
-        ticketingStartAt: new Date("2026-05-16T09:00:00.000Z"),
-      },
-      {
-        logger,
-        repositories: {
-          ticketRepo: {
-            countTickets: jest.fn().mockResolvedValue(0),
-          },
-        },
-      },
-    );
-
-    expect(mockUpdateEventStatus).not.toHaveBeenCalled();
-    expect(result).toEqual({
-      skipped: true,
-      reason: "ticket_organizer_mismatch",
-      expectedOrganizer: "0xe364802f1c5f5f69e4ae6394e6b9e5cc2851ace8",
-      ticketOrganizer: "0x53faa0d59abed9468bc1c8aca95f58f522dcc702",
     });
   });
 
@@ -276,7 +229,7 @@ describe("autoLifecycle.service", () => {
         findDueEventSettlementEvents: jest.fn().mockResolvedValue([]),
       },
       ticketRepo: {
-        countTickets: jest.fn().mockResolvedValue(999),
+        countTickets: jest.fn().mockResolvedValue(5),
       },
     };
 
@@ -289,10 +242,6 @@ describe("autoLifecycle.service", () => {
         _id: "evt-funded",
         status: "ticketing",
       });
-
-    mockTicketContract.getEventTicketInfo
-      .mockResolvedValueOnce({ totalMinted: 5n })
-      .mockResolvedValueOnce({ totalMinted: 0n });
 
     const result = await runAutoEventLifecycleTick({
       logger,
@@ -351,13 +300,9 @@ describe("autoLifecycle.service", () => {
         findDueEventSettlementEvents: jest.fn().mockResolvedValue([]),
       },
       ticketRepo: {
-        countTickets: jest.fn().mockResolvedValue(19),
+        countTickets: jest.fn().mockResolvedValue(0),
       },
     };
-
-    mockTicketContract.getEventTicketInfo.mockResolvedValue({
-      totalMinted: 0n,
-    });
 
     mockUpdateEventStatus.mockResolvedValue({
       _id: "evt-stale-funding",
