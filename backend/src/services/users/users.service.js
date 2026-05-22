@@ -5,6 +5,7 @@ import * as rewardRepo from "../../repositories/rewardClaim.repo.js";
 import { addBigInt } from "../../utils/bigint.js";
 import { NotFoundError, ConflictError } from "../../utils/customErrors.js";
 import UploadService from "../upload/upload.service.js";
+import Contribution from "../../models/Contribution.model.js";
 
 // Default upload service instance (can be overridden via DI)
 let defaultUploadService = null;
@@ -231,6 +232,16 @@ export async function getUserRewards(walletAddress, repos = {}) {
   );
 
   return { claimed, pending, totalClaimed, totalPending };
+}
+
+export async function getUserContributions(walletAddress) {
+  return await Contribution.find({
+    contributor: walletAddress.toLowerCase(),
+    type: "donator_contribution",
+  })
+    .populate("eventId")
+    .sort({ timestamp: -1, createdAt: -1 })
+    .lean();
 }
 
 /**

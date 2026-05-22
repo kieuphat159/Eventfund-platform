@@ -22,7 +22,6 @@ import { Button } from "../../components/ui/button";
 import { useAuth } from "../../contexts/AuthContext";
 import { useLoading } from "../../components/ui/loadingContext";
 import { getUserTickets } from "../../services/tickets.service";
-import { getInvestments } from "../../services/investment.service";
 import { getMarketplaceHistory } from "../../services/listings.service";
 import { userService } from "../../services/user.service";
 import {
@@ -124,13 +123,13 @@ export const Wallet: React.FC = () => {
         const [
           balanceResult,
           ticketsResult,
-          investmentsResult,
+          contributionsResult,
           rewardsResult,
           marketplaceSalesResult,
         ] = await Promise.allSettled([
           fetchWalletBalance(walletAddress),
           getUserTickets(walletAddress),
-          getInvestments(),
+          userService.getUserContributions(),
           userService.getUserRewards(),
           getMarketplaceHistory({
             seller: walletAddress.toLowerCase(),
@@ -151,39 +150,66 @@ export const Wallet: React.FC = () => {
 
         if (ticketsResult.status === "fulfilled") {
           ticketsResult.value.forEach((ticket) => {
-            if (!ticket.soldAt) return;
-
             const eventTitle =
               typeof ticket.eventId === "object" ? ticket.eventId?.title : null;
 
-            nextTransactions.push({
-              id: `ticket-${ticket.tokenId}-purchase`,
-              type: "sent",
-              description: `Ticket Purchase - ${eventTitle || `Event ${ticket.eventIdRaw || "-"}`}`,
-              amountWei: String(ticket.originalPrice || "0"),
-              date: ticket.soldAt,
-              hash:
-                (ticket as any).soldTxHash ||
-                ((ticket as any).transferHistory?.length
-                  ? (ticket as any).transferHistory[(ticket as any).transferHistory.length - 1].txHash
-                  : null) ||
-                null,
-            });
+            if (ticket.soldAt) {
+              nextTransactions.push({
+                id: `ticket-${ticket.tokenId}-purchase`,
+                type: "sent",
+                description: `Ticket Purchase - ${eventTitle || `Event ${ticket.eventIdRaw || "-"}`}`,
+                amountWei: String(ticket.originalPrice || "0"),
+                date: ticket.soldAt,
+                hash:
+                  (ticket as any).soldTxHash ||
+                  ((ticket as any).transferHistory?.length
+                    ? (ticket as any).transferHistory[(ticket as any).transferHistory.length - 1].txHash
+                    : null) ||
+                  null,
+              });
+            }
+
+            if (ticket.status === "refunded" && ticket.refundedAt) {
+              nextTransactions.push({
+                id: `ticket-${ticket.tokenId}-refund`,
+                type: "received",
+                description: `Ticket Refund - ${eventTitle || `Event ${ticket.eventIdRaw || "-"}`}`,
+                amountWei: String(ticket.originalPrice || "0"),
+                date: ticket.refundedAt,
+                hash: ticket.refundedTxHash || null,
+              });
+            }
           });
         }
 
-        if (investmentsResult.status === "fulfilled") {
-          investmentsResult.value.forEach((investment) => {
-            if (!investment.createdAt) return;
+        if (contributionsResult.status === "fulfilled") {
+          contributionsResult.value.forEach((contribution) => {
+            const eventTitle =
+              typeof contribution.eventId === "object"
+                ? contribution.eventId?.title
+                : null;
 
-            nextTransactions.push({
-              id: `investment-${investment._id}`,
-              type: "sent",
-              description: `Investment - ${investment.eventId?.title || "Event"}`,
-              amountWei: String(investment.contributionAmount || "0"),
-              date: investment.createdAt,
-              hash: (investment as any).txHash || (investment as any).transactionHash || null,
-            });
+            if (contribution.timestamp) {
+              nextTransactions.push({
+                id: `investment-${contribution._id}-sent`,
+                type: "sent",
+                description: `Investment - ${eventTitle || "Event"}`,
+                amountWei: String(contribution.amount || "0"),
+                date: contribution.timestamp,
+                hash: contribution.txHash || null,
+              });
+            }
+
+            if (contribution.status === "refunded" && contribution.refundedAt) {
+              nextTransactions.push({
+                id: `investment-${contribution._id}-refund`,
+                type: "received",
+                description: `Investment Refund - ${eventTitle || "Event"}`,
+                amountWei: String(contribution.amount || "0"),
+                date: contribution.refundedAt,
+                hash: contribution.refundTxHash || null,
+              });
+            }
           });
         }
 

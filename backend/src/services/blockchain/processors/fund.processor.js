@@ -594,7 +594,14 @@ async function handleContributionRefunded(log, eventDoc) {
   const contributor = lowerAddress(args.donator);
   const amount = toAmountString(args.amount);
 
-  await contributionRepo.markDonatorContributionsAsRefunded(eventDoc._id, contributor);
+  await contributionRepo.markDonatorContributionsAsRefunded(
+    eventDoc._id,
+    contributor,
+    {
+      refundedAt: new Date(),
+      refundTxHash: txHash,
+    },
+  );
 
   const txHash = transactionHash.toLowerCase();
   const applied = await eventRepo.applyIdempotentDeltaByTxHash(

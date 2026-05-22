@@ -122,6 +122,25 @@ export interface UserRewardsSummary {
   totalPending: string;
 }
 
+export interface UserContributionItem {
+  _id: string;
+  eventId?:
+    | {
+        _id?: string;
+        title?: string;
+        status?: string;
+      }
+    | string;
+  contributor: string;
+  type: "organizer_stake" | "donator_contribution";
+  amount: string;
+  txHash?: string;
+  timestamp?: string;
+  status: "pending" | "confirmed" | "refunded";
+  refundedAt?: string;
+  refundTxHash?: string;
+}
+
 function getAuthHeaders(): HeadersInit {
   const jwtToken = localStorage.getItem("jwtToken");
   return jwtToken ? { Authorization: `Bearer ${jwtToken}` } : {};
@@ -224,5 +243,16 @@ export const userService = {
         totalPending: "0",
       }
     );
+  },
+
+  getUserContributions: async (): Promise<UserContributionItem[]> => {
+    const response = await api.get<{
+      success: boolean;
+      data: UserContributionItem[];
+    }>("/users/contributions", {
+      headers: getAuthHeaders(),
+    });
+
+    return response.data || [];
   },
 };

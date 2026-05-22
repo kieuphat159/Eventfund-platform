@@ -60,6 +60,12 @@ const contributionSchema = new mongoose.Schema({
   refundedAt: {
     type: Date,
   },
+
+  refundTxHash: {
+    type: String,
+    lowercase: true,
+    trim: true,
+  },
 });
 
 // ===== Indexes =====

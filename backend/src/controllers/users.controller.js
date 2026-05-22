@@ -95,6 +95,18 @@ class UsersController {
     });
   });
 
+  getUserContributions = asyncHandler(async (req, res) => {
+    const walletAddress = req.user.walletAddress;
+
+    const contributions =
+      await this.usersService.getUserContributions(walletAddress);
+
+    res.status(200).json({
+      success: true,
+      data: contributions,
+    });
+  });
+
   getUserByWallet = asyncHandler(async (req, res) => {
     const { walletAddress } = req.params;
 
