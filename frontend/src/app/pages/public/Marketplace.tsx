@@ -9,11 +9,9 @@ import {
   Zap,
 } from "lucide-react";
 import { Link } from "react-router-dom";
-import { ethers } from "ethers";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
-import { Slider } from "../../components/ui/slider";
 import { Card, CardContent } from "../../components/ui/card";
 import {
   Select,
@@ -27,9 +25,14 @@ import { listingService, ApiListing } from "../../services/listings.service";
 import { ImageWithFallback } from "../../components/figma/ImageWithFallback";
 import { logger } from "../../lib/logger";
 
-const formatWei = (value?: string | number | bigint) => {
+const isPositiveWeiInteger = (value: string) => {
+  const trimmed = value.trim();
+  return /^[0-9]+$/.test(trimmed) && BigInt(trimmed) > 0n;
+};
+
+const formatWei = (value: string | number | bigint) => {
   try {
-    return BigInt(String(value ?? "0")).toLocaleString();
+    return BigInt(String(value)).toLocaleString("en-US");
   } catch {
     return "0";
   }
@@ -38,16 +41,15 @@ const formatWei = (value?: string | number | bigint) => {
 export const Marketplace: React.FC = () => {
   const [showFilters, setShowFilters] = React.useState(true);
   const [searchQuery, setSearchQuery] = React.useState("");
-  const [priceLimit, setPriceLimit] = React.useState([10]);
-  const [appliedPriceLimit, setAppliedPriceLimit] = React.useState(10);
+  const [minPriceWei, setMinPriceWei] = React.useState("");
+  const [maxPriceWei, setMaxPriceWei] = React.useState("");
+  const [appliedMinPriceWei, setAppliedMinPriceWei] = React.useState("");
+  const [appliedMaxPriceWei, setAppliedMaxPriceWei] = React.useState("");
   const [selectedTicketType, setSelectedTicketType] = React.useState("all");
   const [selectedDate, setSelectedDate] = React.useState("all");
   const [sortBy, setSortBy] = React.useState("newest");
   const [listings, setListings] = React.useState<ApiListing[]>([]);
   const [loading, setLoading] = React.useState(true);
-  const sliderMax = 10;
-  const selectedMaxPrice = priceLimit[0] ?? sliderMax;
-  const sliderProgress = (selectedMaxPrice / sliderMax) * 100;
 
   React.useEffect(() => {
     const fetchListings = async () => {
@@ -63,7 +65,8 @@ export const Marketplace: React.FC = () => {
         const res = await listingService.getAll({
           page: 1,
           limit: 20,
-          maxPrice: ethers.parseEther(appliedPriceLimit.toString()).toString(),
+          minPrice: appliedMinPriceWei || undefined,
+          maxPrice: appliedMaxPriceWei || undefined,
           ...sortMap[sortBy],
         });
 
@@ -76,12 +79,14 @@ export const Marketplace: React.FC = () => {
     };
 
     fetchListings();
-  }, [appliedPriceLimit, sortBy]);
+  }, [appliedMinPriceWei, appliedMaxPriceWei, sortBy]);
 
   const clearFilters = () => {
     setSearchQuery("");
-    setPriceLimit([sliderMax]);
-    setAppliedPriceLimit(sliderMax);
+    setMinPriceWei("");
+    setMaxPriceWei("");
+    setAppliedMinPriceWei("");
+    setAppliedMaxPriceWei("");
     setSelectedTicketType("all");
     setSelectedDate("all");
     setSortBy("newest");
@@ -89,7 +94,7 @@ export const Marketplace: React.FC = () => {
 
   const activeFiltersCount = [
     searchQuery !== "",
-    appliedPriceLimit !== sliderMax,
+    appliedMinPriceWei !== "" || appliedMaxPriceWei !== "",
     selectedTicketType !== "all",
     selectedDate !== "all",
   ].filter(Boolean).length;
@@ -209,31 +214,62 @@ export const Marketplace: React.FC = () => {
                 <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
                   <div className="space-y-3 xl:col-span-2">
                     <Label className="font-medium text-slate-300">
-                      Max Price (ETH)
+                      Price Range (wei)
                     </Label>
                     <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-                      <div className="relative px-2 pt-8">
-                        <div
-                          className="pointer-events-none absolute top-0 z-10 min-w-[88px] -translate-x-1/2 rounded-full border border-cyan-400/30 bg-slate-900 px-3 py-1.5 text-center text-sm font-semibold leading-none text-cyan-200 shadow-lg"
-                          style={{ left: `calc(${sliderProgress}% * 0.96 + 8px)` }}
-                        >
-                          {selectedMaxPrice.toFixed(2)} ETH
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label className="text-xs text-slate-500">
+                            Min price (wei)
+                          </Label>
+                          <Input
+                            type="text"
+                            inputMode="numeric"
+                            placeholder="0"
+                            value={minPriceWei}
+                            onChange={(e) => setMinPriceWei(e.target.value)}
+                            className="border-slate-800 bg-slate-900 text-white placeholder:text-slate-600"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-xs text-slate-500">
+                            Max price (wei)
+                          </Label>
+                          <Input
+                            type="text"
+                            inputMode="numeric"
+                            placeholder="0"
+                            value={maxPriceWei}
+                            onChange={(e) => setMaxPriceWei(e.target.value)}
+                            className="border-slate-800 bg-slate-900 text-white placeholder:text-slate-600"
+                          />
                         </div>
                       </div>
-                      <Slider
-                        min={0}
-                        max={sliderMax}
-                        step={0.01}
-                        value={priceLimit}
-                        onValueChange={setPriceLimit}
-                        onValueCommit={(value) =>
-                          setAppliedPriceLimit(value[0] ?? sliderMax)
-                        }
-                        className="w-full"
-                      />
-                      <div className="mt-4 flex items-center justify-between text-sm text-slate-400">
-                        <span>0.00 ETH</span>
-                        <span>{sliderMax.toFixed(2)} ETH</span>
+                      <div className="mt-4 flex justify-end">
+                        <Button
+                          size="sm"
+                          className="bg-purple-600 text-white hover:bg-purple-500"
+                          onClick={() => {
+                            const nextMin = minPriceWei.trim();
+                            const nextMax = maxPriceWei.trim();
+
+                            if (nextMin && !isPositiveWeiInteger(nextMin)) {
+                              return;
+                            }
+                            if (nextMax && !isPositiveWeiInteger(nextMax)) {
+                              return;
+                            }
+
+                            if (nextMin && nextMax && BigInt(nextMin) > BigInt(nextMax)) {
+                              return;
+                            }
+
+                            setAppliedMinPriceWei(nextMin);
+                            setAppliedMaxPriceWei(nextMax);
+                          }}
+                        >
+                          Apply
+                        </Button>
                       </div>
                     </div>
                   </div>
@@ -291,9 +327,10 @@ export const Marketplace: React.FC = () => {
                           Search: {searchQuery}
                         </Badge>
                       )}
-                      {appliedPriceLimit !== sliderMax && (
+                      {(appliedMinPriceWei !== "" || appliedMaxPriceWei !== "") && (
                         <Badge className="border-green-500/20 bg-green-600/10 text-green-400">
-                          Up to {appliedPriceLimit.toFixed(2)} ETH
+                          {formatWei(appliedMinPriceWei || "0")}-
+                          {appliedMaxPriceWei ? formatWei(appliedMaxPriceWei) : "any"} wei
                         </Badge>
                       )}
                       {selectedTicketType !== "all" && (
