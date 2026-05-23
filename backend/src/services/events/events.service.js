@@ -140,6 +140,12 @@ function mapFundCustomErrorToMessage(errorName) {
     NotCompleted: "Event is not completed on-chain.",
     FundingClosed: "Funding is already closed on-chain.",
     ShareLocked: "Event shares are already finalized on-chain.",
+    NothingToClaim:
+      "This wallet has no refundable contribution left for the event on-chain.",
+    RefundsNotEnabled:
+      "Refunds are not enabled for this event on-chain yet.",
+    TransferFailed:
+      "On-chain refund transfer failed. Please try again or verify contract funding.",
   };
 
   return messages[errorName] || null;
@@ -2365,6 +2371,14 @@ export async function createContributionRefundIntent(
     BigInt(event.contractEventId),
   ]);
 
+  try {
+    await fund.claimContributionRefund.staticCall(BigInt(event.contractEventId), {
+      from: investor,
+    });
+  } catch (error) {
+    throw new BadRequestError(getBlockchainErrorMessage(error));
+  }
+
   return {
     eventId: String(event._id),
     contractEventId: String(event.contractEventId),
@@ -2535,15 +2549,27 @@ async function rebuildSharePercentagesAndFunding(eventId) {
     return map;
   }, {});
 
-  const bulkOperations = Object.entries(holders).map(
-    ([holder, contributionAmount]) => ({
+  const existingShares = await Share.find({ eventId: event._id })
+    .select("holder")
+    .lean();
+  const allHolders = new Set(
+    existingShares
+      .map((share) => String(share.holder || "").toLowerCase())
+      .filter(Boolean),
+  );
+
+  for (const holder of Object.keys(holders)) {
+    allHolders.add(holder);
+  }
+
+  const bulkOperations = Array.from(allHolders).map((holder) => ({
       updateOne: {
         filter: { eventId: event._id, holder },
         update: {
           $set: {
-            contributionAmount,
+            contributionAmount: holders[holder] || "0",
             sharePercentage: calculatePercentage(
-              contributionAmount,
+              holders[holder] || "0",
               totalFunding,
             ),
           },

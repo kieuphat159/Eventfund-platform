@@ -7,7 +7,7 @@ import {
   BadRequestError,
   ForbiddenError,
 } from '../../utils/customErrors.js';
-import { getTicket, provider } from '../blockchain/index.js';
+import { getFund, getTicket, provider } from '../blockchain/index.js';
 
 const ONCHAIN_TICKET_STATUS = {
   MINTED: 0n,
@@ -74,6 +74,114 @@ function validateTransactionHash(txHash) {
   if (!txHash || !ethers.isHexString(txHash, 32)) {
     throw new BadRequestError('Invalid transaction hash');
   }
+}
+
+function getRawBlockchainErrorMessage(error) {
+  if (!error || typeof error !== 'object') {
+    return String(error || 'Unknown blockchain error');
+  }
+
+  return (
+    error.shortMessage ||
+    error.reason ||
+    error.message ||
+    error.info?.error?.message ||
+    error.error?.message ||
+    'Unknown blockchain error'
+  );
+}
+
+function extractBlockchainErrorData(error) {
+  if (!error || typeof error !== 'object') {
+    return null;
+  }
+
+  const queue = [error];
+  const visited = new Set();
+
+  while (queue.length) {
+    const current = queue.shift();
+    if (!current || typeof current !== 'object' || visited.has(current)) {
+      continue;
+    }
+
+    visited.add(current);
+
+    if (
+      typeof current.data === 'string' &&
+      current.data.startsWith('0x') &&
+      current.data.length >= 10
+    ) {
+      return current.data;
+    }
+
+    if (current.error) queue.push(current.error);
+    if (current.info?.error) queue.push(current.info.error);
+    if (current.cause) queue.push(current.cause);
+  }
+
+  return null;
+}
+
+function mapRefundCustomErrorToMessage(errorName) {
+  const messages = {
+    InvalidTicketStatus:
+      'Ticket is not in a refundable on-chain state for this wallet.',
+    RefundsNotEnabled:
+      'Refunds are not enabled for this event on-chain yet.',
+    InsufficientRefundPool:
+      'The event refund pool does not have enough ETH to pay this ticket refund yet.',
+    FundNotSet:
+      'Ticket contract is not wired to the Fund contract on-chain.',
+    EventNotFound: 'The related event was not found on-chain.',
+    BadParam: 'Refund parameters are invalid for the current on-chain state.',
+    NothingToClaim: 'This ticket refund has already been claimed on-chain.',
+    TransferFailed:
+      'On-chain refund transfer failed. Please try again or verify contract funding.',
+  };
+
+  return messages[errorName] || null;
+}
+
+function parseRefundContractError(errorData) {
+  const contracts = [getTicket(), getFund()];
+
+  for (const contract of contracts) {
+    try {
+      if (typeof contract?.interface?.parseError === 'function') {
+        const parsedError = contract.interface.parseError(errorData);
+        if (parsedError?.name) {
+          return parsedError.name;
+        }
+      }
+    } catch {
+      // Try the next contract interface.
+    }
+  }
+
+  return null;
+}
+
+function getRefundBlockchainErrorMessage(error) {
+  const fallbackMessage = getRawBlockchainErrorMessage(error);
+
+  if (error && typeof error === 'object' && typeof error.revert?.name === 'string') {
+    return mapRefundCustomErrorToMessage(error.revert.name) || fallbackMessage;
+  }
+
+  const errorData = extractBlockchainErrorData(error);
+  if (errorData) {
+    const errorName = parseRefundContractError(errorData);
+    if (errorName) {
+      return mapRefundCustomErrorToMessage(errorName) || fallbackMessage;
+    }
+  }
+
+  if (String(fallbackMessage).toLowerCase().includes('execution reverted')) {
+    return 'Refund transaction reverted on-chain. Verify the ticket is still sold, refunds are enabled, and the refund pool is funded.';
+  }
+
+  return fallbackMessage;
 }
 
 const TX_RECEIPT_WAIT_TIMEOUT_MS = Number(process.env.TX_RECEIPT_WAIT_TIMEOUT_MS || 120000);
@@ -779,6 +887,14 @@ export async function createRefundIntent(tokenId, buyerWallet, repos = {}) {
   }
 
   const data = ticketContract.interface.encodeFunctionData('claimRefund', [chainTokenId]);
+
+  try {
+    await ticketContract.claimRefund.staticCall(chainTokenId, {
+      from: buyerWallet,
+    });
+  } catch (error) {
+    throw new BadRequestError(getRefundBlockchainErrorMessage(error));
+  }
 
   return {
     tokenId: ticket.tokenId,

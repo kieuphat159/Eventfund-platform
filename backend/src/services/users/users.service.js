@@ -184,13 +184,48 @@ export async function getUserPortfolio(walletAddress, repos = {}) {
  */
 export async function getUserShares(walletAddress, repos = {}) {
   const repository = repos.shareRepo || shareRepo;
+  const normalizedWallet = walletAddress.toLowerCase();
 
   const shares = await repository.findShares(
-    { holder: walletAddress.toLowerCase() },
+    { holder: normalizedWallet },
     { populate: "eventId" },
   );
 
-  return Array.isArray(shares.docs) ? shares.docs : shares;
+  const docs = Array.isArray(shares.docs) ? shares.docs : shares;
+  if (!Array.isArray(docs) || docs.length === 0) {
+    return docs;
+  }
+
+  const confirmedContributions = await Contribution.find({
+    contributor: normalizedWallet,
+    type: "donator_contribution",
+    status: "confirmed",
+  })
+    .select("eventId amount")
+    .lean();
+
+  const confirmedAmountByEventId = confirmedContributions.reduce(
+    (map, contribution) => {
+      const eventId = String(contribution.eventId || "");
+      if (!eventId) return map;
+
+      map[eventId] = addBigInt(map[eventId] || "0", contribution.amount || "0");
+      return map;
+    },
+    {},
+  );
+
+  return docs.map((share) => {
+    const eventId = String(share.eventId?._id || share.eventId || "");
+    const confirmedAmount = confirmedAmountByEventId[eventId] || "0";
+
+    return {
+      ...share,
+      contributionAmount: confirmedAmount,
+      sharePercentage:
+        confirmedAmount === "0" ? 0 : Number(share.sharePercentage || 0),
+    };
+  });
 }
 
 export async function getUserShareById(walletAddress, shareId, repos = {}) {
