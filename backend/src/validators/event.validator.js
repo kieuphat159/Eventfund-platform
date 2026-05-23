@@ -481,6 +481,11 @@ const confirmContributionRefundSchema = Joi.object({
   investorWallet: ethereumAddress.optional(),
 });
 
+const confirmRewardClaimSchema = Joi.object({
+  txHash: txHashSchema.required(),
+  investorWallet: ethereumAddress.optional(),
+});
+
 const markEventCompletedSchema = Joi.object({
   txHash: txHashSchema.optional(),
   releaseTxHash: txHashSchema.optional(),
@@ -492,6 +497,7 @@ export const eventSchemas = {
   confirmCreateEvent: confirmCreateEventSchema,
   confirmInvestEvent: confirmInvestEventSchema,
   confirmContributionRefund: confirmContributionRefundSchema,
+  confirmRewardClaim: confirmRewardClaimSchema,
   updateEvent: updateEventSchema,
   queryEvents: queryEventsSchema,
   investEvent: investEventSchema,

@@ -61,7 +61,20 @@ export interface RefundInvestmentIntentData {
   transaction: InvestmentIntentTransaction;
 }
 
+export interface RewardClaimIntentData {
+  eventId: string;
+  contractEventId: string;
+  investor: string;
+  claimableAmount: string;
+  transaction: InvestmentIntentTransaction;
+}
+
 export interface ConfirmContributionRefundPayload {
+  txHash: string;
+  investorWallet?: string;
+}
+
+export interface ConfirmRewardClaimPayload {
   txHash: string;
   investorWallet?: string;
 }
@@ -74,10 +87,24 @@ export interface ConfirmContributionRefundData {
   share?: InvestmentDetail;
 }
 
+export interface ConfirmRewardClaimData {
+  synced: boolean;
+  alreadySynced: boolean;
+  txHash: string;
+  rewardAmount: string;
+  share?: InvestmentDetail;
+}
+
 export interface ClaimInvestmentRefundResult {
   txHash: string;
   intent: RefundInvestmentIntentData;
   confirmation: ConfirmContributionRefundData | null;
+}
+
+export interface ClaimRewardResult {
+  txHash: string;
+  intent: RewardClaimIntentData;
+  confirmation: ConfirmRewardClaimData | null;
 }
 
 export interface InvestOnChainResult {
@@ -356,6 +383,51 @@ export async function confirmContributionRefundTransaction(
   return null;
 }
 
+export async function createRewardClaimIntent(
+  eventId: string,
+): Promise<RewardClaimIntentData | null> {
+  const response = await api.post<{
+    success: boolean;
+    data?: RewardClaimIntentData;
+  }>(`/events/${eventId}/reward-intent`, {});
+
+  return response.data || null;
+}
+
+export async function confirmRewardClaimTransaction(
+  eventId: string,
+  payload: ConfirmRewardClaimPayload,
+  maxRetries = 15,
+  retryDelayMs = 2000,
+): Promise<ConfirmRewardClaimData | null> {
+  for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
+    try {
+      const response = await api.post<{
+        success: boolean;
+        data?: ConfirmRewardClaimData;
+      }>(`/events/${eventId}/reward/confirm`, payload);
+
+      return response.data
+        ? {
+            ...response.data,
+            share: response.data.share
+              ? normalizeInvestment(response.data.share)
+              : undefined,
+          }
+        : null;
+    } catch (error: any) {
+      const isNotMined = error?.message?.includes("Transaction not mined yet");
+      if (isNotMined && attempt < maxRetries) {
+        await sleep(retryDelayMs);
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  return null;
+}
+
 export async function investInEvent(
   eventId: string,
   amount: string,
@@ -434,6 +506,44 @@ export async function claimContributionRefundOnChain(
   });
 
   const confirmation = await confirmContributionRefundTransaction(eventId, {
+    txHash,
+    investorWallet: fromAddress,
+  });
+
+  return {
+    txHash,
+    intent,
+    confirmation,
+  };
+}
+
+export async function claimRewardOnChain(
+  provider: Eip1193Provider,
+  eventId: string,
+  investorWallet?: string,
+): Promise<ClaimRewardResult> {
+  if (!provider?.request) {
+    throw new Error("Wallet provider is unavailable");
+  }
+
+  const intent = await createRewardClaimIntent(eventId);
+  if (!intent?.transaction) {
+    throw new Error("Unable to create reward claim intent");
+  }
+
+  const fromAddress = investorWallet || intent.investor;
+  if (!fromAddress) {
+    throw new Error("Investor wallet address is required");
+  }
+
+  const txHash = await sendInvestmentTransactionWithRetry(provider, {
+    from: fromAddress,
+    to: intent.transaction.to,
+    data: intent.transaction.data,
+    value: toHexValue(intent.transaction.value),
+  });
+
+  const confirmation = await confirmRewardClaimTransaction(eventId, {
     txHash,
     investorWallet: fromAddress,
   });

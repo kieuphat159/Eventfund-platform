@@ -4,6 +4,8 @@ import * as eventRepo from "../../repositories/event.repo.js";
 import * as userRepo from "../../repositories/user.repo.js";
 import * as shareRepo from "../../repositories/share.repo.js";
 import * as contributionRepo from "../../repositories/contribution.repo.js";
+import * as rewardClaimRepo from "../../repositories/rewardClaim.repo.js";
+import * as revenueDistributionRepo from "../../repositories/revenueDistribution.repo.js";
 import {
   addBigInt,
   compareBigInt,
@@ -2521,6 +2523,214 @@ export async function confirmContributionRefundTransaction(
     txHash: txHash.toLowerCase(),
     refundAmount: amountFromChain,
     event: updatedEvent,
+    share: updatedShare,
+  };
+}
+
+export async function createRewardClaimIntent(eventId, user, repos = {}) {
+  const repository = repos.eventRepo || eventRepo;
+  const shareRepository = repos.shareRepo || shareRepo;
+
+  if (!isValidObjectId(eventId)) {
+    throw new BadRequestError("Invalid event id");
+  }
+
+  const event = await repository.findById(eventId);
+  if (!event) {
+    throw new NotFoundError("Event not found");
+  }
+
+  if (event.status !== "completed") {
+    throw new BadRequestError("Event must be completed before reward claim");
+  }
+
+  if (!event.contractEventId) {
+    throw new BadRequestError("Event has not been synced to on-chain yet");
+  }
+
+  const investor = getAuthenticatedWalletAddress(user, null, "investorWallet");
+  const existingShare = await shareRepository.findByEventAndHolder(
+    eventId,
+    investor,
+  );
+
+  if (
+    !existingShare ||
+    compareBigInt(String(existingShare.contributionAmount || "0"), "0") <= 0
+  ) {
+    throw new BadRequestError("No reward-bearing investment found for this wallet");
+  }
+
+  const fund = getFund();
+  const [fundAddress, network] = await Promise.all([
+    fund.getAddress(),
+    provider.getNetwork(),
+  ]);
+
+  const eventFundAddress = event.fundContractAddress?.toLowerCase();
+  if (eventFundAddress && eventFundAddress !== fundAddress.toLowerCase()) {
+    throw new BadRequestError(
+      "Event is linked to a different Fund contract than backend configuration",
+    );
+  }
+
+  let claimableAmount = "0";
+  try {
+    if (typeof fund.pendingReward === "function") {
+      claimableAmount = String(
+        await fund.pendingReward(BigInt(event.contractEventId), investor),
+      );
+    }
+
+    await fund.claimReward.staticCall(BigInt(event.contractEventId), {
+      from: investor,
+    });
+  } catch (error) {
+    throw new BadRequestError(getBlockchainErrorMessage(error));
+  }
+
+  const data = fund.interface.encodeFunctionData("claimReward", [
+    BigInt(event.contractEventId),
+  ]);
+
+  return {
+    eventId: String(event._id),
+    contractEventId: String(event.contractEventId),
+    investor,
+    claimableAmount,
+    transaction: {
+      to: fundAddress,
+      data,
+      value: "0",
+      chainId: network.chainId.toString(),
+      functionName: "claimReward",
+    },
+  };
+}
+
+export async function confirmRewardClaimTransaction(
+  eventId,
+  payload = {},
+  user,
+  repos = {},
+) {
+  const repository = repos.eventRepo || eventRepo;
+  const shareRepository = repos.shareRepo || shareRepo;
+  const rewardRepository = repos.rewardClaimRepo || rewardClaimRepo;
+  const distributionRepository =
+    repos.revenueDistributionRepo || revenueDistributionRepo;
+  const { txHash, investorWallet } = payload;
+
+  validateTransactionHash(txHash);
+
+  if (!isValidObjectId(eventId)) {
+    throw new BadRequestError("Invalid event id");
+  }
+
+  const event = await repository.findById(eventId);
+  if (!event) {
+    throw new NotFoundError("Event not found");
+  }
+
+  if (!event.contractEventId) {
+    throw new BadRequestError("Event has not been synced to on-chain yet");
+  }
+
+  const normalizedInvestor = getAuthenticatedWalletAddress(
+    user,
+    investorWallet,
+    "investorWallet",
+  );
+
+  const fund = getFund();
+  const fundAddress = (await fund.getAddress()).toLowerCase();
+  if (
+    event.fundContractAddress &&
+    event.fundContractAddress.toLowerCase() !== fundAddress
+  ) {
+    throw new BadRequestError(
+      "Event is linked to a different Fund contract than backend configuration",
+    );
+  }
+
+  const receipt = await getMinedReceipt(txHash);
+  if (!receipt) {
+    throw new BadRequestError("Transaction not mined yet. Please retry shortly.");
+  }
+  if (Number(receipt.status) !== 1) {
+    throw new BadRequestError("Transaction failed on-chain");
+  }
+
+  const parsedEvents = await parseFundEventsFromReceipt(receipt);
+  const matchedClaim = parsedEvents.find((parsedEvent) => {
+    const chainEventId = String(parsedEvent.args?.eventId ?? "");
+    const chainInvestor = String(parsedEvent.args?.donator ?? "").toLowerCase();
+
+    return (
+      parsedEvent?.name === "RewardClaimed" &&
+      chainEventId === String(event.contractEventId) &&
+      chainInvestor === normalizedInvestor
+    );
+  });
+
+  if (!matchedClaim) {
+    throw new BadRequestError(
+      "RewardClaimed event not found in transaction receipt for this user/event",
+    );
+  }
+
+  const amountFromChain = toStringBigInt(
+    String(matchedClaim.args?.amount ?? "0"),
+  );
+  if (compareBigInt(amountFromChain, "0") <= 0) {
+    throw new BadRequestError("On-chain reward amount must be positive");
+  }
+
+  await persistLogsFromReceipt({
+    receipt,
+    contract: fund,
+    contractName: "Fund",
+    contractAddress: fundAddress,
+  });
+
+  const distribution = await distributionRepository.findLatestByEventId(
+    event._id,
+  );
+  const share = await shareRepository.findByEventAndHolder(
+    event._id,
+    normalizedInvestor,
+  );
+
+  const existingClaim = await rewardRepository.upsertRewardClaim({
+    txHash: txHash.toLowerCase(),
+    eventId: event._id,
+    distributionId: distribution?._id,
+    claimer: normalizedInvestor,
+    sharePercentage: share?.sharePercentage ?? 0,
+    rewardAmount: amountFromChain,
+    status: "confirmed",
+  });
+
+  await shareRepository.incrementClaimedReward(
+    event._id,
+    normalizedInvestor,
+    amountFromChain,
+    txHash,
+  );
+
+  const updatedShare = await Share.findOne({
+    eventId: event._id,
+    holder: normalizedInvestor,
+  })
+    .populate("eventId")
+    .lean();
+
+  return {
+    synced: true,
+    alreadySynced: false,
+    txHash: txHash.toLowerCase(),
+    rewardAmount: amountFromChain,
+    claim: existingClaim,
     share: updatedShare,
   };
 }

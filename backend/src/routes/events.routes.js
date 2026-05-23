@@ -412,6 +412,19 @@ router.post(
   controller.confirmContributionRefundTransaction,
 );
 
+router.post(
+  "/:id/reward-intent",
+  authenticate,
+  controller.createRewardClaimIntent,
+);
+
+router.post(
+  "/:id/reward/confirm",
+  authenticate,
+  validate({ body: eventSchemas.confirmRewardClaim }),
+  controller.confirmRewardClaimTransaction,
+);
+
 /**
  * @swagger
  * /events/{id}/images/{imageUrl}:

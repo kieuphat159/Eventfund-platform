@@ -7,6 +7,7 @@ import {
   Calendar,
   Sparkles,
   ArrowUpRight,
+  Award,
 } from "lucide-react";
 import {
   Card,
@@ -18,6 +19,7 @@ import {
 import { Button } from "../../components/ui/button";
 import {
   claimContributionRefundOnChain,
+  claimRewardOnChain,
   getInvestments,
   InvestmentDetail as InvestmentDetailType,
 } from "../../services/investment.service";
@@ -47,6 +49,9 @@ export const MyInvestments: React.FC = () => {
   const [investments, setInvestments] = useState<InvestmentDetailType[]>([]);
   const [loading, setLoading] = useState(true);
   const [refundingEventId, setRefundingEventId] = useState<string | null>(null);
+  const [claimingRewardEventId, setClaimingRewardEventId] = useState<
+    string | null
+  >(null);
   const [insufficientBalanceMessage, setInsufficientBalanceMessage] =
     useState("");
 
@@ -109,6 +114,37 @@ export const MyInvestments: React.FC = () => {
       console.error("Failed to claim contribution refund:", error);
     } finally {
       setRefundingEventId(null);
+      hideLoading();
+    }
+  };
+
+  const handleClaimReward = async (investment: InvestmentDetailType) => {
+    const eventId = investment.eventId?._id;
+    if (!eventId) return;
+
+    try {
+      if (!user?.walletAddress) {
+        await connectWallet();
+        return;
+      }
+
+      if (!walletProvider?.request) {
+        throw new Error(
+          "Wallet provider is not ready. Please reconnect wallet and try again.",
+        );
+      }
+
+      setClaimingRewardEventId(eventId);
+      showLoading("Claiming reward...");
+      await claimRewardOnChain(walletProvider, eventId, user.walletAddress);
+      await refreshInvestments();
+    } catch (error) {
+      if (isInsufficientBalanceError(error)) {
+        setInsufficientBalanceMessage(getInsufficientBalanceMessage(error));
+      }
+      console.error("Failed to claim reward:", error);
+    } finally {
+      setClaimingRewardEventId(null);
       hideLoading();
     }
   };
@@ -239,6 +275,12 @@ export const MyInvestments: React.FC = () => {
                   ) &&
                   compareIntegerValues(investment.contributionAmount, "0") > 0;
                 const refundEventId = investment.eventId?._id || null;
+                const rewardEventId = investment.eventId?._id || null;
+                const canClaimReward =
+                  investment.eventId?.status === "completed" &&
+                  compareIntegerValues(investment.contributionAmount, "0") >
+                    0 &&
+                  compareIntegerValues(investment.claimedReward, "0") === 0;
 
                 return (
                   <div
@@ -332,6 +374,19 @@ export const MyInvestments: React.FC = () => {
                           {refundingEventId === refundEventId
                             ? "Claiming Refund..."
                             : "Claim Refund"}
+                        </Button>
+                      )}
+                      {canClaimReward && rewardEventId && (
+                        <Button
+                          size="sm"
+                          className="bg-cyan-600 hover:bg-cyan-500 text-white"
+                          disabled={claimingRewardEventId === rewardEventId}
+                          onClick={() => void handleClaimReward(investment)}
+                        >
+                          <Award className="w-4 h-4 mr-1" />
+                          {claimingRewardEventId === rewardEventId
+                            ? "Claiming..."
+                            : "Claim Reward"}
                         </Button>
                       )}
                     </div>
