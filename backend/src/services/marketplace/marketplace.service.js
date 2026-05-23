@@ -7,7 +7,7 @@ import {
   ForbiddenError,
   BadRequestError,
 } from "../../utils/customErrors.js";
-import { getMarketplace, provider } from "../blockchain/index.js";
+import { getMarketplace, getTicket, provider } from "../blockchain/index.js";
 
 function normalizeTxHash(txHash) {
   return txHash?.toLowerCase();
@@ -17,6 +17,10 @@ function validateTransactionHash(txHash) {
   if (!txHash || !ethers.isHexString(txHash, 32)) {
     throw new BadRequestError("Invalid transaction hash");
   }
+}
+
+function normalizeAddress(value) {
+  return value ? String(value).toLowerCase() : "";
 }
 
 async function parseMarketplaceEventsFromReceipt(receipt) {
@@ -96,10 +100,28 @@ export async function createListingIntent(
   }
 
   const marketplace = getMarketplace();
-  const [to, network] = await Promise.all([
+  const ticketContract = getTicket();
+  const [to, network, marketplaceOwner, activeListingId] = await Promise.all([
     marketplace.getAddress(),
     provider.getNetwork(),
+    ticketContract.ownerOf(BigInt(ticket.tokenId)),
+    marketplace.getActiveListingByTokenId(BigInt(ticket.tokenId)),
   ]);
+
+  const normalizedSeller = normalizeAddress(sellerWallet);
+  const normalizedMarketplace = normalizeAddress(to);
+  const normalizedMarketplaceOwner = normalizeAddress(marketplaceOwner);
+
+  if (
+    activeListingId !== 0n ||
+    normalizedMarketplaceOwner === normalizedMarketplace
+  ) {
+    throw new BadRequestError("Ticket is already listed on-chain");
+  }
+
+  if (normalizedMarketplaceOwner !== normalizedSeller) {
+    throw new ForbiddenError("Not authorized to list this ticket on-chain");
+  }
 
   const data = marketplace.interface.encodeFunctionData("createListing", [
     BigInt(ticket.tokenId),
@@ -436,7 +458,10 @@ export async function confirmListingCreatedTransaction(
   const syncedTicket = await ticketRepo.updateStatus(
     tokenId,
     "sold",
-    { isListed: true },
+    {
+      currentOwner: normalizeAddress(await marketplace.getAddress()),
+      isListed: true,
+    },
     repositories.models,
   );
 
@@ -528,7 +553,10 @@ export async function confirmListingCancelledTransaction(
   const syncedTicket = await ticketRepo.updateStatus(
     tokenId,
     "sold",
-    { isListed: false },
+    {
+      currentOwner: seller,
+      isListed: false,
+    },
     repositories.models,
   );
 

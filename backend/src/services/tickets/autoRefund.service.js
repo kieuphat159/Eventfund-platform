@@ -131,86 +131,121 @@ async function autoCancelActiveListingsForEvent(eventDoc, options = {}) {
     cancelled: 0,
     failed: 0,
   };
+  const chainEventId = BigInt(eventDoc.contractEventId);
+  const ticketIds = await (options.ticketContract || getTicket()).getEventTokenIds(
+    chainEventId,
+  );
 
-  let page = 1;
-  let totalPages = 1;
+  for (const tokenIdValue of ticketIds || []) {
+    const tokenId = toTokenIdString(tokenIdValue);
+    if (!tokenId) continue;
 
-  while (page <= totalPages) {
-    const payload = await listingRepository.findListings(
-      { eventId: eventDoc._id, status: "active" },
-      { page, limit: 100, sort: "-listedAt", lean: true },
-      repositories.models,
-    );
+    let activeListingId = 0n;
+    try {
+      activeListingId = await marketplaceContract.getActiveListingByTokenId(
+        BigInt(tokenId),
+      );
+    } catch (error) {
+      result.failed += 1;
+      blockedTokenIds.add(tokenId);
+      logger.error?.(
+        `[auto-refund] failed to inspect active marketplace listing for token ${tokenId}: ${error?.message || error}`,
+      );
+      continue;
+    }
 
-    const listings = Array.isArray(payload?.docs) ? payload.docs : [];
-    totalPages = payload?.totalPages || 1;
+    if (activeListingId === 0n) {
+      continue;
+    }
 
-    for (const listing of listings) {
-      result.inspected += 1;
+    result.inspected += 1;
 
-      const contractListingId = String(listing.contractListingId || "").trim();
-      const tokenId = String(listing.tokenId || "").trim();
-      if (!contractListingId || !tokenId) {
-        result.failed += 1;
-        if (tokenId) blockedTokenIds.add(tokenId);
-        logger.error?.(
-          `[auto-refund] cannot force-cancel listing ${listing?._id || "unknown"} for event ${eventDoc.contractEventId}: missing contractListingId/tokenId`,
-        );
-        continue;
+    let listingDetails;
+    try {
+      listingDetails = await marketplaceContract.getListing(activeListingId);
+    } catch (error) {
+      result.failed += 1;
+      blockedTokenIds.add(tokenId);
+      logger.error?.(
+        `[auto-refund] failed to load on-chain listing ${activeListingId.toString()} for token ${tokenId}: ${error?.message || error}`,
+      );
+      continue;
+    }
+
+    const seller = String(listingDetails?.seller || "").toLowerCase();
+    const contractListingId = activeListingId.toString();
+
+    try {
+      const tx = await signer.sendTransaction({
+        to: marketplaceAddress,
+        data: FORCE_CANCEL_LISTING_INTERFACE.encodeFunctionData(
+          "forceCancelListing",
+          [activeListingId],
+        ),
+      });
+      const receipt = await tx.wait(AUTO_REFUND_WAIT_CONFIRMATIONS);
+
+      if (!receipt || Number(receipt.status) !== 1) {
+        throw new Error("Automatic marketplace cancellation failed on-chain");
       }
 
+      result.cancelled += 1;
+
       try {
-        const tx = await signer.sendTransaction({
-          to: marketplaceAddress,
-          data: FORCE_CANCEL_LISTING_INTERFACE.encodeFunctionData(
-            "forceCancelListing",
-            [BigInt(contractListingId)],
-          ),
-        });
-        const receipt = await tx.wait(AUTO_REFUND_WAIT_CONFIRMATIONS);
+        await persistMarketplaceReceipt(receipt, logger);
+      } catch (error) {
+        logger.error?.(
+          `[auto-refund] failed to persist marketplace receipt for listing ${contractListingId}: ${error?.message || error}`,
+        );
+      }
 
-        if (!receipt || Number(receipt.status) !== 1) {
-          throw new Error("Automatic marketplace cancellation failed on-chain");
-        }
+      const existingListing = await listingRepository.findListings(
+        {
+          $or: [
+            { contractListingId },
+            { tokenId, status: "active" },
+          ],
+        },
+        { page: 1, limit: 1, sort: "-listedAt", lean: true },
+        repositories.models,
+      );
+      const listingDoc = existingListing?.docs?.[0];
 
-        result.cancelled += 1;
+      const updates = [
+        ticketRepository.updateStatus(
+          tokenId,
+          "sold",
+          {
+            currentOwner: seller,
+            isListed: false,
+          },
+          repositories.models,
+        ),
+      ];
 
-        try {
-          await persistMarketplaceReceipt(receipt, logger);
-        } catch (error) {
-          logger.error?.(
-            `[auto-refund] failed to persist marketplace receipt for listing ${contractListingId}: ${error?.message || error}`,
-          );
-        }
-
-        await Promise.all([
+      if (listingDoc?._id) {
+        updates.push(
           listingRepository.updateStatus(
-            listing._id,
+            listingDoc._id,
             "cancelled",
             {},
             repositories.models,
           ),
-          ticketRepository.updateStatus(
-            tokenId,
-            "sold",
-            { isListed: false },
-            repositories.models,
-          ),
-        ]);
-
-        logger.info?.(
-          `[auto-refund] force-cancelled marketplace listing ${contractListingId} for token ${tokenId} in tx ${tx.hash}`,
-        );
-      } catch (error) {
-        result.failed += 1;
-        blockedTokenIds.add(tokenId);
-        logger.error?.(
-          `[auto-refund] failed to force-cancel marketplace listing ${contractListingId} for token ${tokenId}: ${error?.message || error}`,
         );
       }
-    }
 
-    page += 1;
+      await Promise.all(updates);
+
+      logger.info?.(
+        `[auto-refund] force-cancelled marketplace listing ${contractListingId} for token ${tokenId} in tx ${tx.hash}`,
+      );
+    } catch (error) {
+      result.failed += 1;
+      blockedTokenIds.add(tokenId);
+      logger.error?.(
+        `[auto-refund] failed to force-cancel marketplace listing ${contractListingId} for token ${tokenId}: ${error?.message || error}`,
+      );
+    }
   }
 
   return {
