@@ -90,8 +90,15 @@ export async function rebuildFundState(eventObjectId, models = {}) {
  * Mark all confirmed contributions of a contributor as refunded (idempotent)
  * Dùng cho event ContributionRefunded
  */
-export async function markContributionsAsRefunded(eventId, contributor, models = {}) {
+export async function markContributionsAsRefunded(
+  eventId,
+  contributor,
+  refundData = {},
+  models = {},
+) {
   const Contribution = models.Contribution || DefaultContribution;
+
+  const normalizedRefundTxHash = refundData.refundTxHash?.toLowerCase();
 
   return await Contribution.updateMany(
     {
@@ -103,7 +110,8 @@ export async function markContributionsAsRefunded(eventId, contributor, models =
     {
       $set: {
         status: "refunded",
-        refundedAt: new Date(),
+        refundedAt: refundData.refundedAt || new Date(),
+        ...(normalizedRefundTxHash ? { refundTxHash: normalizedRefundTxHash } : {}),
       },
     }
   );
@@ -117,8 +125,13 @@ export async function deleteByTxHashes(txHashes, models = {}) {
   return await Contribution.deleteMany({ txHash: { $in: txHashes } });
 }
 
-export async function markDonatorContributionsAsRefunded(eventId, contributor, models = {}) {
-  return markContributionsAsRefunded(eventId, contributor, models);
+export async function markDonatorContributionsAsRefunded(
+  eventId,
+  contributor,
+  refundData = {},
+  models = {},
+) {
+  return markContributionsAsRefunded(eventId, contributor, refundData, models);
 }
 
 export async function findRefundableContributors(eventId, models = {}) {

@@ -22,10 +22,12 @@ export interface ApiTicket {
   currentOwner?: string;
   createdAt?: string;
   soldAt?: string;
+  refundedAt?: string;
   usedAt?: string;
   verifiedBy?: string;
   eventIdRaw?: string;
   eventId?: ApiEvent | string;
+  refundedTxHash?: string;
 }
 
 interface TicketsResponse {
