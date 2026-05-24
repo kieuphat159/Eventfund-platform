@@ -459,7 +459,7 @@ export async function confirmListingCreatedTransaction(
     tokenId,
     "sold",
     {
-      currentOwner: normalizeAddress(await marketplace.getAddress()),
+      currentOwner: normalizeAddress(await getMarketplace().getAddress()),
       isListed: true,
     },
     repositories.models,
