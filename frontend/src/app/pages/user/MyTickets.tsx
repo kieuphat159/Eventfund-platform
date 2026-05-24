@@ -170,7 +170,7 @@ export const MyTickets: React.FC = () => {
     );
   }, [tickets]);
 
-  const formatWei = (wei: string | bigint | number) => {
+  const formatEthValue = (wei: string | bigint | number) => {
     if (!wei || wei === "0" || wei === "0x0") return "0";
 
     try {
@@ -238,6 +238,9 @@ export const MyTickets: React.FC = () => {
         prevTickets.filter((item) => item._id !== ticket._id),
       );
     } catch (err: any) {
+      if (isInsufficientBalanceError(err)) {
+        setInsufficientBalanceMessage(getInsufficientBalanceMessage(err));
+      }
       const message = err?.message || "Failed to claim refund";
       showListingPopup("error", `Refund failed: ${message}`);
     } finally {
@@ -324,7 +327,7 @@ export const MyTickets: React.FC = () => {
           <CardContent className="p-6">
             <p className="text-sm text-slate-400 mb-1">Total Value</p>
             <p className="text-3xl font-bold text-white">
-              {formatWei(totalValue)} ETH
+              {formatEthValue(totalValue)} ETH
             </p>
           </CardContent>
         </Card>
@@ -407,7 +410,7 @@ export const MyTickets: React.FC = () => {
                       Purchase Price
                     </span>
                     <span className="text-sm font-semibold text-purple-400">
-                      {formatWei(purchasePrice)} ETH
+                      {formatEthValue(purchasePrice)} ETH
                     </span>
                   </div>
                 </div>
@@ -551,8 +554,8 @@ export const MyTickets: React.FC = () => {
               const maxAllowedWei = (originalPriceWei * 150n) / 100n;
               return (
                 <div className="mb-3 rounded-md border border-slate-700 bg-slate-800/60 p-3 text-xs text-slate-300">
-                  <p>Original price: {formatWei(originalPriceWei)} ETH</p>
-                  <p>Max resale (150% cap): {formatWei(maxAllowedWei)} ETH</p>
+                  <p>Original price: {formatWei(originalPriceWei)} wei</p>
+                  <p>Max resale (150% cap): {formatWei(maxAllowedWei)} wei</p>
                 </div>
               );
             })()}

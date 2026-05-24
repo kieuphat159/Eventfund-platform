@@ -182,19 +182,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const disconnectWallet = useCallback(async () => {
     try {
-      // web3Auth.logout({ cleanup: true }) clears the cross-origin iframe session
-      // at wallet.web3auth.io, preventing "Invalid token specified" errors when
-      // switching between MetaMask and social login.
+      // 1. disconnect() from useWeb3AuthDisconnect() updates the React hook's
+      //    internal state (isConnected = false) so that connect() later will
+      //    show the modal instead of hanging.
+      try {
+        await disconnect();
+      } catch (err) {
+        console.warn("[Auth] disconnect() failed:", err);
+      }
+
+      // 2. Additional cleanup: clear the cross-origin iframe session at
+      //    wallet.web3auth.io to prevent "Invalid token specified" errors
+      //    when switching between MetaMask and social login.
       if (web3Auth) {
         try {
           await web3Auth.logout({ cleanup: true });
         } catch (err) {
-          console.warn("[Auth] logout({ cleanup: true }) failed, falling back to disconnect():", err);
-          try { await disconnect(); } catch { /* ignore */ }
+          console.warn("[Auth] web3Auth.logout({ cleanup: true }) failed:", err);
         }
       }
-    } catch (err) {
-      console.warn("[Auth] logout error (non-fatal):", err);
     } finally {
       clearAuth();
     }

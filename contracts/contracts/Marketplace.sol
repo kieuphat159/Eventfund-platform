@@ -149,14 +149,15 @@ contract Marketplace is IMarketplace, ReentrancyGuard, Ownable, IERC721Receiver 
         if (listing.status != ListingStatus.Active) revert ListingNotActive(listingId);
         if (listing.seller != msg.sender) revert NotListingSeller(listingId);
 
-        uint256 tokenId = listing.tokenId;
+        _cancelListing(listingId, listing.seller);
+    }
 
-        listing.status = ListingStatus.Cancelled;
-        _activeListingByTokenId[tokenId] = 0;
+    function forceCancelListing(uint256 listingId) external onlyOwner {
+        Listing storage listing = _listings[listingId];
 
-        ticketNFT.safeTransferFrom(address(this), msg.sender, tokenId);
+        if (listing.status != ListingStatus.Active) revert ListingNotActive(listingId);
 
-        emit ListingCancelled(listingId, tokenId, msg.sender);
+        _cancelListing(listingId, listing.seller);
     }
 
     // ============ View Functions ============
@@ -186,5 +187,17 @@ contract Marketplace is IMarketplace, ReentrancyGuard, Ownable, IERC721Receiver 
     function _safeTransferETH(address to, uint256 amount) internal {
         (bool success, ) = to.call{value: amount}("");
         if (!success) revert EthTransferFailed(to, amount);
+    }
+
+    function _cancelListing(uint256 listingId, address recipient) internal {
+        Listing storage listing = _listings[listingId];
+        uint256 tokenId = listing.tokenId;
+
+        listing.status = ListingStatus.Cancelled;
+        _activeListingByTokenId[tokenId] = 0;
+
+        ticketNFT.safeTransferFrom(address(this), recipient, tokenId);
+
+        emit ListingCancelled(listingId, tokenId, listing.seller);
     }
 }

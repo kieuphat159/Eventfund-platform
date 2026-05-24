@@ -251,6 +251,32 @@ class EventsController {
     });
   });
 
+  createRewardClaimIntent = asyncHandler(async (req, res) => {
+    const intent = await this.eventsService.createRewardClaimIntent(
+      req.params.id,
+      req.user,
+    );
+
+    res.status(200).json({
+      success: true,
+      data: intent,
+    });
+  });
+
+  confirmRewardClaimTransaction = asyncHandler(async (req, res) => {
+    const payload = req.validated?.body || req.body;
+    const result = await this.eventsService.confirmRewardClaimTransaction(
+      req.params.id,
+      payload,
+      req.user,
+    );
+
+    res.status(200).json({
+      success: true,
+      data: result,
+    });
+  });
+
   /**
    * GET /events/:id/stats
    * Get event statistics
