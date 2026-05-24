@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: indexer-fund
+
+  labels:
+    app: indexer-fund
+    component: blockchain
+spec:
+  revisionHistoryLimit: 1
+  replicas: 1  # KHÔNG scale > 1, checkpoint state trong MongoDB
+  selector:
+    matchLabels:
+      app: indexer-fund
+  template:
+    metadata:
+      labels:
+        app: indexer-fund
+        component: blockchain
+    spec:
+      containers:
+        - name: indexer-fund
+          image: eventfund-backend:latest
+          command: ["node", "src/services/blockchain/indexers/fund/run.js"]
+          envFrom:
+            - configMapRef:
+                name: eventfund-backend-config
+            - secretRef:
+                name: eventfund-backend-secret
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              cpu: "150m"
+              memory: "256Mi"
+          livenessProbe:
+            exec:
+              command: ["pgrep", "-f", "indexers/fund/run.js"]
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            failureThreshold: 3
+      automountServiceAccountToken: false
+      restartPolicy: Always
+

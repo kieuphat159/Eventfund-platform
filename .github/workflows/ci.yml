@@ -2,9 +2,27 @@ name: CI
 
 on:
   push:
-    branches: [dev, main, ci/cd]
+    branches: [dev, master]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - 'contracts/**'
+      - '.github/actions/**'
+      - '.github/workflows/ci.yml'
+      - '.github/workflows/reusable-*.yml'
+      - 'package-lock.json'
+      - 'docker-compose.yml'
   pull_request:
-    branches: [dev, main, ci/cd]
+    branches: [dev, master]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - 'contracts/**'
+      - '.github/actions/**'
+      - '.github/workflows/ci.yml'
+      - '.github/workflows/reusable-*.yml'
+      - 'package-lock.json'
+      - 'docker-compose.yml'
   workflow_dispatch:
 
 concurrency:
@@ -12,23 +30,96 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  frontend:
-    uses: ./.github/workflows/ci_frontend.yml
+  # Determine environment from branch
+  determine-env:
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.env.outputs.environment }}
+    steps:
+      - name: Determine environment from branch
+        id: env
+        run: |
+          BRANCH="${{ github.ref_name }}"
+          
+          if [ "$BRANCH" = "master" ]; then
+            ENVIRONMENT="prod"
+          else
+            ENVIRONMENT="dev"
+          fi
+          
+          echo "environment=${ENVIRONMENT}" >> $GITHUB_OUTPUT
+          echo "✅ Determined environment: ${ENVIRONMENT} (branch: ${BRANCH})"
 
-  sonarcloud:
-    uses: ./.github/workflows/ci_sonarcloud.yml
+  # Detect which services have changed
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      backend:   ${{ steps.filter.outputs.backend }}
+      frontend:  ${{ steps.filter.outputs.frontend }}
+      contracts: ${{ steps.filter.outputs.contracts }}
+      shared:    ${{ steps.filter.outputs.shared }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+            frontend:
+              - 'frontend/**'
+            contracts:
+              - 'contracts/**'
+            shared:
+              - '.github/actions/**'
+              - '.github/workflows/ci.yml'
+              - '.github/workflows/reusable-*.yml'
+              - 'package-lock.json'
+              - 'docker-compose.yml'
+
+  frontend:
+    needs: [changes, determine-env]
+    if: needs.changes.outputs.frontend == 'true' || needs.changes.outputs.shared == 'true'
+    uses: ./.github/workflows/reusable-build-frontend.yml
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      environment: ${{ needs.determine-env.outputs.environment }}
     secrets:
-      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
 
   contracts:
-    uses: ./.github/workflows/ci_contracts.yml
+    needs: changes
+    if: needs.changes.outputs.contracts == 'true' || needs.changes.outputs.shared == 'true'
+    uses: ./.github/workflows/reusable-build-contracts.yml
 
   backend:
-    uses: ./.github/workflows/ci_backend.yml
+    needs: [changes, determine-env]
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.shared == 'true'
+    uses: ./.github/workflows/reusable-build-backend.yml
     permissions:
       contents: read
       id-token: write
       security-events: write
+    with:
+      environment: ${{ needs.determine-env.outputs.environment }}
     secrets:
       AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
       RPC_URL: ${{ secrets.RPC_URL }}
+
+  sonarcloud:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true' || needs.changes.outputs.shared == 'true'
+    uses: ./.github/workflows/reusable-scan-sonarqube.yml
+    permissions:
+      contents: read
+      actions: read
+    with:
+      branch: ${{ github.ref_name }}
+      scan_mode: pr  # CI always uses PR mode (changed files only)
+    secrets:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}

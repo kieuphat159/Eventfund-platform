@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alertmanager-prometheus-kube-prometheus-alertmanager
+  namespace: monitoring
+type: Opaque
+stringData:
+  alertmanager.yaml: |
+    global:
+      resolve_timeout: 5m
+      smtp_smarthost: 'smtp.gmail.com:587'
+      smtp_from: '${ALERT_EMAIL}'
+      smtp_auth_username: '${ALERT_EMAIL}'
+      smtp_auth_password: '${ALERT_EMAIL_PASSWORD}'
+      smtp_require_tls: true
+
+    route:
+      group_by: ['alertname', 'namespace']
+      group_wait: 10s
+      group_interval: 5m
+      repeat_interval: 4h
+      receiver: 'email-notifications'
+
+    receivers:
+      - name: 'email-notifications'
+        email_configs:
+          - to: '${ALERT_EMAIL}'
+            send_resolved: true
+            headers:
+              Subject: '[EventFund] {{ .Status | toUpper }} - {{ .GroupLabels.alertname }}'

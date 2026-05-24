@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: indexer-ticket
+
+  labels:
+    app: indexer-ticket
+    component: blockchain
+spec:
+  revisionHistoryLimit: 1
+  replicas: 1
+  selector:
+    matchLabels:
+      app: indexer-ticket
+  template:
+    metadata:
+      labels:
+        app: indexer-ticket
+        component: blockchain
+    spec:
+      containers:
+        - name: indexer-ticket
+          image: eventfund-backend:latest
+          command: ["node", "src/services/blockchain/indexers/ticket/run.js"]
+          envFrom:
+            - configMapRef:
+                name: eventfund-backend-config
+            - secretRef:
+                name: eventfund-backend-secret
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              cpu: "150m"
+              memory: "256Mi"
+          livenessProbe:
+            exec:
+              command: ["pgrep", "-f", "indexers/ticket/run.js"]
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            failureThreshold: 3
+      automountServiceAccountToken: false
+      restartPolicy: Always
+

@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: processor-ticket
+
+  labels:
+    app: processor-ticket
+    component: blockchain
+spec:
+  revisionHistoryLimit: 1
+  replicas: 1
+  selector:
+    matchLabels:
+      app: processor-ticket
+  template:
+    metadata:
+      labels:
+        app: processor-ticket
+        component: blockchain
+    spec:
+      containers:
+        - name: processor-ticket
+          image: eventfund-backend:latest
+          command: ["node", "src/services/blockchain/processors/ticket.run.js"]
+          envFrom:
+            - configMapRef:
+                name: eventfund-backend-config
+            - secretRef:
+                name: eventfund-backend-secret
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              cpu: "150m"
+              memory: "256Mi"
+          livenessProbe:
+            exec:
+              command: ["pgrep", "-f", "processors/ticket.run.js"]
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            failureThreshold: 3
+      automountServiceAccountToken: false
+      restartPolicy: Always
+

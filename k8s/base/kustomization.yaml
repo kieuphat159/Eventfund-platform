@@ -1,0 +1,27 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+images:
+  - name: eventfund-backend
+    newName: 612827970242.dkr.ecr.ap-southeast-1.amazonaws.com/eventfund-backend
+    newTag: b93f1a25c12af93ec996c48beb808392ab7354b3
+
+resources:
+  - namespace/namespace.yaml
+  - secrets/externalsecret-backend.yaml
+  - backend/configmap.yaml
+  - backend/api-deployment.yaml
+  - backend/api-service.yaml
+  - backend/api-ingress.yaml
+  - backend/api-hpa.yaml
+  - backend/indexer-fund-deployment.yaml
+  - backend/processor-fund-deployment.yaml
+  - backend/indexer-ticket-deployment.yaml
+  - backend/processor-ticket-deployment.yaml
+  - backend/indexer-marketplace-deployment.yaml
+  - backend/processor-marketplace-deployment.yaml
+  - backend/worker-deposits-deployment.yaml
+  - monitoring/prometheus-rules.yaml
+  # alertmanager-config.yaml được apply riêng trong manual-infra-apply workflow
+  # không đưa vào ArgoCD sync để tránh conflict với Prometheus Helm
+  # ArgoCD và Grafana Ingress được tạo riêng trong namespace của chúng, không qua kustomize overlay
