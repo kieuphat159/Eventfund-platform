@@ -1,0 +1,72 @@
+name: Setup AWS Credentials
+description: Configure AWS credentials using OIDC (OpenID Connect)
+
+inputs:
+  aws_account_id:
+    description: 'AWS Account ID'
+    required: true
+  aws_region:
+    description: 'AWS Region (optional, loads from config if not provided)'
+    required: false
+  role_name:
+    description: 'IAM Role name (optional, loads from config if not provided)'
+    required: false
+
+outputs:
+  region:
+    description: 'AWS Region used'
+    value: ${{ steps.config.outputs.region }}
+  role_arn:
+    description: 'Full IAM Role ARN'
+    value: ${{ steps.config.outputs.role_arn }}
+
+runs:
+  using: composite
+  steps:
+    - name: Load AWS configuration
+      id: config
+      shell: bash
+      run: |
+        CONFIG_FILE="${{ github.action_path }}/../../config/env.yml"
+
+        # Load region
+        REGION="${{ inputs.aws_region }}"
+        if [ -z "$REGION" ]; then
+          if [ -f "$CONFIG_FILE" ]; then
+            REGION=$(yq '.aws.region' "$CONFIG_FILE")
+          else
+            REGION="ap-southeast-1"  # Fallback default
+          fi
+        fi
+
+        # Load role name
+        ROLE_NAME="${{ inputs.role_name }}"
+        if [ -z "$ROLE_NAME" ]; then
+          if [ -f "$CONFIG_FILE" ]; then
+            ROLE_NAME=$(yq '.aws.oidc_role_name' "$CONFIG_FILE")
+          else
+            ROLE_NAME="GitHubActionsRole"  # Fallback default
+          fi
+        fi
+
+        # Construct full role ARN
+        ROLE_ARN="arn:aws:iam::${{ inputs.aws_account_id }}:role/${ROLE_NAME}"
+
+        echo "region=${REGION}" >> $GITHUB_OUTPUT
+        echo "role_arn=${ROLE_ARN}" >> $GITHUB_OUTPUT
+
+        echo " AWS Configuration:"
+        echo "  Region: ${REGION}"
+        echo "  Role ARN: ${ROLE_ARN}"
+
+    - name: Configure AWS Credentials (OIDC)
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ steps.config.outputs.role_arn }}
+        aws-region: ${{ steps.config.outputs.region }}
+
+    - name: Verify AWS identity
+      shell: bash
+      run: |
+        echo " AWS credentials configured successfully"
+        aws sts get-caller-identity

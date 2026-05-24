@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: eventfund-prod
+  labels:
+    name: eventfund-prod
+    environment: prod
+    app.kubernetes.io/managed-by: argocd

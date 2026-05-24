@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-deposits
+
+  labels:
+    app: worker-deposits
+    component: worker
+spec:
+  revisionHistoryLimit: 1
+  replicas: 1
+  selector:
+    matchLabels:
+      app: worker-deposits
+  template:
+    metadata:
+      labels:
+        app: worker-deposits
+        component: worker
+    spec:
+      containers:
+        - name: worker-deposits
+          image: eventfund-backend:latest
+          command: ["node", "src/workers/depositWorker.js"]
+          envFrom:
+            - configMapRef:
+                name: eventfund-backend-config
+            - secretRef:
+                name: eventfund-backend-secret
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "128Mi"
+            limits:
+              cpu: "100m"
+              memory: "256Mi"
+          livenessProbe:
+            exec:
+              command: ["pgrep", "-f", "depositWorker.js"]
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            failureThreshold: 3
+      automountServiceAccountToken: false
+      restartPolicy: Always
+
