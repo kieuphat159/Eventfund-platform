@@ -1,5 +1,6 @@
 import type { Web3AuthContextConfig } from '@web3auth/modal/react';
 import { logger } from './lib/logger';
+import { resolveSepoliaRpcUrl } from './lib/rpc';
 
 const clientId = import.meta.env.VITE_WEB3AUTH_CLIENT_ID as string;
 const web3AuthNetwork = (import.meta.env.VITE_WEB3AUTH_NETWORK ??
@@ -8,29 +9,7 @@ const bundlerUrl = import.meta.env.VITE_BUNDLER_URL as string | undefined;
 const pimlicoApiKey = import.meta.env.VITE_PIMLICO_API_KEY as
   | string
   | undefined;
-const DEFAULT_SEPOLIA_RPC_URL = "https://ethereum-sepolia-rpc.publicnode.com";
-
-function resolveRpcUrl(): string {
-  const configured =
-    (import.meta.env.VITE_WEB3AUTH_RPC_URL as string | undefined) ||
-    (import.meta.env.VITE_RPC_URL as string | undefined) ||
-    DEFAULT_SEPOLIA_RPC_URL;
-
-  const trimmed = configured.trim();
-  if (!trimmed) return DEFAULT_SEPOLIA_RPC_URL;
-
-  const looksLikeQuickNode = /quiknode\.pro/i.test(trimmed);
-  if (looksLikeQuickNode) {
-    console.warn(
-      "[Web3Auth] QuickNode free-tier may hit 429 while signing tx. Falling back to public Sepolia RPC.",
-    );
-    return DEFAULT_SEPOLIA_RPC_URL;
-  }
-
-  return trimmed;
-}
-
-const rpcUrl = resolveRpcUrl();
+const rpcUrl = resolveSepoliaRpcUrl();
 
 export const WEB3AUTH_SEPOLIA_CHAIN_ID = "0xaa36a7";
 export const WEB3AUTH_SEPOLIA_CHAIN = {
@@ -69,6 +48,12 @@ if (!clientId) {
 }
 if (!bundlerUrl) {
   logger.warn('web3auth', 'VITE_BUNDLER_URL is not set. Smart Account transactions will not work.');
+}
+if (rpcUrl === "https://ethereum-sepolia-rpc.publicnode.com") {
+  logger.warn(
+    'web3auth',
+    'Using the fallback public Sepolia RPC. Set VITE_SEPOLIA_RPC_URL to a dedicated RPC endpoint to reduce 429 rate limits.',
+  );
 }
 
 export const web3AuthConfig: Web3AuthContextConfig = {

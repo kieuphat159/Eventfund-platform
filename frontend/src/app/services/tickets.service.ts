@@ -428,9 +428,18 @@ function normalizeTicket(ticket: ApiTicket): ApiTicket {
 
 export async function getUserTickets(
   walletAddress: string,
+  options: { includeRefunded?: boolean } = {},
 ): Promise<ApiTicket[]> {
+  const query = new URLSearchParams();
+  query.set("page", "1");
+  query.set("limit", "100");
+
+  if (options.includeRefunded) {
+    query.set("includeRefunded", "true");
+  }
+
   const payload = await api.get<TicketsResponse>(
-    `/tickets/user/${walletAddress.toLowerCase()}?page=1&limit=100`,
+    `/tickets/user/${walletAddress.toLowerCase()}?${query.toString()}`,
   );
 
   return (payload.data?.docs || []).map(normalizeTicket);

@@ -24,6 +24,7 @@ import { useLoading } from "../../components/ui/loadingContext";
 import { getUserTickets } from "../../services/tickets.service";
 import { getMarketplaceHistory } from "../../services/listings.service";
 import { userService } from "../../services/user.service";
+import { resolveSepoliaRpcUrl } from "../../lib/rpc";
 import {
   addIntegerValues,
   compareIntegerValues,
@@ -46,10 +47,7 @@ type WalletBalance = {
   eth: string;
 };
 
-const BALANCE_RPC_URL =
-  (import.meta.env.VITE_WEB3AUTH_RPC_URL as string | undefined) ||
-  (import.meta.env.VITE_RPC_URL as string | undefined) ||
-  "https://ethereum-sepolia-rpc.publicnode.com";
+const BALANCE_RPC_URL = resolveSepoliaRpcUrl();
 
 async function fetchWalletBalance(walletAddress: string): Promise<WalletBalance> {
   const response = await fetch(BALANCE_RPC_URL, {
@@ -128,7 +126,7 @@ export const Wallet: React.FC = () => {
           marketplaceSalesResult,
         ] = await Promise.allSettled([
           fetchWalletBalance(walletAddress),
-          getUserTickets(walletAddress),
+          getUserTickets(walletAddress, { includeRefunded: true }),
           userService.getUserContributions(),
           userService.getUserRewards(),
           getMarketplaceHistory({

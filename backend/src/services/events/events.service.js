@@ -1228,13 +1228,7 @@ export async function confirmCreateEventTransaction(
 
   const normalizedOrganizer = getUserSigningAddress(user, organizerWallet);
 
-  let receipt;
-  try {
-    receipt = await provider.getTransactionReceipt(txHash);
-  } catch {
-    throw new BadRequestError("Transaction not mined yet");
-  }
-
+  const receipt = await getMinedReceipt(txHash);
   if (!receipt) {
     throw new BadRequestError("Transaction not mined yet");
   }

@@ -83,7 +83,8 @@ const eventIdParamsSchema = Joi.object({
 const userTicketsQuerySchema = Joi.object({
   page: Joi.number().integer().min(1).optional(),
   limit: Joi.number().integer().min(1).max(100).optional(),
-  sort: Joi.string().optional()
+  sort: Joi.string().optional(),
+  includeRefunded: Joi.boolean().truthy("true").falsy("false").optional(),
 });
 
 export const ticketSchemas = {

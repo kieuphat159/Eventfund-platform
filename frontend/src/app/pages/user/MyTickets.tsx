@@ -102,6 +102,11 @@ export const MyTickets: React.FC = () => {
     useState("");
   const walletProvider = resolveTransactionProvider(web3Auth?.provider);
 
+  const visibleTickets = useMemo(
+    () => tickets.filter((ticket) => ticket.status !== "refunded"),
+    [tickets],
+  );
+
   useEffect(() => {
     if (!listingPopup) return;
 
@@ -153,7 +158,7 @@ export const MyTickets: React.FC = () => {
 
   const upcomingEventsCount = useMemo(() => {
     const now = Date.now();
-    return tickets.filter((ticket) => {
+    return visibleTickets.filter((ticket) => {
       const event =
         typeof ticket.eventId === "object" ? ticket.eventId : undefined;
       if (!event?.startDate) {
@@ -161,14 +166,14 @@ export const MyTickets: React.FC = () => {
       }
       return new Date(event.startDate).getTime() > now;
     }).length;
-  }, [tickets]);
+  }, [visibleTickets]);
 
   const totalValue = useMemo(() => {
-    return tickets.reduce(
+    return visibleTickets.reduce(
       (sum, ticket) => sum + BigInt(ticket.originalPrice || "0"),
       0n,
     );
-  }, [tickets]);
+  }, [visibleTickets]);
 
   const formatEthValue = (wei: string | bigint | number) => {
     if (!wei || wei === "0" || wei === "0x0") return "0";
@@ -312,7 +317,7 @@ export const MyTickets: React.FC = () => {
         <Card className="bg-slate-900 border-slate-800">
           <CardContent className="p-6">
             <p className="text-sm text-slate-400 mb-1">Total Tickets</p>
-            <p className="text-3xl font-bold text-white">{tickets.length}</p>
+            <p className="text-3xl font-bold text-white">{visibleTickets.length}</p>
           </CardContent>
         </Card>
         <Card className="bg-slate-900 border-slate-800">
@@ -349,7 +354,7 @@ export const MyTickets: React.FC = () => {
 
       {/* Tickets Grid */}
       <div className="grid md:grid-cols-2 gap-6">
-        {tickets.map((ticket) => {
+        {visibleTickets.map((ticket) => {
           const event =
             typeof ticket.eventId === "object" ? ticket.eventId : undefined;
           const eventName = event?.title || "Unknown Event";
@@ -491,7 +496,7 @@ export const MyTickets: React.FC = () => {
       </div>
 
       {/* Empty State */}
-      {!isLoading && tickets.length === 0 && !error && (
+      {!isLoading && visibleTickets.length === 0 && !error && (
         <Card className="bg-slate-900 border-slate-800">
           <CardContent className="p-12 text-center">
             <Ticket className="w-16 h-16 text-slate-700 mx-auto mb-4" />

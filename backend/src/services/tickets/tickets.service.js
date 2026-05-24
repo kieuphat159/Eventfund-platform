@@ -709,7 +709,7 @@ export async function getUserTickets(walletAddress, query = {}, repos = {}) {
   const ticketRepository = repos.ticketRepo || ticketRepo;
   const listingRepository = repos.listingRepo || listingRepo;
 
-  const { page, limit, sort } = query;
+  const { page, limit, sort, includeRefunded } = query;
   const normalizedWallet = walletAddress.toLowerCase();
 
   const options = {
@@ -752,6 +752,7 @@ export async function getUserTickets(walletAddress, query = {}, repos = {}) {
       return {
         ...ticket,
         isListed: true,
+        listedAt: listing?.listedAt || ticket?.listedAt || ticket?.createdAt,
         eventId: populatedEvent,
       };
     })
@@ -772,7 +773,46 @@ export async function getUserTickets(walletAddress, query = {}, repos = {}) {
     });
   }
 
-  const mergedDocs = Array.from(mergedByTokenId.values());
+  const resolveTicketSortTimestamp = (ticket) => {
+    const candidates = [
+      ticket?.listedAt,
+      ticket?.soldAt,
+      ticket?.refundedAt,
+      ticket?.usedAt,
+      ticket?.createdAt,
+      ticket?.eventId && typeof ticket.eventId === "object"
+        ? ticket.eventId.startDate || ticket.eventId.createdAt
+        : null,
+    ];
+
+    for (const candidate of candidates) {
+      if (!candidate) continue;
+      const time = new Date(candidate).getTime();
+      if (Number.isFinite(time)) {
+        return time;
+      }
+    }
+
+    return 0;
+  };
+
+  const shouldIncludeRefunded =
+    includeRefunded === true ||
+    includeRefunded === "true" ||
+    includeRefunded === 1 ||
+    includeRefunded === "1";
+
+  const mergedDocs = Array.from(mergedByTokenId.values())
+    .filter((ticket) => shouldIncludeRefunded || ticket?.status !== "refunded")
+    .sort((a, b) => {
+      const timeDiff =
+        resolveTicketSortTimestamp(b) - resolveTicketSortTimestamp(a);
+      if (timeDiff !== 0) return timeDiff;
+
+      const tokenA = Number.parseInt(String(a?.tokenId || "0"), 10) || 0;
+      const tokenB = Number.parseInt(String(b?.tokenId || "0"), 10) || 0;
+      return tokenB - tokenA;
+    });
 
   return {
     ...(ownedTickets || {}),

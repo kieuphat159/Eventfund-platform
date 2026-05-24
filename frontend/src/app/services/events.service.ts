@@ -1,5 +1,6 @@
 import { api } from '../lib/api';
 import { logger } from '../lib/logger';
+import { resolveSepoliaRpcUrl } from '../lib/rpc';
 import { encodeFunctionData } from "viem";
 
 export interface EventVenue {
@@ -433,10 +434,7 @@ interface ConfirmCreateEventResponse {
   message?: string;
 }
 
-const PUBLIC_RPC_URL =
-  (import.meta.env.VITE_WEB3AUTH_RPC_URL as string | undefined) ||
-  (import.meta.env.VITE_RPC_URL as string | undefined) ||
-  "https://ethereum-sepolia-rpc.publicnode.com";
+const PUBLIC_RPC_URL = resolveSepoliaRpcUrl();
 
 function normalizeEvents(
   data?: PaginatedEventsData | EventItem[],
