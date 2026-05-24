@@ -27,6 +27,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../../components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "../../components/ui/alert-dialog";
 import { Badge } from "../../components/ui/badge";
 import {
   cancelEventWithWalletFallback,
@@ -37,8 +47,14 @@ import {
   type EventStatus,
 } from "../../services/events.service";
 import { getTickets, type ApiTicket } from "../../services/tickets.service";
+import { resolveTransactionProvider } from "../../services/providerService";
 import { useAuth } from "../../contexts/AuthContext";
 import { useLoading } from "../../components/ui/loadingContext";
+import { InsufficientBalanceDialog } from "../../components/shared/InsufficientBalanceDialog";
+import {
+  getInsufficientBalanceMessage,
+  isInsufficientBalanceError,
+} from "../../lib/insufficientBalance";
 
 const OWNER_CANCELABLE_STATUSES = new Set<EventStatus>([
   "draft",
@@ -125,6 +141,16 @@ export const MyEvents: React.FC = () => {
   const [eventTickets, setEventTickets] = useState<ApiTicket[]>([]);
   const [ticketsLoading, setTicketsLoading] = useState(false);
   const [ticketsError, setTicketsError] = useState("");
+  const [insufficientBalanceMessage, setInsufficientBalanceMessage] =
+    useState("");
+  const [confirmDeleteEvent, setConfirmDeleteEvent] =
+    useState<EventItem | null>(null);
+  const [confirmCancelEvent, setConfirmCancelEvent] =
+    useState<EventItem | null>(null);
+  const [infoAlert, setInfoAlert] = useState<{
+    title: string;
+    message: string;
+  } | null>(null);
 
   useEffect(() => {
     const fetchEvents = async () => {
@@ -151,61 +177,63 @@ export const MyEvents: React.FC = () => {
     fetchEvents();
   }, [isVerifierView, user?.walletAddress]);
 
-  const handleDelete = async (event: EventItem) => {
+  const handleDelete = (event: EventItem) => {
+    setConfirmDeleteEvent(event);
+  };
+
+  const executeDelete = async () => {
+    const event = confirmDeleteEvent;
+    if (!event) return;
     const eventId = event._id || event.id;
     if (!eventId) return;
 
-    const ok = window.confirm(
-      `Are you sure you want to delete the event "${event.title || "Untitled event"}"?\n\nOnly delete drafts because the backend currently restricts deletion to drafts.`,
-    );
-    if (!ok) return;
-
     try {
       setDeletingId(eventId);
+      setConfirmDeleteEvent(null);
       showLoading("Deleting event...");
       await deleteEvent(eventId);
       setEvents((prev) => prev.filter((e) => (e._id || e.id) !== eventId));
     } catch (err: any) {
-      alert(
-        err?.response?.data?.message ||
+      setInfoAlert({
+        title: "Error",
+        message:
+          err?.response?.data?.message ||
           err?.message ||
           "Failed to delete event",
-      );
+      });
     } finally {
       setDeletingId("");
       hideLoading();
     }
   };
 
-  const handleCancel = async (event: EventItem) => {
+  const handleCancel = (event: EventItem) => {
+    setConfirmCancelEvent(event);
+  };
+
+  const executeCancel = async () => {
+    const event = confirmCancelEvent;
+    if (!event) return;
     const eventId = event._id || event.id;
     if (!eventId) return;
 
-    const ok = window.confirm(
-      `Are you sure you want to cancel the event "${event.title || "Untitled event"}"?\n\nThe event will be moved to the cancelled state according to the backend flow.`,
-    );
-    if (!ok) return;
-
     try {
       setCancellingId(eventId);
+      setConfirmCancelEvent(null);
 
       if (!web3Auth?.provider) {
         await connectWallet();
-        alert(
-          "Wallet connected. Please press Cancel Event again to sign the cancellation transaction with the organizer wallet.",
-        );
+        setInfoAlert({
+          title: "Wallet Connected",
+          message:
+            "Wallet connected. Please click Cancel again to sign the cancellation transaction with the organizer wallet.",
+        });
         return;
       }
 
+      showLoading("Cancelling event...");
       const updated = await cancelEventWithWalletFallback(
-        web3Auth.provider as
-          | {
-              request: (args: {
-                method: string;
-                params?: unknown[];
-              }) => Promise<unknown>;
-            }
-          | undefined,
+        resolveTransactionProvider(web3Auth?.provider),
         eventId,
         { status: "cancelled" },
         user?.walletAddress,
@@ -222,11 +250,16 @@ export const MyEvents: React.FC = () => {
         ),
       );
     } catch (err: any) {
-      alert(
-        err?.response?.data?.message ||
+      if (isInsufficientBalanceError(err)) {
+        setInsufficientBalanceMessage(getInsufficientBalanceMessage(err));
+      }
+      setInfoAlert({
+        title: "Error",
+        message:
+          err?.response?.data?.message ||
           err?.message ||
           "Failed to cancel event",
-      );
+      });
     } finally {
       setCancellingId("");
       hideLoading();
@@ -312,6 +345,87 @@ export const MyEvents: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      <InsufficientBalanceDialog
+        open={!!insufficientBalanceMessage}
+        message={insufficientBalanceMessage}
+        onClose={() => setInsufficientBalanceMessage("")}
+      />
+
+      <AlertDialog
+        open={!!confirmDeleteEvent}
+        onOpenChange={(open) => {
+          if (!open) setConfirmDeleteEvent(null);
+        }}
+      >
+        <AlertDialogContent className="border-slate-700 bg-slate-950">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-white">
+              Delete Event
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-slate-400">
+              Delete "{confirmDeleteEvent?.title || "Untitled event"}"? Only
+              draft events should be deleted because the backend currently
+              limits deletion to draft records.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={executeDelete}
+              className="border border-red-600 text-red-400 hover:bg-red-900/20 bg-transparent shadow-none"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={!!confirmCancelEvent}
+        onOpenChange={(open) => {
+          if (!open) setConfirmCancelEvent(null);
+        }}
+      >
+        <AlertDialogContent className="border-slate-700 bg-slate-950">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-white">
+              Cancel Event
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-slate-400">
+              Are you sure you want to cancel the event "
+              {confirmCancelEvent?.title || "Untitled event"}"?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Go Back</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={executeCancel}
+              className="border border-red-600 text-red-400 hover:bg-red-900/20 bg-transparent shadow-none"
+            >
+              Cancel Event
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog
+        open={!!infoAlert}
+        onOpenChange={(open) => {
+          if (!open) setInfoAlert(null);
+        }}
+      >
+        <DialogContent className="border-slate-700 bg-slate-950">
+          <DialogHeader>
+            <DialogTitle className="text-white">
+              {infoAlert?.title || ""}
+            </DialogTitle>
+            <DialogDescription className="text-slate-400">
+              {infoAlert?.message || ""}
+            </DialogDescription>
+          </DialogHeader>
+        </DialogContent>
+      </Dialog>
+
       <div className="flex items-center justify-between">
         <div>
           <h1 className="mb-2 text-3xl font-semibold tracking-tight text-white">
@@ -598,7 +712,7 @@ export const MyEvents: React.FC = () => {
               Ticket QR - {ticketDialogEvent?.title || "Selected Event"}
             </DialogTitle>
             <DialogDescription className="text-slate-400">
-              Chọn ticket của event để xem QR và test flow scan verifier.
+              Select an event ticket to view QR and test verifier scan flow.
             </DialogDescription>
           </DialogHeader>
 
@@ -650,7 +764,7 @@ export const MyEvents: React.FC = () => {
                 </div>
               ) : (
                 <div className="py-10 text-center text-slate-400">
-                  Event này chưa có ticket để tạo QR.
+                  This event does not have tickets to create QR.
                 </div>
               )}
             </div>
@@ -699,7 +813,7 @@ export const MyEvents: React.FC = () => {
                 </div>
               ) : (
                 <div className="py-10 text-center text-slate-400">
-                  Chọn một ticket ở bên trái để xem QR.
+                  Select a ticket on the left to view QR.
                 </div>
               )}
             </div>

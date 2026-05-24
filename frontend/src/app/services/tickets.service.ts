@@ -22,10 +22,12 @@ export interface ApiTicket {
   currentOwner?: string;
   createdAt?: string;
   soldAt?: string;
+  refundedAt?: string;
   usedAt?: string;
   verifiedBy?: string;
   eventIdRaw?: string;
   eventId?: ApiEvent | string;
+  refundedTxHash?: string;
 }
 
 interface TicketsResponse {
@@ -426,9 +428,18 @@ function normalizeTicket(ticket: ApiTicket): ApiTicket {
 
 export async function getUserTickets(
   walletAddress: string,
+  options: { includeRefunded?: boolean } = {},
 ): Promise<ApiTicket[]> {
+  const query = new URLSearchParams();
+  query.set("page", "1");
+  query.set("limit", "100");
+
+  if (options.includeRefunded) {
+    query.set("includeRefunded", "true");
+  }
+
   const payload = await api.get<TicketsResponse>(
-    `/tickets/user/${walletAddress.toLowerCase()}?page=1&limit=100`,
+    `/tickets/user/${walletAddress.toLowerCase()}?${query.toString()}`,
   );
 
   return (payload.data?.docs || []).map(normalizeTicket);
@@ -512,6 +523,18 @@ export async function verifyTicket(
           : null,
       }
     : null;
+}
+
+export async function markTicketAsUsed(
+  tokenId: string,
+): Promise<ApiTicket | null> {
+  const response = await api.post<TicketDetailResponse>(
+    `/tickets/${encodeURIComponent(tokenId)}/use`,
+    {},
+    { headers: getAuthHeaders() },
+  );
+
+  return response.data ? normalizeTicket(response.data) : null;
 }
 
 export async function createPurchaseIntent(
@@ -751,6 +774,7 @@ export const ticketsService = {
   getTicketByTokenId,
   getTicketStats,
   verifyTicket,
+  markTicketAsUsed,
   createUseTicketIntent,
   confirmUseTicketTransaction,
   useTicketOnChain,

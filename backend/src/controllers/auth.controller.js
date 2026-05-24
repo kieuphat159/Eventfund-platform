@@ -45,62 +45,6 @@ class AuthController {
   });
 
   /**
-   * GET /api/auth/nonce
-   */
-  getNonce = asyncHandler(async (req, res) => {
-    const { walletAddress } = req.validated?.body || req.body;
-    const result = await this.authService.generateNonce(walletAddress);
-    res.status(200).json({ success: true, data: result });
-  });
-
-  /**
-   * POST /api/auth/message
-   */
-  getMessage = asyncHandler(async (req, res) => {
-    const { walletAddress, chainId } = req.validated?.body || req.body;
-    const nonceData = await this.authService.getNonce(walletAddress);
-
-    if (!nonceData) {
-      throw new BadRequestError(
-        "No nonce found. Please request a nonce first by calling POST /auth/nonce",
-        "NONCE_NOT_FOUND",
-      );
-    }
-
-    const message = this.authService.createSIWEMessage(
-      walletAddress,
-      nonceData.nonce,
-      process.env.SIWE_DOMAIN || "localhost",
-      process.env.SIWE_URI || "http://localhost:3000",
-      chainId || 1,
-    );
-
-    res.status(200).json({
-      success: true,
-      data: {
-        message,
-        nonce: nonceData.nonce,
-      },
-    });
-  });
-
-  /**
-   * POST /api/auth/verify
-   */
-  verifySignature = asyncHandler(async (req, res) => {
-    const { message, signature } = req.validated.body;
-    const result = await this.authService.verifyAndAuthenticate(
-      message,
-      signature,
-    );
-
-    res.status(200).json({
-      success: true,
-      data: result,
-    });
-  });
-
-  /**
    * POST /api/auth/logout
    */
   logout = asyncHandler(async (req, res) => {

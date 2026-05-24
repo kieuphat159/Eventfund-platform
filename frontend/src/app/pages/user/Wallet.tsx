@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Wallet as WalletIcon,
   Send,
@@ -21,9 +22,9 @@ import { Button } from "../../components/ui/button";
 import { useAuth } from "../../contexts/AuthContext";
 import { useLoading } from "../../components/ui/loadingContext";
 import { getUserTickets } from "../../services/tickets.service";
-import { getInvestments } from "../../services/investment.service";
 import { getMarketplaceHistory } from "../../services/listings.service";
 import { userService } from "../../services/user.service";
+import { resolveSepoliaRpcUrl } from "../../lib/rpc";
 import {
   addIntegerValues,
   compareIntegerValues,
@@ -46,10 +47,7 @@ type WalletBalance = {
   eth: string;
 };
 
-const BALANCE_RPC_URL =
-  (import.meta.env.VITE_WEB3AUTH_RPC_URL as string | undefined) ||
-  (import.meta.env.VITE_RPC_URL as string | undefined) ||
-  "https://ethereum-sepolia-rpc.publicnode.com";
+const BALANCE_RPC_URL = resolveSepoliaRpcUrl();
 
 async function fetchWalletBalance(walletAddress: string): Promise<WalletBalance> {
   const response = await fetch(BALANCE_RPC_URL, {
@@ -89,6 +87,7 @@ export const Wallet: React.FC = () => {
   const { user } = useAuth();
   const walletAddress = user?.walletAddress;
   const { show: showLoading, hide: hideLoading } = useLoading();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [addressCopied, setAddressCopied] = useState(false);
   const [copiedTxIds, setCopiedTxIds] = useState<Record<string, boolean>>({});
@@ -102,6 +101,12 @@ export const Wallet: React.FC = () => {
   const [isDepositModalOpen, setIsDepositModalOpen] = useState(false);
 
   useEffect(() => {
+    if (searchParams.get("deposit") === "1") {
+      setIsDepositModalOpen(true);
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
     const loadWalletData = async () => {
       if (!walletAddress) {
         setBalance({ wei: "0", eth: "0" });
@@ -112,117 +117,145 @@ export const Wallet: React.FC = () => {
 
       setLoading(true);
       showLoading('Loading wallet...');
+      try {
+        const [
+          balanceResult,
+          ticketsResult,
+          contributionsResult,
+          rewardsResult,
+          marketplaceSalesResult,
+        ] = await Promise.allSettled([
+          fetchWalletBalance(walletAddress),
+          getUserTickets(walletAddress, { includeRefunded: true }),
+          userService.getUserContributions(),
+          userService.getUserRewards(),
+          getMarketplaceHistory({
+            seller: walletAddress.toLowerCase(),
+            page: 1,
+            limit: 100,
+            sort: "soldAt",
+            order: "desc",
+          }),
+        ]);
 
-      const [
-        balanceResult,
-        ticketsResult,
-        investmentsResult,
-        rewardsResult,
-        marketplaceSalesResult,
-      ] = await Promise.allSettled([
-        fetchWalletBalance(walletAddress),
-        getUserTickets(walletAddress),
-        getInvestments(),
-        userService.getUserRewards(),
-        getMarketplaceHistory({
-          seller: walletAddress.toLowerCase(),
-          page: 1,
-          limit: 100,
-          sort: "soldAt",
-          order: "desc",
-        }),
-      ]);
+        setBalance(
+          balanceResult.status === "fulfilled"
+            ? balanceResult.value
+            : { wei: "0", eth: "0" },
+        );
 
-      setBalance(
-        balanceResult.status === "fulfilled"
-          ? balanceResult.value
-          : { wei: "0", eth: "0" },
-      );
+        const nextTransactions: WalletTransaction[] = [];
 
-      const nextTransactions: WalletTransaction[] = [];
+        if (ticketsResult.status === "fulfilled") {
+          ticketsResult.value.forEach((ticket) => {
+            const eventTitle =
+              typeof ticket.eventId === "object" ? ticket.eventId?.title : null;
 
-      if (ticketsResult.status === "fulfilled") {
-        ticketsResult.value.forEach((ticket) => {
-          if (!ticket.soldAt) return;
+            if (ticket.soldAt) {
+              nextTransactions.push({
+                id: `ticket-${ticket.tokenId}-purchase`,
+                type: "sent",
+                description: `Ticket Purchase - ${eventTitle || `Event ${ticket.eventIdRaw || "-"}`}`,
+                amountWei: String(ticket.originalPrice || "0"),
+                date: ticket.soldAt,
+                hash:
+                  (ticket as any).soldTxHash ||
+                  ((ticket as any).transferHistory?.length
+                    ? (ticket as any).transferHistory[(ticket as any).transferHistory.length - 1].txHash
+                    : null) ||
+                  null,
+              });
+            }
 
-          const eventTitle =
-            typeof ticket.eventId === "object" ? ticket.eventId?.title : null;
-
-          nextTransactions.push({
-            id: `ticket-${ticket.tokenId}-purchase`,
-            type: "sent",
-            description: `Ticket Purchase - ${eventTitle || `Event ${ticket.eventIdRaw || "-"}`}`,
-            amountWei: String(ticket.originalPrice || "0"),
-            date: ticket.soldAt,
-            hash:
-              // prefer explicit soldTxHash set by backend, fall back to any transferHistory entry
-              (ticket as any).soldTxHash ||
-              ((ticket as any).transferHistory?.length
-                ? (ticket as any).transferHistory[(ticket as any).transferHistory.length - 1].txHash
-                : null) ||
-              null,
+            if (ticket.status === "refunded" && ticket.refundedAt) {
+              nextTransactions.push({
+                id: `ticket-${ticket.tokenId}-refund`,
+                type: "received",
+                description: `Ticket Refund - ${eventTitle || `Event ${ticket.eventIdRaw || "-"}`}`,
+                amountWei: String(ticket.originalPrice || "0"),
+                date: ticket.refundedAt,
+                hash: ticket.refundedTxHash || null,
+              });
+            }
           });
-        });
-      }
+        }
 
-      if (investmentsResult.status === "fulfilled") {
-        investmentsResult.value.forEach((investment) => {
-          if (!investment.createdAt) return;
+        if (contributionsResult.status === "fulfilled") {
+          contributionsResult.value.forEach((contribution) => {
+            const eventTitle =
+              typeof contribution.eventId === "object"
+                ? contribution.eventId?.title
+                : null;
 
-          nextTransactions.push({
-            id: `investment-${investment._id}`,
-            type: "sent",
-            description: `Investment - ${investment.eventId?.title || "Event"}`,
-            amountWei: String(investment.contributionAmount || "0"),
-            date: investment.createdAt,
-            hash: (investment as any).txHash || (investment as any).transactionHash || null,
+            if (contribution.timestamp) {
+              nextTransactions.push({
+                id: `investment-${contribution._id}-sent`,
+                type: "sent",
+                description: `Investment - ${eventTitle || "Event"}`,
+                amountWei: String(contribution.amount || "0"),
+                date: contribution.timestamp,
+                hash: contribution.txHash || null,
+              });
+            }
+
+            if (contribution.status === "refunded" && contribution.refundedAt) {
+              nextTransactions.push({
+                id: `investment-${contribution._id}-refund`,
+                type: "received",
+                description: `Investment Refund - ${eventTitle || "Event"}`,
+                amountWei: String(contribution.amount || "0"),
+                date: contribution.refundedAt,
+                hash: contribution.refundTxHash || null,
+              });
+            }
           });
-        });
-      }
+        }
 
-      if (rewardsResult.status === "fulfilled") {
-        rewardsResult.value.claimed.forEach((reward, index) => {
-          if (!reward.claimedAt) return;
+        if (rewardsResult.status === "fulfilled") {
+          rewardsResult.value.claimed.forEach((reward, index) => {
+            if (!reward.claimedAt) return;
 
-          const eventTitle =
-            reward.eventTitle ||
-            (typeof reward.eventId === "object" ? reward.eventId?.title : null) ||
-            "Event";
+            const eventTitle =
+              reward.eventTitle ||
+              (typeof reward.eventId === "object" ? reward.eventId?.title : null) ||
+              "Event";
 
-          nextTransactions.push({
-            id: `reward-${reward.txHash || index}`,
-            type: "received",
-            description: `Reward Claim - ${eventTitle}`,
-            amountWei: String(reward.rewardAmount || "0"),
-            date: reward.claimedAt,
-            hash: reward.txHash || null,
+            nextTransactions.push({
+              id: `reward-${reward.txHash || index}`,
+              type: "received",
+              description: `Reward Claim - ${eventTitle}`,
+              amountWei: String(reward.rewardAmount || "0"),
+              date: reward.claimedAt,
+              hash: reward.txHash || null,
+            });
           });
-        });
-      }
+        }
 
-      if (marketplaceSalesResult.status === "fulfilled") {
-        marketplaceSalesResult.value.docs.forEach((sale) => {
-          if (!sale.time) return;
+        if (marketplaceSalesResult.status === "fulfilled") {
+          marketplaceSalesResult.value.docs.forEach((sale) => {
+            if (!sale.time) return;
 
-          nextTransactions.push({
-            id: `marketplace-sale-${sale.listingId}`,
-            type: "received",
-            description: `Marketplace Sale - ${sale.event || `Ticket #${sale.tokenId}`}`,
-            amountWei: String(sale.price || "0"),
-            date: sale.time,
-            hash: (sale as any).txHash || (sale as any).transactionHash || null,
+            nextTransactions.push({
+              id: `marketplace-sale-${sale.listingId}`,
+              type: "received",
+              description: `Marketplace Sale - ${sale.event || `Ticket #${sale.tokenId}`}`,
+              amountWei: String(sale.price || "0"),
+              date: sale.time,
+              hash: (sale as any).txHash || (sale as any).transactionHash || null,
+            });
           });
-        });
+        }
+
+        nextTransactions.sort(
+          (left, right) =>
+            new Date(right.date).getTime() - new Date(left.date).getTime(),
+        );
+
+        setTransactions(nextTransactions.slice(0, 20));
+      } finally {
+        setLoading(false);
+        hideLoading();
       }
-
-      nextTransactions.sort(
-        (left, right) =>
-          new Date(right.date).getTime() - new Date(left.date).getTime(),
-      );
-
-      setTransactions(nextTransactions.slice(0, 20));
-      setLoading(false);
-      hideLoading();
     };
 
     loadWalletData();
@@ -290,7 +323,12 @@ export const Wallet: React.FC = () => {
       {/* Deposit Modal */}
       <DepositModal
         isOpen={isDepositModalOpen}
-        onClose={() => setIsDepositModalOpen(false)}
+        onClose={() => {
+          setIsDepositModalOpen(false);
+          if (searchParams.get("deposit") === "1") {
+            setSearchParams({});
+          }
+        }}
         onSuccess={handleDepositSuccess}
       />
 

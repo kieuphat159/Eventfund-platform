@@ -1,4 +1,5 @@
 import { Event as DefaultEvent } from '../models/index.js';
+import cacheService from '../services/cache/redis.service.js';
 
 function normalizeAddress(address) {
   return address ? String(address).toLowerCase() : undefined;
@@ -38,7 +39,22 @@ export async function createEvent(eventData, models = {}) {
  */
 export async function findById(eventId, models = {}) {
   const Event = models.Event || DefaultEvent;
-  return await Event.findById(eventId).lean();
+
+  // Try to get from cache first
+  const cached = await cacheService.getEvent(eventId);
+  if (cached) {
+    return cached;
+  }
+
+  // Cache miss - load from database
+  const event = await Event.findById(eventId).lean();
+
+  if (event) {
+    // Cache the event for future requests
+    await cacheService.cacheEvent(eventId, event);
+  }
+
+  return event;
 }
 
 /**
@@ -71,11 +87,19 @@ export async function findEvents(query, options, models = {}) {
  */
 export async function updateById(eventId, updates, models = {}) {
   const Event = models.Event || DefaultEvent;
-  return await Event.findByIdAndUpdate(
+
+  const updatedEvent = await Event.findByIdAndUpdate(
     eventId,
     updates,
     { new: true, runValidators: true, lean: true }
   );
+
+  // Invalidate cache after update
+  if (updatedEvent) {
+    await cacheService.invalidateEvent(eventId);
+  }
+
+  return updatedEvent;
 }
 
 /**
@@ -87,6 +111,12 @@ export async function updateById(eventId, updates, models = {}) {
 export async function deleteById(eventId, models = {}) {
   const Event = models.Event || DefaultEvent;
   const result = await Event.findByIdAndDelete(eventId);
+
+  // Invalidate cache after deletion
+  if (result) {
+    await cacheService.invalidateEvent(eventId);
+  }
+
   return result !== null;
 }
 
@@ -99,11 +129,19 @@ export async function deleteById(eventId, models = {}) {
  */
 export async function updateFundingStatus(eventId, fundingData, models = {}) {
   const Event = models.Event || DefaultEvent;
-  return await Event.findByIdAndUpdate(
+
+  const updatedEvent = await Event.findByIdAndUpdate(
     eventId,
     fundingData,
     { new: true, runValidators: true, lean: true }
   );
+
+  // Invalidate cache after funding status update
+  if (updatedEvent) {
+    await cacheService.invalidateEvent(eventId);
+  }
+
+  return updatedEvent;
 }
 
 /**
@@ -126,11 +164,18 @@ export async function incrementTicketCounters(eventId, increments, models = {}) 
     updateOperation.$inc.totalTicketsUsed = increments.totalTicketsUsed;
   }
 
-  return await Event.findByIdAndUpdate(
+  const updatedEvent = await Event.findByIdAndUpdate(
     eventId,
     updateOperation,
     { new: true, runValidators: true, lean: true }
   );
+
+  // Invalidate cache after counter update
+  if (updatedEvent) {
+    await cacheService.invalidateEvent(eventId);
+  }
+
+  return updatedEvent;
 }
 
 /**

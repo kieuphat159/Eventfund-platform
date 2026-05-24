@@ -6,13 +6,15 @@ import { UserLayout } from "./layouts/UserLayout";
 import { AdminLayout } from "./layouts/AdminLayout";
 import { LoadingProvider } from "./components/ui/loadingContext";
 
-
 // Public Pages
 import { Home } from "./pages/public/Home";
 import { Explore } from "./pages/public/Explore";
 import { Marketplace } from "./pages/public/Marketplace";
 import { EventDetail } from "./pages/public/EventDetail";
 import { About } from "./pages/public/About";
+import { FAQ } from "./pages/public/FAQ";
+import { Terms } from "./pages/public/Terms";
+import { Privacy } from "./pages/public/Privacy";
 import { TicketDetail } from "./pages/public/TicketDetail";
 import { LoginPage } from "./pages/public/LoginPage";
 
@@ -26,7 +28,7 @@ import { MyInvestments } from "./pages/user/MyInvestments";
 import { InvestmentDetail } from "./pages/user/InvestmentDetail";
 import { Wallet } from "./pages/user/Wallet";
 import { Profile } from "./pages/user/Profile";
-import { Settings } from "./pages/user/Settings";
+// import { Settings } from "./pages/user/Settings";
 import { DepositSuccess } from "./pages/user/DepositSuccess";
 import { DepositFailed } from "./pages/user/DepositFailed";
 
@@ -163,7 +165,7 @@ const AppRoutes: React.FC = () => {
         <Route path="fraud" element={<FraudMonitoring />} />
         <Route path="finance" element={<FinanceDashboard />} />
         <Route path="analytics" element={<AnalyticsDashboard />} />
-        <Route path="settings" element={<PlatformSettings />} />
+        {/* <Route path="settings" element={<PlatformSettings />} /> */}
       </Route>
 
       <Route
@@ -204,7 +206,7 @@ const AppRoutes: React.FC = () => {
         <Route path="deposit/success" element={<DepositSuccess />} />
         <Route path="deposit/failed" element={<DepositFailed />} />
         <Route path="account/profile" element={<Profile />} />
-        <Route path="account/settings" element={<Settings />} />
+        {/* <Route path="account/settings" element={<Settings />} /> */}
       </Route>
 
       <Route path="/" element={<PublicLayout />}>
@@ -220,18 +222,9 @@ const AppRoutes: React.FC = () => {
         <Route path="about" element={<About />} />
         <Route path="login" element={<LoginRedirect />} />
 
-        <Route
-          path="faq"
-          element={<div className="p-20 text-white">FAQ Page</div>}
-        />
-        <Route
-          path="terms"
-          element={<div className="p-20 text-white">Terms Page</div>}
-        />
-        <Route
-          path="privacy"
-          element={<div className="p-20 text-white">Privacy Page</div>}
-        />
+        <Route path="faq" element={<FAQ />} />
+        <Route path="terms" element={<Terms />} />
+        <Route path="privacy" element={<Privacy />} />
       </Route>
 
       <Route

@@ -2,12 +2,13 @@ import mongoose from 'mongoose';
 import { ethers } from 'ethers';
 import * as ticketRepo from '../../repositories/ticket.repo.js';
 import * as eventRepo from '../../repositories/event.repo.js';
+import * as listingRepo from '../../repositories/listing.repo.js';
 import {
   NotFoundError,
   BadRequestError,
   ForbiddenError,
 } from '../../utils/customErrors.js';
-import { getTicket, provider } from '../blockchain/index.js';
+import { getFund, getTicket, provider } from '../blockchain/index.js';
 
 const ONCHAIN_TICKET_STATUS = {
   MINTED: 0n,
@@ -74,6 +75,114 @@ function validateTransactionHash(txHash) {
   if (!txHash || !ethers.isHexString(txHash, 32)) {
     throw new BadRequestError('Invalid transaction hash');
   }
+}
+
+function getRawBlockchainErrorMessage(error) {
+  if (!error || typeof error !== 'object') {
+    return String(error || 'Unknown blockchain error');
+  }
+
+  return (
+    error.shortMessage ||
+    error.reason ||
+    error.message ||
+    error.info?.error?.message ||
+    error.error?.message ||
+    'Unknown blockchain error'
+  );
+}
+
+function extractBlockchainErrorData(error) {
+  if (!error || typeof error !== 'object') {
+    return null;
+  }
+
+  const queue = [error];
+  const visited = new Set();
+
+  while (queue.length) {
+    const current = queue.shift();
+    if (!current || typeof current !== 'object' || visited.has(current)) {
+      continue;
+    }
+
+    visited.add(current);
+
+    if (
+      typeof current.data === 'string' &&
+      current.data.startsWith('0x') &&
+      current.data.length >= 10
+    ) {
+      return current.data;
+    }
+
+    if (current.error) queue.push(current.error);
+    if (current.info?.error) queue.push(current.info.error);
+    if (current.cause) queue.push(current.cause);
+  }
+
+  return null;
+}
+
+function mapRefundCustomErrorToMessage(errorName) {
+  const messages = {
+    InvalidTicketStatus:
+      'Ticket is not in a refundable on-chain state for this wallet.',
+    RefundsNotEnabled:
+      'Refunds are not enabled for this event on-chain yet.',
+    InsufficientRefundPool:
+      'The event refund pool does not have enough ETH to pay this ticket refund yet.',
+    FundNotSet:
+      'Ticket contract is not wired to the Fund contract on-chain.',
+    EventNotFound: 'The related event was not found on-chain.',
+    BadParam: 'Refund parameters are invalid for the current on-chain state.',
+    NothingToClaim: 'This ticket refund has already been claimed on-chain.',
+    TransferFailed:
+      'On-chain refund transfer failed. Please try again or verify contract funding.',
+  };
+
+  return messages[errorName] || null;
+}
+
+function parseRefundContractError(errorData) {
+  const contracts = [getTicket(), getFund()];
+
+  for (const contract of contracts) {
+    try {
+      if (typeof contract?.interface?.parseError === 'function') {
+        const parsedError = contract.interface.parseError(errorData);
+        if (parsedError?.name) {
+          return parsedError.name;
+        }
+      }
+    } catch {
+      // Try the next contract interface.
+    }
+  }
+
+  return null;
+}
+
+function getRefundBlockchainErrorMessage(error) {
+  const fallbackMessage = getRawBlockchainErrorMessage(error);
+
+  if (error && typeof error === 'object' && typeof error.revert?.name === 'string') {
+    return mapRefundCustomErrorToMessage(error.revert.name) || fallbackMessage;
+  }
+
+  const errorData = extractBlockchainErrorData(error);
+  if (errorData) {
+    const errorName = parseRefundContractError(errorData);
+    if (errorName) {
+      return mapRefundCustomErrorToMessage(errorName) || fallbackMessage;
+    }
+  }
+
+  if (String(fallbackMessage).toLowerCase().includes('execution reverted')) {
+    return 'Refund transaction reverted on-chain. Verify the ticket is still sold, refunds are enabled, and the refund pool is funded.';
+  }
+
+  return fallbackMessage;
 }
 
 const TX_RECEIPT_WAIT_TIMEOUT_MS = Number(process.env.TX_RECEIPT_WAIT_TIMEOUT_MS || 120000);
@@ -598,8 +707,10 @@ export async function getTicketById(tokenId, repos = {}) {
  */
 export async function getUserTickets(walletAddress, query = {}, repos = {}) {
   const ticketRepository = repos.ticketRepo || ticketRepo;
+  const listingRepository = repos.listingRepo || listingRepo;
 
-  const { page, limit, sort } = query;
+  const { page, limit, sort, includeRefunded } = query;
+  const normalizedWallet = walletAddress.toLowerCase();
 
   const options = {
     page: page ? parseInt(page, 10) : 1,
@@ -609,7 +720,107 @@ export async function getUserTickets(walletAddress, query = {}, repos = {}) {
     populate: 'eventId',
   };
 
-  return await ticketRepository.findByOwner(walletAddress, options);
+  const ownedTickets = await ticketRepository.findByOwner(normalizedWallet, options);
+
+  const listedTicketsPage = await listingRepository.findListings(
+    { seller: normalizedWallet, status: 'active' },
+    {
+      page: 1,
+      limit: 100,
+      sort: '-listedAt',
+      lean: true,
+      populate: ['ticketId', 'eventId'],
+    },
+    repos.models,
+  );
+
+  const listedTickets = (listedTicketsPage?.docs || [])
+    .map((listing) => {
+      const ticket = listing?.ticketId;
+      if (!ticket || typeof ticket !== 'object') {
+        return null;
+      }
+
+      const isPopulatedEvent = (value) =>
+        value && typeof value === 'object' && 'title' in value;
+      const populatedEvent = isPopulatedEvent(listing.eventId)
+        ? listing.eventId
+        : isPopulatedEvent(ticket.eventId)
+          ? ticket.eventId
+          : listing.eventId || ticket.eventId;
+
+      return {
+        ...ticket,
+        isListed: true,
+        listedAt: listing?.listedAt || ticket?.listedAt || ticket?.createdAt,
+        eventId: populatedEvent,
+      };
+    })
+    .filter(Boolean);
+
+  const mergedByTokenId = new Map();
+
+  for (const ticket of ownedTickets?.docs || []) {
+    mergedByTokenId.set(String(ticket.tokenId), ticket);
+  }
+
+  for (const ticket of listedTickets) {
+    mergedByTokenId.set(String(ticket.tokenId), {
+      ...ticket,
+      ...(mergedByTokenId.get(String(ticket.tokenId)) || {}),
+      isListed: true,
+      eventId: ticket.eventId,
+    });
+  }
+
+  const resolveTicketSortTimestamp = (ticket) => {
+    const candidates = [
+      ticket?.listedAt,
+      ticket?.soldAt,
+      ticket?.refundedAt,
+      ticket?.usedAt,
+      ticket?.createdAt,
+      ticket?.eventId && typeof ticket.eventId === "object"
+        ? ticket.eventId.startDate || ticket.eventId.createdAt
+        : null,
+    ];
+
+    for (const candidate of candidates) {
+      if (!candidate) continue;
+      const time = new Date(candidate).getTime();
+      if (Number.isFinite(time)) {
+        return time;
+      }
+    }
+
+    return 0;
+  };
+
+  const shouldIncludeRefunded =
+    includeRefunded === true ||
+    includeRefunded === "true" ||
+    includeRefunded === 1 ||
+    includeRefunded === "1";
+
+  const mergedDocs = Array.from(mergedByTokenId.values())
+    .filter((ticket) => shouldIncludeRefunded || ticket?.status !== "refunded")
+    .sort((a, b) => {
+      const timeDiff =
+        resolveTicketSortTimestamp(b) - resolveTicketSortTimestamp(a);
+      if (timeDiff !== 0) return timeDiff;
+
+      const tokenA = Number.parseInt(String(a?.tokenId || "0"), 10) || 0;
+      const tokenB = Number.parseInt(String(b?.tokenId || "0"), 10) || 0;
+      return tokenB - tokenA;
+    });
+
+  return {
+    ...(ownedTickets || {}),
+    docs: mergedDocs,
+    totalDocs: mergedDocs.length,
+    totalPages: 1,
+    page: 1,
+  };
 }
 
 /**
@@ -767,18 +978,50 @@ export async function createRefundIntent(tokenId, buyerWallet, repos = {}) {
   }
 
   const ticketContract = getTicket();
+  const marketplaceContract = getMarketplace();
   const chainTokenId = BigInt(ticket.tokenId);
-  const [chainStatus, contractAddress, network] = await Promise.all([
+  const [chainStatus, chainOwner, contractAddress, network, activeListingId] = await Promise.all([
     ticketContract.getTicketStatus(chainTokenId),
+    ticketContract.ownerOf(chainTokenId),
     ticketContract.getAddress(),
     provider.getNetwork(),
+    marketplaceContract.getActiveListingByTokenId(chainTokenId),
   ]);
+
+  const normalizedBuyer = buyerWallet.toLowerCase();
+  const normalizedChainOwner = normalizeWalletAddress(chainOwner);
+  const normalizedMarketplace = normalizeWalletAddress(
+    await marketplaceContract.getAddress(),
+  );
+
+  if (
+    activeListingId !== 0n ||
+    normalizedChainOwner === normalizedMarketplace
+  ) {
+    throw new BadRequestError(
+      'Ticket is still locked in an active marketplace listing on-chain. Cancel or force-cancel the listing before refunding.',
+    );
+  }
+
+  if (normalizedChainOwner !== normalizedBuyer) {
+    throw new BadRequestError(
+      'Ticket is not owned by this wallet on-chain, so refund cannot be claimed yet.',
+    );
+  }
 
   if (chainStatus !== ONCHAIN_TICKET_STATUS.SOLD) {
     throw new BadRequestError('Ticket is not refundable on-chain');
   }
 
   const data = ticketContract.interface.encodeFunctionData('claimRefund', [chainTokenId]);
+
+  try {
+    await ticketContract.claimRefund.staticCall(chainTokenId, {
+      from: buyerWallet,
+    });
+  } catch (error) {
+    throw new BadRequestError(getRefundBlockchainErrorMessage(error));
+  }
 
   return {
     tokenId: ticket.tokenId,

@@ -55,10 +55,10 @@ export const DepositSuccess = () => {
             <div className="flex flex-col items-center justify-center py-8">
               <Loader2 className="mb-4 h-16 w-16 animate-spin text-purple-500" />
               <h2 className="mb-2 text-xl font-semibold text-white">
-                Đang xử lý giao dịch
+                Processing Transaction
               </h2>
               <p className="text-center text-sm text-slate-400">
-                Vui lòng đợi trong khi chúng tôi xử lý giao dịch của bạn...
+                Please wait while we process your transaction...
               </p>
               {orderId && (
                 <p className="mt-4 text-xs text-slate-500">Order ID: {orderId}</p>
@@ -70,25 +70,25 @@ export const DepositSuccess = () => {
             <div className="flex flex-col items-center justify-center py-8">
               <CheckCircle2 className="mb-4 h-16 w-16 text-green-500" />
               <h2 className="mb-2 text-xl font-semibold text-white">
-                Nạp tiền thành công!
+                Deposit Successful!
               </h2>
               <p className="mb-6 text-center text-sm text-slate-400">
-                {order.ethAmount} ETH đã được chuyển vào ví của bạn
+                {order.ethAmount} ETH has been transferred to your wallet
               </p>
 
               <div className="w-full space-y-3 rounded-lg bg-slate-800 p-4">
                 <div className="flex justify-between text-sm">
-                  <span className="text-slate-400">Số tiền VND:</span>
+                  <span className="text-slate-400">VND Amount:</span>
                   <span className="font-medium text-white">
                     {order.vndAmount.toLocaleString("vi-VN")} VND
                   </span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-slate-400">Số ETH nhận:</span>
+                  <span className="text-slate-400">ETH Received:</span>
                   <span className="font-medium text-white">{order.ethAmount} ETH</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-slate-400">Tỷ giá:</span>
+                  <span className="text-slate-400">Exchange Rate:</span>
                   <span className="font-medium text-white">
                     {order.exchangeRate.toLocaleString("vi-VN")} VND/ETH
                   </span>
@@ -113,7 +113,7 @@ export const DepositSuccess = () => {
                 onClick={() => navigate("/user/wallet")}
                 className="mt-6 w-full bg-purple-600 hover:bg-purple-700"
               >
-                Về ví
+                Back to Wallet
               </Button>
             </div>
           )}
@@ -122,7 +122,7 @@ export const DepositSuccess = () => {
             <div className="flex flex-col items-center justify-center py-8">
               <XCircle className="mb-4 h-16 w-16 text-red-500" />
               <h2 className="mb-2 text-xl font-semibold text-white">
-                Giao dịch thất bại
+                Transaction Failed
               </h2>
               <p className="mb-6 text-center text-sm text-slate-400">{error}</p>
 
@@ -133,13 +133,13 @@ export const DepositSuccess = () => {
                   className="flex-1 border-slate-700"
                 >
                   <ArrowLeft className="mr-2 h-4 w-4" />
-                  Về ví
+                  Back to Wallet
                 </Button>
                 <Button
                   onClick={() => navigate("/user/wallet")}
                   className="flex-1 bg-purple-600 hover:bg-purple-700"
                 >
-                  Thử lại
+                  Try Again
                 </Button>
               </div>
             </div>

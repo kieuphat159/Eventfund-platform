@@ -2,9 +2,15 @@ import { jest } from "@jest/globals";
 
 const mockPersistLogsFromReceipt = jest.fn();
 const mockGetFund = jest.fn();
+const mockGetMarketplace = jest.fn();
 const mockGetTicket = jest.fn();
 const mockFund = {
   getAddress: jest.fn(),
+};
+const mockMarketplace = {
+  getAddress: jest.fn(),
+  getActiveListingByTokenId: jest.fn(),
+  getListing: jest.fn(),
 };
 const mockTicketWithSigner = {
   claimRefundFor: jest.fn(),
@@ -18,6 +24,7 @@ const mockTicket = {
 
 jest.unstable_mockModule("../../../services/blockchain/index.js", () => ({
   getFund: mockGetFund,
+  getMarketplace: mockGetMarketplace,
   getTicket: mockGetTicket,
   provider: {},
 }));
@@ -45,12 +52,20 @@ describe("autoRefund.service", () => {
     jest.clearAllMocks();
     resetAutoRefundQueueForTests();
     mockGetFund.mockReturnValue(mockFund);
+    mockGetMarketplace.mockReturnValue(mockMarketplace);
     mockGetTicket.mockReturnValue(mockTicket);
     mockTicket.connect.mockReturnValue(mockTicketWithSigner);
 
     mockFund.getAddress.mockResolvedValue(
       "0x2222222222222222222222222222222222222222",
     );
+    mockMarketplace.getAddress.mockResolvedValue(
+      "0x3333333333333333333333333333333333333333",
+    );
+    mockMarketplace.getActiveListingByTokenId.mockResolvedValue(0n);
+    mockMarketplace.getListing.mockResolvedValue({
+      seller: "0x4444444444444444444444444444444444444444",
+    });
     mockTicket.getAddress.mockResolvedValue(
       "0x1111111111111111111111111111111111111111",
     );
@@ -95,6 +110,9 @@ describe("autoRefund.service", () => {
     expect(result).toEqual({
       eventId: "507f1f77bcf86cd799439011",
       inspected: 3,
+      listingsInspected: 0,
+      listingsCancelled: 0,
+      listingCancellationFailed: 0,
       refunded: 1,
       alreadyRefunded: 1,
       skipped: 1,

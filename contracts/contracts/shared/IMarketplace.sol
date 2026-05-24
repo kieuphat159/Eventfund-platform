@@ -54,4 +54,5 @@ interface IMarketplace {
     function createListing(uint256 tokenId, uint256 price) external returns (uint256 listingId);
     function buyListing(uint256 listingId) external payable;
     function cancelListing(uint256 listingId) external;
+    function forceCancelListing(uint256 listingId) external;
 }

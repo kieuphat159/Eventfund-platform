@@ -1,7 +1,9 @@
 import asyncHandler from '../utils/asyncHandler.js';
 import JWTService from '../services/auth/jwt.service.js';
-import * as userRepo from '../repositories/user.repo.js'; // Dùng Repo thay cho Model
-import { UnauthorizedError } from '../utils/customErrors.js'; // Dùng Custom Error
+import * as userRepo from '../repositories/user.repo.js';
+import { UnauthorizedError } from '../utils/customErrors.js';
+import cacheService from '../services/cache/redis.service.js';
+import logger from '../config/logger.js';
 
 const jwtService = new JWTService();
 
@@ -9,6 +11,7 @@ const jwtService = new JWTService();
  * Core helper: Trích xuất, kiểm tra token và tìm User
  * - Nếu không có token: Trả về null
  * - Nếu token/user sai: Ném lỗi UnauthorizedError
+ * - Sử dụng Redis cache để giảm DB queries
  */
 async function resolveUserFromRequest(req) {
   const authHeader = req.headers.authorization;
@@ -29,18 +32,42 @@ async function resolveUserFromRequest(req) {
 
   const { walletAddress } = verificationResult.payload;
 
-  // Dùng Repository thay vì gọi Model trực tiếp
-  const user = await userRepo.findByWalletAddress(walletAddress);
+  // Try to get user from cache first
+  let user = await cacheService.getUser(walletAddress);
 
-  if (!user) {
-    throw new UnauthorizedError('User not found', 'USER_NOT_FOUND');
+  if (user) {
+    logger.debug('User loaded from cache', { walletAddress });
+  } else {
+    // Cache miss - load from database
+    user = await userRepo.findByWalletAddress(walletAddress);
+
+    if (!user) {
+      throw new UnauthorizedError('User not found', 'USER_NOT_FOUND');
+    }
+
+    // Cache the user profile for future requests
+    const userToCache = {
+      _id: user._id,
+      walletAddress: user.walletAddress,
+      smartAccountAddress: user.smartAccountAddress,
+      username: user.username,
+      email: user.email,
+      avatarUrl: user.avatarUrl,
+      role: user.role,
+      isActive: user.isActive,
+    };
+
+    await cacheService.cacheUser(walletAddress, userToCache);
+    logger.debug('User cached', { walletAddress });
+
+    user = userToCache;
   }
 
   if (!user.isActive) {
     throw new UnauthorizedError('User account is inactive', 'USER_INACTIVE');
   }
 
-  // Chỉ đính kèm các trường an toàn, không nhét cả cục Mongoose Document vào req
+  // Return safe user object
   return {
     _id: user._id,
     walletAddress: user.walletAddress,
@@ -77,7 +104,11 @@ export const optionalAuth = asyncHandler(async (req, res, next) => {
       req.user = user;
     }
   } catch (error) {
-    // Nuốt lỗi (Silently fail) vì đây là Optional. Client vẫn truy cập được với tư cách Guest
+    // Silently fail for optional auth - user continues as guest
+    logger.debug('Optional auth failed (continuing as guest)', {
+      error: error.message,
+      code: error.code
+    });
   }
   next();
 });

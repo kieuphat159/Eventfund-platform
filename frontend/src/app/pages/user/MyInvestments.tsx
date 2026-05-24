@@ -7,6 +7,7 @@ import {
   Calendar,
   Sparkles,
   ArrowUpRight,
+  Award,
 } from "lucide-react";
 import {
   Card,
@@ -18,12 +19,14 @@ import {
 import { Button } from "../../components/ui/button";
 import {
   claimContributionRefundOnChain,
+  claimRewardOnChain,
   getInvestments,
   InvestmentDetail as InvestmentDetailType,
 } from "../../services/investment.service";
 import { useAuth } from "../../contexts/AuthContext";
 import { useLoading } from "../../components/ui/loadingContext";
 import { useWeb3Auth } from "@web3auth/modal/react";
+import { resolveTransactionProvider } from "../../services/providerService";
 import {
   addIntegerValues,
   calculatePercentage,
@@ -32,6 +35,12 @@ import {
   subtractIntegerValues,
 } from "../../lib/utils";
 import { StatusBadge } from "../../components/StatusBadge";
+import { logger } from "../../lib/logger";
+import { InsufficientBalanceDialog } from "../../components/shared/InsufficientBalanceDialog";
+import {
+  getInsufficientBalanceMessage,
+  isInsufficientBalanceError,
+} from "../../lib/insufficientBalance";
 
 export const MyInvestments: React.FC = () => {
   const { user, connectWallet } = useAuth();
@@ -40,6 +49,11 @@ export const MyInvestments: React.FC = () => {
   const [investments, setInvestments] = useState<InvestmentDetailType[]>([]);
   const [loading, setLoading] = useState(true);
   const [refundingEventId, setRefundingEventId] = useState<string | null>(null);
+  const [claimingRewardEventId, setClaimingRewardEventId] = useState<
+    string | null
+  >(null);
+  const [insufficientBalanceMessage, setInsufficientBalanceMessage] =
+    useState("");
 
   useEffect(() => {
     const fetchInvestments = async () => {
@@ -48,7 +62,7 @@ export const MyInvestments: React.FC = () => {
         const shares = await getInvestments();
         setInvestments(shares);
       } catch (error) {
-        console.error("Failed to load investments:", error);
+        logger.error("investments", "Failed to load investments", error);
       } finally {
         setLoading(false);
         hideLoading();
@@ -62,14 +76,7 @@ export const MyInvestments: React.FC = () => {
     }
   }, [user]);
 
-  const walletProvider = web3Auth?.provider as
-    | {
-        request: (args: {
-          method: string;
-          params?: unknown[];
-        }) => Promise<unknown>;
-      }
-    | undefined;
+  const walletProvider = resolveTransactionProvider(web3Auth?.provider);
 
   const refreshInvestments = async () => {
     const shares = await getInvestments();
@@ -101,9 +108,43 @@ export const MyInvestments: React.FC = () => {
       );
       await refreshInvestments();
     } catch (error) {
+      if (isInsufficientBalanceError(error)) {
+        setInsufficientBalanceMessage(getInsufficientBalanceMessage(error));
+      }
       console.error("Failed to claim contribution refund:", error);
     } finally {
       setRefundingEventId(null);
+      hideLoading();
+    }
+  };
+
+  const handleClaimReward = async (investment: InvestmentDetailType) => {
+    const eventId = investment.eventId?._id;
+    if (!eventId) return;
+
+    try {
+      if (!user?.walletAddress) {
+        await connectWallet();
+        return;
+      }
+
+      if (!walletProvider?.request) {
+        throw new Error(
+          "Wallet provider is not ready. Please reconnect wallet and try again.",
+        );
+      }
+
+      setClaimingRewardEventId(eventId);
+      showLoading("Claiming reward...");
+      await claimRewardOnChain(walletProvider, eventId, user.walletAddress);
+      await refreshInvestments();
+    } catch (error) {
+      if (isInsufficientBalanceError(error)) {
+        setInsufficientBalanceMessage(getInsufficientBalanceMessage(error));
+      }
+      console.error("Failed to claim reward:", error);
+    } finally {
+      setClaimingRewardEventId(null);
       hideLoading();
     }
   };
@@ -152,6 +193,12 @@ export const MyInvestments: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      <InsufficientBalanceDialog
+        open={!!insufficientBalanceMessage}
+        message={insufficientBalanceMessage}
+        onClose={() => setInsufficientBalanceMessage("")}
+      />
+
       <div>
         <h1 className="text-3xl font-semibold tracking-tight text-white mb-2">
           My Investments
@@ -228,6 +275,12 @@ export const MyInvestments: React.FC = () => {
                   ) &&
                   compareIntegerValues(investment.contributionAmount, "0") > 0;
                 const refundEventId = investment.eventId?._id || null;
+                const rewardEventId = investment.eventId?._id || null;
+                const canClaimReward =
+                  investment.eventId?.status === "completed" &&
+                  compareIntegerValues(investment.contributionAmount, "0") >
+                    0 &&
+                  compareIntegerValues(investment.claimedReward, "0") === 0;
 
                 return (
                   <div
@@ -321,6 +374,19 @@ export const MyInvestments: React.FC = () => {
                           {refundingEventId === refundEventId
                             ? "Claiming Refund..."
                             : "Claim Refund"}
+                        </Button>
+                      )}
+                      {canClaimReward && rewardEventId && (
+                        <Button
+                          size="sm"
+                          className="bg-cyan-600 hover:bg-cyan-500 text-white"
+                          disabled={claimingRewardEventId === rewardEventId}
+                          onClick={() => void handleClaimReward(investment)}
+                        >
+                          <Award className="w-4 h-4 mr-1" />
+                          {claimingRewardEventId === rewardEventId
+                            ? "Claiming..."
+                            : "Claim Reward"}
                         </Button>
                       )}
                     </div>

@@ -5,6 +5,7 @@ import * as rewardRepo from "../../repositories/rewardClaim.repo.js";
 import { addBigInt } from "../../utils/bigint.js";
 import { NotFoundError, ConflictError } from "../../utils/customErrors.js";
 import UploadService from "../upload/upload.service.js";
+import Contribution from "../../models/Contribution.model.js";
 
 // Default upload service instance (can be overridden via DI)
 let defaultUploadService = null;
@@ -58,11 +59,13 @@ export async function updateProfile(walletAddress, updates, repos = {}) {
   }
 
   // Bỏ qua toàn bộ các trường nhạy cảm như role, walletAddress, password...
-  const { username, email, avatarUrl } = updates;
+  const { username, email, avatarUrl, bio, location } = updates;
   const filteredUpdates = {
     ...(username !== undefined && { username }),
     ...(email !== undefined && { email }),
     ...(avatarUrl !== undefined && { avatarUrl }),
+    ...(bio !== undefined && { bio }),
+    ...(location !== undefined && { location }),
   };
 
   return await repository.updateProfile(walletAddress, filteredUpdates);
@@ -128,11 +131,13 @@ export async function updateProfileWithAvatar(
   }
 
   // Merge updates with avatar data
-  const { username, email, avatarUrl } = updates;
+  const { username, email, avatarUrl, bio, location } = updates;
   const filteredUpdates = {
     ...(username !== undefined && { username }),
     ...(email !== undefined && { email }),
     ...(avatarUrl !== undefined && { avatarUrl }),
+    ...(bio !== undefined && { bio }),
+    ...(location !== undefined && { location }),
     ...(avatarData && { avatarUrl: avatarData.avatarUrl }),
   };
 
@@ -179,13 +184,48 @@ export async function getUserPortfolio(walletAddress, repos = {}) {
  */
 export async function getUserShares(walletAddress, repos = {}) {
   const repository = repos.shareRepo || shareRepo;
+  const normalizedWallet = walletAddress.toLowerCase();
 
   const shares = await repository.findShares(
-    { holder: walletAddress.toLowerCase() },
+    { holder: normalizedWallet },
     { populate: "eventId" },
   );
 
-  return Array.isArray(shares.docs) ? shares.docs : shares;
+  const docs = Array.isArray(shares.docs) ? shares.docs : shares;
+  if (!Array.isArray(docs) || docs.length === 0) {
+    return docs;
+  }
+
+  const confirmedContributions = await Contribution.find({
+    contributor: normalizedWallet,
+    type: "donator_contribution",
+    status: "confirmed",
+  })
+    .select("eventId amount")
+    .lean();
+
+  const confirmedAmountByEventId = confirmedContributions.reduce(
+    (map, contribution) => {
+      const eventId = String(contribution.eventId || "");
+      if (!eventId) return map;
+
+      map[eventId] = addBigInt(map[eventId] || "0", contribution.amount || "0");
+      return map;
+    },
+    {},
+  );
+
+  return docs.map((share) => {
+    const eventId = String(share.eventId?._id || share.eventId || "");
+    const confirmedAmount = confirmedAmountByEventId[eventId] || "0";
+
+    return {
+      ...share,
+      contributionAmount: confirmedAmount,
+      sharePercentage:
+        confirmedAmount === "0" ? 0 : Number(share.sharePercentage || 0),
+    };
+  });
 }
 
 export async function getUserShareById(walletAddress, shareId, repos = {}) {
@@ -227,6 +267,16 @@ export async function getUserRewards(walletAddress, repos = {}) {
   );
 
   return { claimed, pending, totalClaimed, totalPending };
+}
+
+export async function getUserContributions(walletAddress) {
+  return await Contribution.find({
+    contributor: walletAddress.toLowerCase(),
+    type: "donator_contribution",
+  })
+    .populate("eventId")
+    .sort({ timestamp: -1, createdAt: -1 })
+    .lean();
 }
 
 /**

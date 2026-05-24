@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { Share as DefaultShare } from '../models/index.js';
 import { Contribution as DefaultContribution } from '../models/index.js';
+import { addBigInt } from '../utils/bigint.js';
 
 /**
  * Create a new share
@@ -165,20 +166,31 @@ export async function incrementClaimedReward(eventId, holder, amount, txHash, mo
   const Share = models.Share || DefaultShare;
 
   const normalizedTxHash = txHash?.toLowerCase();
+  const normalizedHolder = holder.toLowerCase();
 
   // Check xem txHash nay da duoc xu ly chua
   const existing = await Share.findOne({
     eventId,
-    holder: holder.toLowerCase(),
+    holder: normalizedHolder,
     processedRewardTxHashes: normalizedTxHash,
   }).lean();
 
   if (existing) return; // da xu ly, skip
 
+  const current = await Share.findOne({
+    eventId,
+    holder: normalizedHolder,
+  }).lean();
+
+  const nextClaimedReward = addBigInt(
+    current?.claimedReward || "0",
+    String(amount || "0"),
+  );
+
   await Share.updateOne(
-    { eventId, holder: holder.toLowerCase() },
+    { eventId, holder: normalizedHolder },
     {
-      $inc: { claimedReward: amount },
+      $set: { claimedReward: nextClaimedReward },
       $addToSet: { processedRewardTxHashes: normalizedTxHash },
     },
     { upsert: true }

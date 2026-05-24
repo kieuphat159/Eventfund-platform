@@ -9,6 +9,7 @@ import {
   CardTitle,
 } from "../../components/ui/card";
 import {
+  claimRewardOnChain,
   getInvestmentById,
   InvestmentDetail as InvestmentDetailType,
 } from "../../services/investment.service";
@@ -17,9 +18,19 @@ import { useLoading } from "../../components/ui/loadingContext";
 import {
   addIntegerValues,
   calculatePercentage,
+  compareIntegerValues,
   formatIntegerWithUnit,
   subtractIntegerValues,
 } from "../../lib/utils";
+import { logger } from "../../lib/logger";
+import { useAuth } from "../../contexts/AuthContext";
+import { useWeb3Auth } from "@web3auth/modal/react";
+import { resolveTransactionProvider } from "../../services/providerService";
+import { InsufficientBalanceDialog } from "../../components/shared/InsufficientBalanceDialog";
+import {
+  getInsufficientBalanceMessage,
+  isInsufficientBalanceError,
+} from "../../lib/insufficientBalance";
 
 export const InvestmentDetail: React.FC = () => {
   const { id } = useParams();
@@ -28,7 +39,14 @@ export const InvestmentDetail: React.FC = () => {
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [actionError, setActionError] = useState("");
+  const [claimingReward, setClaimingReward] = useState(false);
+  const [insufficientBalanceMessage, setInsufficientBalanceMessage] =
+    useState("");
   const { show: showLoading, hide: hideLoading } = useLoading();
+  const { user, connectWallet } = useAuth();
+  const { web3Auth } = useWeb3Auth();
+  const walletProvider = resolveTransactionProvider(web3Auth?.provider);
 
   useEffect(() => {
     const fetchInvestment = async () => {
@@ -44,7 +62,7 @@ export const InvestmentDetail: React.FC = () => {
         const data = await getInvestmentById(id);
         setInvestment(data);
       } catch (err) {
-        console.error("Failed to load investment detail:", err);
+        logger.error("investments", "Failed to load investment detail", err);
         setError(
           err instanceof Error
             ? err.message
@@ -58,6 +76,47 @@ export const InvestmentDetail: React.FC = () => {
 
     fetchInvestment();
   }, [id]);
+
+  const refreshInvestment = async () => {
+    if (!id) return;
+    const data = await getInvestmentById(id);
+    setInvestment(data);
+  };
+
+  const handleClaimReward = async () => {
+    const eventId = investment?.eventId?._id;
+    if (!eventId) return;
+
+    try {
+      if (!user?.walletAddress) {
+        await connectWallet();
+        return;
+      }
+
+      if (!walletProvider?.request) {
+        throw new Error(
+          "Wallet provider is not ready. Please reconnect wallet and try again.",
+        );
+      }
+
+      setClaimingReward(true);
+      setActionError("");
+      showLoading("Claiming reward...");
+      await claimRewardOnChain(walletProvider, eventId, user.walletAddress);
+      await refreshInvestment();
+    } catch (err) {
+      if (isInsufficientBalanceError(err)) {
+        setInsufficientBalanceMessage(getInsufficientBalanceMessage(err));
+      }
+      logger.error("investments", "Failed to claim reward", err);
+      setActionError(
+        err instanceof Error ? err.message : "Unable to claim reward.",
+      );
+    } finally {
+      setClaimingReward(false);
+      hideLoading();
+    }
+  };
 
   if (loading) {
     return (
@@ -98,9 +157,19 @@ export const InvestmentDetail: React.FC = () => {
     investment.contributionAmount,
     1,
   ).toFixed(1);
+  const canClaimReward =
+    investment.eventId?.status === "completed" &&
+    compareIntegerValues(investment.contributionAmount, "0") > 0 &&
+    compareIntegerValues(investment.claimedReward, "0") === 0;
 
   return (
     <div className="space-y-6">
+      <InsufficientBalanceDialog
+        open={!!insufficientBalanceMessage}
+        message={insufficientBalanceMessage}
+        onClose={() => setInsufficientBalanceMessage("")}
+      />
+
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
           <Link
@@ -116,8 +185,21 @@ export const InvestmentDetail: React.FC = () => {
           <p className="text-slate-400">
             Full detail view of your event investment.
           </p>
+          {actionError && (
+            <p className="mt-2 text-sm text-red-300">{actionError}</p>
+          )}
         </div>
         <div className="space-x-2">
+          {canClaimReward && (
+            <Button
+              className="bg-cyan-600 hover:bg-cyan-500 text-white"
+              disabled={claimingReward}
+              onClick={() => void handleClaimReward()}
+            >
+              <Award className="w-4 h-4 mr-2" />
+              {claimingReward ? "Claiming..." : "Claim Reward"}
+            </Button>
+          )}
           <a
             href={`/events/${investment.eventId?._id ?? ""}`}
             target="_blank"

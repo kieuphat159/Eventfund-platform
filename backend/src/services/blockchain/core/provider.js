@@ -1,11 +1,15 @@
 import { ethers } from "ethers";
 import "../../../config/env.js";
 
-if (!process.env.RPC_URL) {
-  throw new Error("Missing RPC_URL in environment (backend/.env)");
+const resolvedRpcUrl =
+  process.env.SEPOLIA_RPC_URL ||
+  process.env.RPC_URL;
+
+if (!resolvedRpcUrl) {
+  throw new Error("Missing SEPOLIA_RPC_URL or RPC_URL in environment (backend/.env)");
 }
 
-export const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
+export const provider = new ethers.JsonRpcProvider(resolvedRpcUrl);
 
 /**
  * Hàm test kết nối RPC

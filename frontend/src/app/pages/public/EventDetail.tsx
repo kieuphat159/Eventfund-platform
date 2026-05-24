@@ -16,11 +16,9 @@ import { Input } from "../../components/ui/input";
 import { StatusBadge } from "../../components/StatusBadge";
 import { ImageWithFallback } from "../../components/figma/ImageWithFallback";
 import { useAuth } from "../../contexts/AuthContext";
-import { useLoading } from "../../components/ui/loadingContext";
 import { getEventById, type EventItem } from "../../services/events.service";
 import {
   investInEventOnChain,
-  type Eip1193Provider,
 } from "../../services/investment.service";
 import {
   getTicketStats,
@@ -30,13 +28,18 @@ import {
   type EventTicketStats,
 } from "../../services/tickets.service";
 import { useWeb3Auth } from "@web3auth/modal/react";
+import { resolveTransactionProvider } from "../../services/providerService";
 import { calculatePercentage, formatIntegerWithUnit } from "../../lib/utils";
+import { InsufficientBalanceDialog } from "../../components/shared/InsufficientBalanceDialog";
+import {
+  getInsufficientBalanceMessage,
+  isInsufficientBalanceError,
+} from "../../lib/insufficientBalance";
 
 export const EventDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const { connectWallet, user } = useAuth();
   const { web3Auth } = useWeb3Auth();
-  const { show: showLoading, hide: hideLoading } = useLoading();
   const [event, setEvent] = useState<EventItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -55,6 +58,9 @@ export const EventDetail: React.FC = () => {
   const [purchaseConfirmTier, setPurchaseConfirmTier] = useState<string | null>(
     null,
   );
+  const [insufficientBalanceMessage, setInsufficientBalanceMessage] =
+    useState("");
+  const [selectedImageIndex, setSelectedImageIndex] = useState(0);
 
   useEffect(() => {
     if (!buyPopup) return;
@@ -102,7 +108,6 @@ export const EventDetail: React.FC = () => {
       try {
         setLoading(true);
         setError("");
-        showLoading("Loading event...");
         const data = await getEventById(id);
         setEvent(data);
         if (data?._id && (data.status === "ticketing" || data.status === "ongoing")) {
@@ -115,12 +120,15 @@ export const EventDetail: React.FC = () => {
         setError(err instanceof Error ? err.message : "Failed to load event");
       } finally {
         setLoading(false);
-        hideLoading();
       }
     };
 
     fetchEvent();
   }, [id]);
+
+  useEffect(() => {
+    setSelectedImageIndex(0);
+  }, [event?._id]);
 
   const totalTickets = useMemo(() => {
     if (typeof event?.totalTickets === "number") return event.totalTickets;
@@ -147,7 +155,20 @@ export const EventDetail: React.FC = () => {
   const minInvestmentAmount = String(event?.minInvestmentAmount || "0");
 
   const coverImage = event?.imageUrls?.[0] || "";
+  const galleryImages = useMemo(() => {
+    const images = event?.imageUrls?.filter(Boolean) || [];
+    return images.length > 0 ? images : coverImage ? [coverImage] : [];
+  }, [event?.imageUrls, coverImage]);
+  const selectedGalleryImage =
+    galleryImages[selectedImageIndex] || galleryImages[0] || "";
   const eventDate = event?.startDate ? new Date(event.startDate) : null;
+  const eventEndDate = event?.endDate ? new Date(event.endDate) : null;
+  const ticketingStartDate = event?.ticketingStartAt
+    ? new Date(event.ticketingStartAt)
+    : null;
+  const ticketingEndDate = event?.ticketingEndAt
+    ? new Date(event.ticketingEndAt)
+    : null;
   const fundingDeadline = event?.fundingDeadline
     ? new Date(event.fundingDeadline)
     : null;
@@ -183,6 +204,20 @@ export const EventDetail: React.FC = () => {
     return ticket.currentOwner || "-";
   };
 
+  const handleShowPreviousImage = () => {
+    if (galleryImages.length <= 1) return;
+    setSelectedImageIndex((current) =>
+      current === 0 ? galleryImages.length - 1 : current - 1,
+    );
+  };
+
+  const handleShowNextImage = () => {
+    if (galleryImages.length <= 1) return;
+    setSelectedImageIndex((current) =>
+      current === galleryImages.length - 1 ? 0 : current + 1,
+    );
+  };
+
   const handleInvest = async () => {
     if (!user?.walletAddress && !user?.smartAccountAddress) {
       await connectWallet();
@@ -214,7 +249,7 @@ export const EventDetail: React.FC = () => {
     setInvesting(true);
 
     try {
-      const provider = web3Auth?.provider as Eip1193Provider | undefined;
+      const provider = resolveTransactionProvider(web3Auth?.provider);
       if (!provider?.request) {
         throw new Error(
           "Wallet provider is not ready. Please reconnect wallet and try again.",
@@ -231,6 +266,9 @@ export const EventDetail: React.FC = () => {
       const refreshedEvent = await getEventById(eventId);
       setEvent(refreshedEvent);
     } catch (err) {
+      if (isInsufficientBalanceError(err)) {
+        setInsufficientBalanceMessage(getInsufficientBalanceMessage(err));
+      }
       setInvestError(err instanceof Error ? err.message : "Investment failed");
     } finally {
       setInvesting(false);
@@ -256,14 +294,7 @@ export const EventDetail: React.FC = () => {
       return;
     }
 
-    const provider = web3Auth?.provider as
-      | {
-          request: (args: {
-            method: string;
-            params?: unknown[];
-          }) => Promise<unknown>;
-        }
-      | undefined;
+    const provider = resolveTransactionProvider(web3Auth?.provider);
 
     if (!provider?.request) {
       showBuyPopup(
@@ -286,6 +317,9 @@ export const EventDetail: React.FC = () => {
       setEvent(refreshedEvent);
       await loadTicketData(event._id);
     } catch (err) {
+      if (isInsufficientBalanceError(err)) {
+        setInsufficientBalanceMessage(getInsufficientBalanceMessage(err));
+      }
       showBuyPopup(
         "error",
         err instanceof Error ? err.message : "Ticket purchase failed",
@@ -324,12 +358,43 @@ export const EventDetail: React.FC = () => {
     setPurchaseConfirmTier(tierName || "this ticket");
   };
 
-  
+
   if (error) return <div className="p-8 text-red-400">{error}</div>;
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-950 py-8">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="mb-8 grid gap-8 xl:grid-cols-[1.2fr_1fr]">
+            <div className="aspect-[16/10] sm:aspect-video animate-pulse rounded-3xl border border-slate-800 bg-slate-900/60" />
+            <div className="grid gap-4">
+              <div className="h-6 w-32 animate-pulse rounded bg-slate-800" />
+              <div className="h-12 w-4/5 animate-pulse rounded bg-slate-800" />
+              <div className="h-24 animate-pulse rounded-2xl bg-slate-900/70" />
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="h-20 animate-pulse rounded-xl bg-slate-900/70" />
+                <div className="h-20 animate-pulse rounded-xl bg-slate-900/70" />
+                <div className="h-20 animate-pulse rounded-xl bg-slate-900/70 sm:col-span-2" />
+              </div>
+            </div>
+          </div>
+
+          <div className="h-72 animate-pulse rounded-2xl border border-slate-800 bg-slate-900/70" />
+        </div>
+      </div>
+    );
+  }
+
   if (!event) return <div className="p-8 text-white">Event not found</div>;
 
   return (
     <div className="min-h-screen bg-slate-950 py-8">
+      <InsufficientBalanceDialog
+        open={!!insufficientBalanceMessage}
+        message={insufficientBalanceMessage}
+        onClose={() => setInsufficientBalanceMessage("")}
+      />
+
       {buyPopup && (
         <div className="fixed top-4 right-4 z-[60]">
           <div
@@ -345,121 +410,185 @@ export const EventDetail: React.FC = () => {
       )}
 
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="grid lg:grid-cols-2 gap-8 mb-8">
-          <div className="aspect-video rounded-xl overflow-hidden">
-            <ImageWithFallback
-              src={coverImage}
-              alt={event.title || "Event image"}
-              className="w-full h-full object-cover"
-            />
+        <div className="mb-5">
+          <div className="mb-4 flex flex-wrap items-center gap-3">
+            <StatusBadge status={event.status || "draft"} />
+            <span className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-300">
+              {availableTickets ?? totalTickets} available / {trackedTickets} tracked
+            </span>
+            <span className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-300">
+              Investment Mode: {investmentMode}
+            </span>
           </div>
 
-          <div className="relative grid lg:grid-cols-2 gap-8">
-            <div className="aspect-video rounded-2xl overflow-hidden border border-slate-800">
-              <ImageWithFallback
-                src={coverImage}
-                alt={event.title || "Event image"}
-                className="w-full h-full object-cover"
-              />
-            </div>
+          <h1 className="bg-gradient-to-r from-purple-400 via-blue-300 to-cyan-300 bg-clip-text text-3xl font-semibold tracking-tight text-transparent sm:text-4xl">
+            {event.title}
+          </h1>
+          <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300 sm:text-base">
+            {event.description || "No event description available."}
+          </p>
+        </div>
 
-            <div>
-              <div className="mb-4 flex flex-wrap items-center gap-3">
-                <StatusBadge status={event.status || "draft"} />
-                <span className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-300">
-                  {availableTickets ?? totalTickets} available /{" "}
-                  {trackedTickets} tracked
-                </span>
-                <span className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-300">
-                  Investment Mode: {investmentMode}
-                </span>
+        <div className="mb-6 overflow-hidden rounded-[2rem] border border-slate-800 bg-slate-900/60 shadow-2xl shadow-cyan-950/20">
+          <div className="relative aspect-[16/9]">
+            {galleryImages.length > 1 ? (
+              <>
+                <button
+                  type="button"
+                  onClick={handleShowPreviousImage}
+                  className="absolute left-4 top-1/2 z-10 -translate-y-1/2 rounded-full border border-slate-700 bg-slate-950/80 px-4 py-2 text-sm font-medium text-white backdrop-blur transition hover:border-cyan-400 hover:text-cyan-200"
+                >
+                  Prev
+                </button>
+                <button
+                  type="button"
+                  onClick={handleShowNextImage}
+                  className="absolute right-4 top-1/2 z-10 -translate-y-1/2 rounded-full border border-slate-700 bg-slate-950/80 px-4 py-2 text-sm font-medium text-white backdrop-blur transition hover:border-cyan-400 hover:text-cyan-200"
+                >
+                  Next
+                </button>
+              </>
+            ) : null}
+
+            <ImageWithFallback
+              src={selectedGalleryImage}
+              alt={event.title || "Event image"}
+              className="h-full w-full object-cover"
+            />
+
+            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-slate-950 via-slate-950/70 to-transparent p-5 sm:p-6">
+              <div className="flex items-end justify-between gap-4">
+                <div className="text-xs uppercase tracking-[0.25em] text-slate-300">
+                  Event Gallery
+                </div>
+                <div className="rounded-full bg-slate-950/80 px-3 py-1 text-xs font-medium text-white backdrop-blur">
+                  {selectedImageIndex + 1} / {galleryImages.length}
+                </div>
               </div>
 
-              <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight text-white mb-3">
-                {event.title}
-              </h1>
-              <p className="text-slate-300 text-base leading-7 mb-6">
-                {event.description || "No event description available."}
-              </p>
-
-              <div className="grid sm:grid-cols-2 gap-3 mb-6">
-                <div className="rounded-xl border border-slate-800 bg-slate-900/90 p-3 text-slate-300">
-                  <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-500 mb-1">
-                    <Calendar className="w-4 h-4 text-cyan-300" />
-                    Date
-                  </div>
-                  <div className="font-medium">{formatDate(eventDate)}</div>
+              {galleryImages.length > 1 && (
+                <div className="mt-4 flex gap-2 overflow-x-auto pb-2">
+                  {galleryImages.map((imageUrl, index) => {
+                    const active = index === selectedImageIndex;
+                    return (
+                      <button
+                        key={`${imageUrl}-${index}`}
+                        type="button"
+                        onClick={() => setSelectedImageIndex(index)}
+                        className={`group relative h-14 w-20 flex-none overflow-hidden rounded-xl border transition-all duration-200 sm:h-16 sm:w-24 ${
+                          active
+                            ? "border-cyan-400 ring-2 ring-cyan-400/30"
+                            : "border-slate-700 hover:border-slate-500"
+                        }`}
+                      >
+                        <ImageWithFallback
+                          src={imageUrl}
+                          alt={`${event.title || "Event"} gallery ${index + 1}`}
+                          className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+                        />
+                        <div className="absolute left-2 top-2 rounded-full bg-slate-950/75 px-2 py-0.5 text-[11px] font-medium text-white backdrop-blur">
+                          {index + 1}
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
+              )}
+            </div>
+          </div>
+        </div>
 
-                <div className="rounded-xl border border-slate-800 bg-slate-900/90 p-3 text-slate-300">
-                  <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-500 mb-1">
-                    <Clock className="w-4 h-4 text-cyan-300" />
-                    Time
-                  </div>
-                  <div className="font-medium">{formatTime(eventDate)}</div>
+        <div className="mb-8 space-y-4">
+          <div className="grid gap-4 lg:grid-cols-[1.25fr_0.75fr]">
+            <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-5 sm:p-6">
+              <div className="mb-4 flex items-center gap-2 text-xs uppercase tracking-[0.24em] text-slate-500">
+                <Calendar className="h-4 w-4 text-cyan-300" />
+                Schedule
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4 text-slate-300">
+                  <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Event Date</div>
+                  <div className="mt-2 text-lg font-semibold text-white">{formatDate(eventDate)}</div>
+                  <div className="mt-1 text-sm text-slate-400">{formatTime(eventDate)}</div>
                 </div>
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4 text-slate-300">
+                  <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">End Time</div>
+                  <div className="mt-2 text-lg font-semibold text-white">{formatDate(eventEndDate)}</div>
+                  <div className="mt-1 text-sm text-slate-400">{formatTime(eventEndDate)}</div>
+                </div>
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4 text-slate-300">
+                  <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Ticketing Opens</div>
+                  <div className="mt-2 text-lg font-semibold text-white">{formatDate(ticketingStartDate)}</div>
+                  <div className="mt-1 text-sm text-slate-400">{formatTime(ticketingStartDate)}</div>
+                </div>
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4 text-slate-300">
+                  <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Ticketing Closes</div>
+                  <div className="mt-2 text-lg font-semibold text-white">{formatDate(ticketingEndDate)}</div>
+                  <div className="mt-1 text-sm text-slate-400">{formatTime(ticketingEndDate)}</div>
+                </div>
+              </div>
+            </div>
 
-                <div className="rounded-xl border border-slate-800 bg-slate-900/90 p-3 text-slate-300 sm:col-span-2">
-                  <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-500 mb-1">
-                    <MapPin className="w-4 h-4 text-emerald-300" />
-                    Venue
-                  </div>
-                  <div className="font-medium">
+            <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-4 sm:p-5">
+              <div className="mb-4 flex items-center gap-2 text-xs uppercase tracking-[0.24em] text-slate-500">
+                <MapPin className="h-4 w-4 text-emerald-300" />
+                Venue & Organizer
+              </div>
+              <div className="space-y-3">
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-3.5">
+                  <div className="mb-2 text-[11px] uppercase tracking-[0.2em] text-slate-500">Venue</div>
+                  <div className="text-base font-semibold text-white">
                     {event.venue?.address || "Unknown location"}
                   </div>
                 </div>
-
-                <div className="rounded-xl border border-slate-800 bg-slate-900/90 p-3 text-slate-300 sm:col-span-2">
-                  <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-500 mb-1">
-                    <Users className="w-4 h-4 text-emerald-300" />
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-3.5">
+                  <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.2em] text-slate-500">
+                    <Users className="h-4 w-4 text-emerald-300" />
                     Organizer
                   </div>
-                  <code className="text-xs sm:text-sm text-slate-200 break-all">
-                    {event.organizer ||
-                      event.organizerWallet ||
-                      "Unknown organizer"}
+                  <code className="text-xs break-all text-slate-200 sm:text-sm">
+                    {event.organizer || event.organizerWallet || "Unknown organizer"}
                   </code>
                 </div>
               </div>
-
-              {event?.investmentEnabled !== false ? (
-                <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
-                  <div className="flex items-center justify-between text-sm text-slate-300 mb-2">
-                    <span className="inline-flex items-center gap-2">
-                      <Gauge className="w-4 h-4 text-cyan-300" />
-                      Funding progress
-                    </span>
-                    <span className="font-medium">
-                      {fundingProgress.toFixed(1)}%
-                    </span>
-                  </div>
-                  <div className="h-2 rounded-full bg-slate-800 overflow-hidden mb-3">
-                    <div
-                      className="h-full bg-gradient-to-r from-cyan-400 via-emerald-400 to-amber-300"
-                      style={{ width: `${fundingProgress}%` }}
-                    />
-                  </div>
-                  <div className="grid sm:grid-cols-2 gap-2 text-xs text-slate-400">
-                    <span>
-                      Raised: {" "}
-                      {formatIntegerWithUnit(event?.currentFunding, "wei")}
-                    </span>
-                    <span>
-                      Goal: {formatIntegerWithUnit(event?.fundingGoal, "wei")}
-                    </span>
-                    <span>
-                      Min stake: {" "}
-                      {formatIntegerWithUnit(event?.minStakeRequired, "wei")}
-                    </span>
-                    {fundingDeadline ? (
-                      <span>Deadline: {formatDate(fundingDeadline)}</span>
-                    ) : null}
-                    <span>Investment Mode: {investmentMode}</span>
-                  </div>
-                </div>
-              ) : null}
             </div>
           </div>
+
+          {event?.investmentEnabled !== false ? (
+            <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-5 sm:p-6">
+              <div className="mb-3 flex items-center justify-between text-sm text-slate-300">
+                <span className="inline-flex items-center gap-2">
+                  <Gauge className="w-4 h-4 text-cyan-300" />
+                  Funding progress
+                </span>
+                <span className="font-medium">{fundingProgress.toFixed(1)}%</span>
+              </div>
+              <div className="mb-4 h-2 overflow-hidden rounded-full bg-slate-800">
+                <div
+                  className="h-full bg-gradient-to-r from-cyan-400 via-emerald-400 to-amber-300"
+                  style={{ width: `${fundingProgress}%` }}
+                />
+              </div>
+              <div className="flex gap-3 overflow-x-auto pb-2">
+                <div className="min-w-[180px] rounded-2xl border border-slate-800 bg-slate-950/70 p-4 text-sm text-slate-300">
+                  <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Raised</div>
+                  <div className="mt-2 font-semibold text-white">{formatIntegerWithUnit(event?.currentFunding, "wei")}</div>
+                </div>
+                <div className="min-w-[180px] rounded-2xl border border-slate-800 bg-slate-950/70 p-4 text-sm text-slate-300">
+                  <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Goal</div>
+                  <div className="mt-2 font-semibold text-white">{formatIntegerWithUnit(event?.fundingGoal, "wei")}</div>
+                </div>
+                <div className="min-w-[180px] rounded-2xl border border-slate-800 bg-slate-950/70 p-4 text-sm text-slate-300">
+                  <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Min Stake</div>
+                  <div className="mt-2 font-semibold text-white">{formatIntegerWithUnit(event?.minStakeRequired, "wei")}</div>
+                </div>
+                <div className="min-w-[180px] rounded-2xl border border-slate-800 bg-slate-950/70 p-4 text-sm text-slate-300">
+                  <div className="text-[11px] uppercase tracking-[0.2em] text-slate-500">Mode</div>
+                  <div className="mt-2 font-semibold text-white">{investmentMode}</div>
+                </div>
+              </div>
+            </div>
+          ) : null}
         </div>
 
         <Card className="bg-slate-900/80 border-slate-800 backdrop-blur-sm">
@@ -621,9 +750,9 @@ export const EventDetail: React.FC = () => {
           <div className="bg-slate-900 p-6 rounded-xl border border-slate-700 w-[340px]">
             <h3 className="text-white mb-2 font-semibold">Confirm Purchase</h3>
             <p className="text-slate-300 text-sm mb-4">
-              Are you sure you want to purchase the{" "}
+              Do you want to purchase{" "}
               <span className="font-semibold">{purchaseConfirmTier}</span>{" "}
-              ticket?
+              now?
             </p>
 
             <div className="flex gap-2">

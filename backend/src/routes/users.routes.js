@@ -376,6 +376,8 @@ router.get('/shares/:id', authenticate, controller.getUserShareById);
  */
 router.get('/rewards', authenticate, controller.getUserRewards);
 
+router.get('/contributions', authenticate, controller.getUserContributions);
+
 /**
  * @swagger
  * /users/{walletAddress}:
