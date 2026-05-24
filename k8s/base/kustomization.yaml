@@ -4,7 +4,7 @@ kind: Kustomization
 images:
   - name: eventfund-backend
     newName: 612827970242.dkr.ecr.ap-southeast-1.amazonaws.com/eventfund-backend
-    newTag: 573724b173a658b41e247a932e43b4687c9b377e
+    newTag: 438438c6ac6ccfac634b2551e0f60ad10731ff79
 
 resources:
   - namespace/namespace.yaml
