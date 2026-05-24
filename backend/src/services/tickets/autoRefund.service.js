@@ -49,6 +49,20 @@ function getBackendSigner() {
   return new ethers.Wallet(privateKey, provider);
 }
 
+function getMarketplaceOwnerSigner() {
+  const privateKey =
+    process.env.MARKETPLACE_OWNER_PRIVATE_KEY ||
+    process.env.BACKEND_SIGNER_PRIVATE_KEY;
+
+  if (!privateKey) {
+    throw new Error(
+      "Missing MARKETPLACE_OWNER_PRIVATE_KEY (or BACKEND_SIGNER_PRIVATE_KEY fallback) for marketplace force-cancel",
+    );
+  }
+
+  return new ethers.Wallet(privateKey, provider);
+}
+
 function toEventKey(eventDoc) {
   if (eventDoc?._id) return String(eventDoc._id);
   if (eventDoc?.contractEventId) return `chain:${eventDoc.contractEventId}`;
@@ -121,7 +135,6 @@ async function autoCancelActiveListingsForEvent(eventDoc, options = {}) {
   const repositories = options.repositories || {};
   const listingRepository = repositories.listingRepo || listingRepo;
   const ticketRepository = repositories.ticketRepo || ticketRepo;
-  const signer = options.signer || getBackendSigner();
   const marketplaceContract = options.marketplaceContract || getMarketplace();
   const marketplaceAddress = await marketplaceContract.getAddress();
 
@@ -135,6 +148,7 @@ async function autoCancelActiveListingsForEvent(eventDoc, options = {}) {
   const ticketIds = await (options.ticketContract || getTicket()).getEventTokenIds(
     chainEventId,
   );
+  const marketplaceSigner = options.marketplaceSigner || getMarketplaceOwnerSigner();
 
   for (const tokenIdValue of ticketIds || []) {
     const tokenId = toTokenIdString(tokenIdValue);
@@ -176,7 +190,7 @@ async function autoCancelActiveListingsForEvent(eventDoc, options = {}) {
     const contractListingId = activeListingId.toString();
 
     try {
-      const tx = await signer.sendTransaction({
+      const tx = await marketplaceSigner.sendTransaction({
         to: marketplaceAddress,
         data: FORCE_CANCEL_LISTING_INTERFACE.encodeFunctionData(
           "forceCancelListing",

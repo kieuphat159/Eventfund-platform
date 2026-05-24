@@ -1,5 +1,6 @@
 import * as ListingRepo from "../../repositories/listing.repo.js";
 import * as TicketRepo from "../../repositories/ticket.repo.js";
+import * as EventRepo from "../../repositories/event.repo.js";
 import { ethers } from "ethers";
 import { multiplyBigInt, divideBigInt, toBigInt } from "../../utils/bigint.js";
 import {
@@ -21,6 +22,32 @@ function validateTransactionHash(txHash) {
 
 function normalizeAddress(value) {
   return value ? String(value).toLowerCase() : "";
+}
+
+const TERMINAL_EVENT_STATUSES = new Set(["failed", "cancelled"]);
+
+function isTerminalEventStatus(status) {
+  return TERMINAL_EVENT_STATUSES.has(String(status || "").toLowerCase());
+}
+
+function isPopulatedEvent(value) {
+  return value && typeof value === "object" && "status" in value;
+}
+
+async function isListingBlockedByTerminalEvent(listing, repositories = {}) {
+  const eventValue = listing?.eventId;
+  if (!eventValue) {
+    return false;
+  }
+
+  if (isPopulatedEvent(eventValue)) {
+    return isTerminalEventStatus(eventValue.status);
+  }
+
+  const eventRepository = repositories.event || EventRepo;
+  const event = await eventRepository.findById(String(eventValue), repositories.models);
+
+  return isTerminalEventStatus(event?.status);
 }
 
 async function parseMarketplaceEventsFromReceipt(receipt) {
@@ -155,6 +182,7 @@ export async function createBuyListingIntent(
   repositories = {},
 ) {
   const listingRepo = repositories.listing || ListingRepo;
+  const eventRepo = repositories.event || EventRepo;
 
   const listing = await listingRepo.findById(
     listingId,
@@ -164,6 +192,17 @@ export async function createBuyListingIntent(
   if (!listing) throw new NotFoundError("Listing not found");
   if (listing.status !== "active")
     throw new BadRequestError("Listing is not active");
+
+  const event =
+    isPopulatedEvent(listing.eventId)
+      ? listing.eventId
+      : await eventRepo.findById(String(listing.eventId), repositories.models);
+
+  if (isTerminalEventStatus(event?.status)) {
+    throw new BadRequestError(
+      "This listing is no longer available because the event was cancelled or failed",
+    );
+  }
 
   if (listing.seller.toLowerCase() === buyerWallet.toLowerCase()) {
     throw new BadRequestError("Seller cannot buy own listing");
@@ -599,7 +638,21 @@ export async function getListings(query = {}, repositories = {}) {
     populate: "ticketId eventId",
   };
 
-  return await listingRepo.findListings(dbQuery, options, repositories.models);
+  const result = await listingRepo.findListings(dbQuery, options, repositories.models);
+  const docs = result?.docs || [];
+
+  const visibleDocs = [];
+  for (const listing of docs) {
+    if (await isListingBlockedByTerminalEvent(listing, repositories)) {
+      continue;
+    }
+    visibleDocs.push(listing);
+  }
+
+  return {
+    ...result,
+    docs: visibleDocs,
+  };
 }
 
 /**
@@ -617,6 +670,12 @@ export async function getListingById(listingId, repositories = {}) {
   );
 
   if (!listing) throw new NotFoundError("Listing not found");
+  if (
+    listing.status === "active" &&
+    (await isListingBlockedByTerminalEvent(listing, repositories))
+  ) {
+    throw new NotFoundError("Listing not found");
+  }
 
   return listing;
 }
