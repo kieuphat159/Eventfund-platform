@@ -741,10 +741,18 @@ export async function getUserTickets(walletAddress, query = {}, repos = {}) {
         return null;
       }
 
+      const isPopulatedEvent = (value) =>
+        value && typeof value === 'object' && 'title' in value;
+      const populatedEvent = isPopulatedEvent(listing.eventId)
+        ? listing.eventId
+        : isPopulatedEvent(ticket.eventId)
+          ? ticket.eventId
+          : listing.eventId || ticket.eventId;
+
       return {
         ...ticket,
         isListed: true,
-        eventId: ticket.eventId || listing.eventId,
+        eventId: populatedEvent,
       };
     })
     .filter(Boolean);
