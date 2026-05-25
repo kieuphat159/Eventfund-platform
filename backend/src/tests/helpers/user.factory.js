@@ -55,7 +55,7 @@ export function createMultipleUsers(count, overrides = {}) {
 
 /**
  * Create test user with specific role
- * @param {string} role - User role (user, organizer, verifier, admin)
+ * @param {string} role - User role (user, verifier, admin)
  * @param {Object} overrides - Optional field overrides
  * @returns {Object} User data object
  */
@@ -74,7 +74,7 @@ export function createAdminUser(overrides = {}) {
  * Create organizer user
  */
 export function createOrganizerUser(overrides = {}) {
-  return createUserWithRole('organizer', overrides);
+  return createUserWithRole('user', overrides);
 }
 
 /**

@@ -41,7 +41,7 @@ describe('Tickets Routes - E2E Integration Tests', () => {
 
     // Create test users
     verifierUser = await User.create({
-      walletAddress: '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0',
+      walletAddress: '0x888d35Cc6634C0532925a3b844Bc9e7595f0bEb8',
       role: 'verifier',
       nonce: 'test-nonce-verifier',
       nonceExpiresAt: new Date(Date.now() + 15 * 60 * 1000)
@@ -70,6 +70,7 @@ describe('Tickets Routes - E2E Integration Tests', () => {
       startDate: new Date(Date.now() - 1 * 60 * 60 * 1000), // Started 1 hour ago
       endDate: new Date(Date.now() + 2 * 60 * 60 * 1000), // Ends in 2 hours
       totalTickets: 500,
+      verifiers: [verifierUser.walletAddress.toLowerCase()],
       status: 'ongoing'
     });
 
@@ -348,6 +349,7 @@ describe('Tickets Routes - E2E Integration Tests', () => {
         startDate: new Date(Date.now() + 40 * 24 * 60 * 60 * 1000),
         endDate: new Date(Date.now() + 42 * 24 * 60 * 60 * 1000),
         totalTickets: 500,
+        verifiers: [verifierUser.walletAddress.toLowerCase()],
         status: 'funded'
       });
 
@@ -470,6 +472,7 @@ describe('Tickets Routes - E2E Integration Tests', () => {
         startDate: new Date(Date.now() + 50 * 24 * 60 * 60 * 1000),
         endDate: new Date(Date.now() + 52 * 24 * 60 * 60 * 1000),
         totalTickets: 500,
+        verifiers: [verifierUser.walletAddress.toLowerCase()],
         status: 'funded'
       });
 
