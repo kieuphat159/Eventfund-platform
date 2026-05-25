@@ -591,6 +591,7 @@ async function handleRoyaltyDeposited(log, eventDoc) {
 
 async function handleContributionRefunded(log, eventDoc) {
   const { args, transactionHash } = log;
+  const txHash = transactionHash.toLowerCase();
   const contributor = lowerAddress(args.donator);
   const amount = toAmountString(args.amount);
 
@@ -602,8 +603,6 @@ async function handleContributionRefunded(log, eventDoc) {
       refundTxHash: txHash,
     },
   );
-
-  const txHash = transactionHash.toLowerCase();
   const applied = await eventRepo.applyIdempotentDeltaByTxHash(
     eventDoc._id,
     txHash,

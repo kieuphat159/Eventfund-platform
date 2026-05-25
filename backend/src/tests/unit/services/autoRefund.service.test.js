@@ -103,6 +103,7 @@ describe("autoRefund.service", () => {
           },
         },
         signer: { address: "0x3333333333333333333333333333333333333333" },
+        marketplaceSigner: { sendTransaction: jest.fn() },
         ticketContract: mockTicket,
       },
     );
@@ -164,6 +165,7 @@ describe("autoRefund.service", () => {
           },
         },
         signer: { address: "0x4444444444444444444444444444444444444444" },
+        marketplaceSigner: { sendTransaction: jest.fn() },
         ticketContract: mockTicket,
       },
     );
@@ -180,6 +182,7 @@ describe("autoRefund.service", () => {
           },
         },
         signer: { address: "0x4444444444444444444444444444444444444444" },
+        marketplaceSigner: { sendTransaction: jest.fn() },
         ticketContract: mockTicket,
       },
     );

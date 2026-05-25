@@ -53,6 +53,7 @@ describe("Blockchain Reorg Safety Regressions", () => {
     const now = Date.now();
     return EventModel.create({
       contractEventId: CONTRACT_EID,
+      fundContractAddress: FUND_ADDR.toLowerCase(),
       title: `Reorg Test Event ${CONTRACT_EID}`,
       organizer: ORGANIZER.toLowerCase(),
       startDate: new Date(now + 86400 * 7 * 1000),

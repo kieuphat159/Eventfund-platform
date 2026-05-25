@@ -210,17 +210,17 @@ const eventSchema = new mongoose.Schema(
 
     // ===== Refund =====
     refundPool: { type: String, default: "0" },
-    refundedAmount: { type: String, default: "0" },
+    refundedAmount: { type: Number, default: 0 },
     refundEnabledAt: { type: Date },
     lastRefundedAt: { type: Date },
     lastRefundPoolDepositAt: { type: Date },
-    extraRefundPoolDeposited: { type: String, default: "0" },
+    extraRefundPoolDeposited: { type: Number, default: 0 },
 
     // ===== Revenue Tracking =====
-    ticketRevenueDeposited: { type: String, default: "0" },
+    ticketRevenueDeposited: { type: Number, default: 0 },
     lastTicketRevenueAt: { type: Date },
 
-    royaltyRevenueDeposited: { type: String, default: "0" },
+    royaltyRevenueDeposited: { type: Number, default: 0 },
     lastRoyaltyRevenueAt: { type: Date },
 
     // ===== Contribution Refund =====
@@ -231,7 +231,7 @@ const eventSchema = new mongoose.Schema(
     stakeWithdrawnAt: { type: Date },
 
     // ===== Penalty =====
-    totalPenaltyAmount: { type: String, default: "0" },
+    totalPenaltyAmount: { type: Number, default: 0 },
     lastPenaltyAt: { type: Date },
 
     // ===== Flags =====
