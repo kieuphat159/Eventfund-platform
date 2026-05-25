@@ -662,7 +662,7 @@ describe("Fund Smart Contract", () => {
       await fund.connect(organizer).finalizeFunding(eventId);
       await expect(
         fund.connect(stranger).withdrawStake(eventId),
-      ).to.be.revertedWithCustomError(fund, "NotOrganizer");
+      ).to.be.revertedWithCustomError(fund, "NotAuthorized");
       await expect(
         fund.connect(organizer).withdrawStake(eventId),
       ).to.be.revertedWithCustomError(fund, "Unsafe");

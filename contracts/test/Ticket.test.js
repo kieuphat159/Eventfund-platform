@@ -1,13 +1,10 @@
-import {
-  time,
-  loadFixture,
-} from "@nomicfoundation/hardhat-toolbox/network-helpers.js";
+import { loadFixture } from "@nomicfoundation/hardhat-toolbox/network-helpers.js";
 import { expect } from "chai";
 import pkg from "hardhat";
+
 const { ethers } = pkg;
 
 describe("Ticket Smart Contract", () => {
-  // Helper: Giả lập Signer cho địa chỉ Contract (Dùng cho Fund gọi sang Ticket)
   async function getContractSigner(targetAddress) {
     await pkg.network.provider.send("hardhat_setBalance", [
       targetAddress,
@@ -25,37 +22,30 @@ describe("Ticket Smart Contract", () => {
     const Ticket = await ethers.getContractFactory("Ticket");
     const ticket = await Ticket.deploy();
 
-    // Wiring
     await ticket.connect(admin).setFundContract(fund.target);
     await fund.setTicketContract(ticket.target);
 
     const ORGANIZER_ROLE = await ticket.ORGANIZER_ROLE();
-
-    // Cấp quyền mặc định
     await ticket.grantRole(ORGANIZER_ROLE, fund.target);
 
-    // Per-event verifier: admin registers verifier for eventId after event creation
     const eventId = 1;
-
     const ticketPrice = ethers.parseEther("0.1");
-
-    // Khởi tạo Event trên Fund để các hàm nạp tiền của Ticket không bị revert (EventNotFound)
-    const deadline = (await time.latest()) + 7 * 24 * 60 * 60;
     const minStake = ethers.parseEther("1");
+
     await fund
       .connect(organizer)
-      .createEvent(
-        ethers.parseEther("10"),
-        deadline,
+      .createEventWithInvestment(
+        0,
+        0,
         minStake,
         8000,
         ticketPrice,
         100,
         2,
+        false,
         { value: minStake },
       );
 
-    // Register per-event verifier (admin can do this for any event)
     await ticket.connect(admin).addEventVerifier(eventId, verifier.address);
 
     return {
@@ -72,14 +62,9 @@ describe("Ticket Smart Contract", () => {
     };
   }
 
-  // ---------------------------------------------------------
-  // 1. NHÓM CẤU HÌNH & QUYỀN HẠN
-  // ---------------------------------------------------------
   describe("Group 1: Admin & Setup", () => {
     it("TC1: Only DEFAULT_ADMIN_ROLE can set Fund contract", async () => {
-      const { ticket, stranger, admin } = await loadFixture(
-        deployTicketFixture,
-      );
+      const { ticket, stranger } = await loadFixture(deployTicketFixture);
       await expect(
         ticket.connect(stranger).setFundContract(stranger.address),
       ).to.be.revertedWithCustomError(
@@ -114,12 +99,10 @@ describe("Ticket Smart Contract", () => {
         deployTicketFixture,
       );
 
-      // Before any mint, eventOrganizer[eventId] == address(0) => organizer isn't recognized yet.
       await expect(
         ticket.connect(organizer).setSalesActive(eventId, false),
       ).to.be.revertedWithCustomError(ticket, "InvalidTicketStatus");
 
-      // Stranger also cannot toggle.
       await expect(
         ticket.connect(stranger).setSalesActive(eventId, false),
       ).to.be.revertedWithCustomError(ticket, "InvalidTicketStatus");
@@ -135,9 +118,6 @@ describe("Ticket Smart Contract", () => {
     });
   });
 
-  // ---------------------------------------------------------
-  // 2. NHÓM MINT VÉ
-  // ---------------------------------------------------------
   describe("Group 2: Minting Batch", () => {
     it("TC5: Mint successfully and store metadata", async () => {
       const { ticket, fund, organizer, eventId, ticketPrice } =
@@ -187,15 +167,11 @@ describe("Ticket Smart Contract", () => {
         await loadFixture(deployTicketFixture);
       const fundSigner = await getContractSigner(fund.target);
 
-      // Bước 1: Mint đợt 1 (để totalMinted > 0 và salesActive trở thành true)
       await ticket
         .connect(fundSigner)
         .mintBatch(organizer.address, eventId, ticketPrice, 0, 1);
-
-      // Bước 2: Bây giờ mới tắt sales
       await ticket.connect(admin).setSalesActive(eventId, false);
 
-      // Bước 3: Mint đợt 2 -> Lúc này mới revert SalesInactive vì totalMinted đã > 0
       await expect(
         ticket
           .connect(fundSigner)
@@ -220,26 +196,11 @@ describe("Ticket Smart Contract", () => {
     });
   });
 
-  // ---------------------------------------------------------
-  // 3. NHÓM MUA VÉ
-  // ---------------------------------------------------------
   describe("Group 3: Purchase Ticket", () => {
     async function mintedFixture() {
       const base = await loadFixture(deployTicketFixture);
-      const {
-        ticket,
-        fund,
-        organizer,
-        eventId,
-        ticketPrice,
-        admin,
-        ORGANIZER_ROLE,
-      } = base;
-      await ticket.connect(admin).grantRole(ORGANIZER_ROLE, organizer.address);
-      const fundSigner = await getContractSigner(fund.target);
-      await ticket
-        .connect(fundSigner)
-        .mintBatch(organizer.address, eventId, ticketPrice, 0, 10);
+      const { fund, organizer, eventId } = base;
+      await fund.connect(organizer).startTicketing(eventId, 0, 10);
       return base;
     }
 
@@ -253,7 +214,7 @@ describe("Ticket Smart Contract", () => {
       await expect(tx)
         .to.emit(ticket, "TicketPurchased")
         .withArgs(1, 1, buyer.address, ticketPrice);
-      expect(await ticket.getTicketStatus(1)).to.equal(1); // Sold
+      expect(await ticket.getTicketStatus(1)).to.equal(1);
     });
 
     it("TC11: Refund excess ETH", async () => {
@@ -284,39 +245,21 @@ describe("Ticket Smart Contract", () => {
       const { ticket, buyer, stranger, organizer, ticketPrice } =
         await mintedFixture();
 
-      // Simulate organizer transferring a Minted ticket away.
       await ticket
         .connect(organizer)
         .transferFrom(organizer.address, stranger.address, 5);
 
-      // Primary purchase must be from an ORGANIZER_ROLE holder.
       await expect(
         ticket.connect(buyer).purchaseTicket(5, { value: ticketPrice }),
       ).to.be.revertedWithCustomError(ticket, "InvalidTicketStatus");
     });
   });
 
-  // ---------------------------------------------------------
-  // 4. NHÓM SỬ DỤNG
-  // ---------------------------------------------------------
   describe("Group 4: Usage & Check-in", () => {
     async function purchasedFixture() {
       const base = await loadFixture(deployTicketFixture);
-      const {
-        ticket,
-        fund,
-        organizer,
-        buyer,
-        eventId,
-        ticketPrice,
-        admin,
-        ORGANIZER_ROLE,
-      } = base;
-      await ticket.connect(admin).grantRole(ORGANIZER_ROLE, organizer.address);
-      const fundSigner = await getContractSigner(fund.target);
-      await ticket
-        .connect(fundSigner)
-        .mintBatch(organizer.address, eventId, ticketPrice, 0, 5);
+      const { ticket, fund, organizer, buyer, eventId, ticketPrice } = base;
+      await fund.connect(organizer).startTicketing(eventId, 0, 5);
       await ticket.connect(buyer).purchaseTicket(1, { value: ticketPrice });
       return base;
     }
@@ -324,7 +267,7 @@ describe("Ticket Smart Contract", () => {
     it("TC15: Verifier marks as used", async () => {
       const { ticket, verifier } = await purchasedFixture();
       await ticket.connect(verifier).markAsUsed(1);
-      expect(await ticket.getTicketStatus(1)).to.equal(2); // Used
+      expect(await ticket.getTicketStatus(1)).to.equal(2);
     });
 
     it("TC16 & TC17: Mark as expired and refunded", async () => {
@@ -332,8 +275,8 @@ describe("Ticket Smart Contract", () => {
       await ticket.connect(buyer).purchaseTicket(2, { value: ticketPrice });
       await ticket.connect(verifier).markAsExpired(1);
       await ticket.connect(verifier).markAsRefunded(2);
-      expect(await ticket.getTicketStatus(1)).to.equal(3); // Expired
-      expect(await ticket.getTicketStatus(2)).to.equal(4); // Refunded
+      expect(await ticket.getTicketStatus(1)).to.equal(3);
+      expect(await ticket.getTicketStatus(2)).to.equal(4);
     });
 
     it("TC18: Block check-in for non-sold tickets", async () => {
@@ -344,9 +287,6 @@ describe("Ticket Smart Contract", () => {
     });
   });
 
-  // ---------------------------------------------------------
-  // 5. NHÓM CHUYỂN NHƯỢNG & BẢO MẬT
-  // ---------------------------------------------------------
   describe("Group 5: Transfers", () => {
     it("TC19: Block transfer of used/expired/refunded tickets", async () => {
       const {
@@ -355,17 +295,11 @@ describe("Ticket Smart Contract", () => {
         verifier,
         stranger,
         ticketPrice,
-        admin,
         organizer,
-        ORGANIZER_ROLE,
         fund,
         eventId,
       } = await loadFixture(deployTicketFixture);
-      await ticket.connect(admin).grantRole(ORGANIZER_ROLE, organizer.address);
-      const fundSigner = await getContractSigner(fund.target);
-      await ticket
-        .connect(fundSigner)
-        .mintBatch(organizer.address, eventId, ticketPrice, 0, 5);
+      await fund.connect(organizer).startTicketing(eventId, 0, 5);
       await ticket.connect(buyer).purchaseTicket(1, { value: ticketPrice });
 
       await ticket.connect(verifier).markAsUsed(1);
@@ -375,49 +309,21 @@ describe("Ticket Smart Contract", () => {
     });
 
     it("TC20: isTransferable only for Sold status", async () => {
-      const {
-        ticket,
-        buyer,
-        ticketPrice,
-        admin,
-        organizer,
-        ORGANIZER_ROLE,
-        fund,
-        eventId,
-      } = await loadFixture(deployTicketFixture);
-      await ticket.connect(admin).grantRole(ORGANIZER_ROLE, organizer.address);
-      const fundSigner = await getContractSigner(fund.target);
-      await ticket
-        .connect(fundSigner)
-        .mintBatch(organizer.address, eventId, ticketPrice, 0, 2);
+      const { ticket, buyer, ticketPrice, organizer, fund, eventId } =
+        await loadFixture(deployTicketFixture);
+      await fund.connect(organizer).startTicketing(eventId, 0, 2);
 
-      expect(await ticket.isTransferable(1)).to.be.false; // Minted
+      expect(await ticket.isTransferable(1)).to.be.false;
       await ticket.connect(buyer).purchaseTicket(1, { value: ticketPrice });
-      expect(await ticket.isTransferable(1)).to.be.true; // Sold
+      expect(await ticket.isTransferable(1)).to.be.true;
     });
   });
 
-  // ---------------------------------------------------------
-  // 6. NHÓM TÍCH HỢP & VIEW
-  // ---------------------------------------------------------
   describe("Group 6: Integration Views", () => {
     it("TC22: usageRatio calculation", async () => {
-      const {
-        ticket,
-        buyer,
-        verifier,
-        ticketPrice,
-        admin,
-        organizer,
-        ORGANIZER_ROLE,
-        fund,
-        eventId,
-      } = await loadFixture(deployTicketFixture);
-      await ticket.connect(admin).grantRole(ORGANIZER_ROLE, organizer.address);
-      const fundSigner = await getContractSigner(fund.target);
-      await ticket
-        .connect(fundSigner)
-        .mintBatch(organizer.address, eventId, ticketPrice, 0, 2);
+      const { ticket, buyer, verifier, ticketPrice, organizer, fund, eventId } =
+        await loadFixture(deployTicketFixture);
+      await fund.connect(organizer).startTicketing(eventId, 0, 2);
 
       await ticket.connect(buyer).purchaseTicket(1, { value: ticketPrice });
       await ticket.connect(buyer).purchaseTicket(2, { value: ticketPrice });
@@ -426,25 +332,13 @@ describe("Ticket Smart Contract", () => {
       const stats = await ticket.getUsageStats(eventId);
       expect(stats.totalSold).to.equal(2);
       expect(stats.totalUsed).to.equal(1);
-      expect(stats.usageRatio).to.equal(5000); // 50%
+      expect(stats.usageRatio).to.equal(5000);
     });
 
     it("TC23: getTotalRevenue matches funds pushed to Fund", async () => {
-      const {
-        ticket,
-        buyer,
-        ticketPrice,
-        admin,
-        organizer,
-        ORGANIZER_ROLE,
-        fund,
-        eventId,
-      } = await loadFixture(deployTicketFixture);
-      await ticket.connect(admin).grantRole(ORGANIZER_ROLE, organizer.address);
-      const fundSigner = await getContractSigner(fund.target);
-      await ticket
-        .connect(fundSigner)
-        .mintBatch(organizer.address, eventId, ticketPrice, 0, 5);
+      const { ticket, buyer, ticketPrice, organizer, fund, eventId } =
+        await loadFixture(deployTicketFixture);
+      await fund.connect(organizer).startTicketing(eventId, 0, 5);
 
       await ticket.connect(buyer).purchaseTicket(1, { value: ticketPrice });
       await ticket.connect(buyer).purchaseTicket(2, { value: ticketPrice });
