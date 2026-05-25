@@ -417,7 +417,7 @@ describe('Users Routes - E2E Integration Tests', () => {
 
     test('should reject username with invalid characters', async () => {
       const invalidData = {
-        username: 'john doe' // Contains space
+        username: 'john@doe'
       };
 
       const response = await request(app)
@@ -433,7 +433,7 @@ describe('Users Routes - E2E Integration Tests', () => {
       expect(Array.isArray(response.body.error.details)).toBe(true);
       const detail = response.body.error.details.find(d => d.field === 'username');
       expect(detail).toBeDefined();
-      expect(detail.message).toContain('alphanumeric');
+      expect(detail.message).toContain('letters');
     });
 
     test('should reject invalid avatarUrl format', async () => {

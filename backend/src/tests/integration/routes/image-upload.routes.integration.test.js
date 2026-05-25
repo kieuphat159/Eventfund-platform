@@ -162,7 +162,7 @@ describe('Image Upload Routes - E2E Integration Tests', () => {
 
     testOrganizer = await User.create({
       walletAddress: '0x123d35Cc6634C0532925a3b844Bc9e7595f0bEb1',
-      role: 'organizer',
+      role: 'user',
       nonce: 'test-nonce-organizer',
       nonceExpiresAt: new Date(Date.now() + 15 * 60 * 1000)
     });

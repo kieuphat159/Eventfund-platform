@@ -16,12 +16,6 @@ process.env.CLOUDINARY_SECRET = 'test-secret';
 // Note: jest.setTimeout is called in individual test files as needed
 // since jest is not available in setup files with ES modules
 
-// Suppress console output during tests (optional)
-// global.console = {
-//   ...console,
-//   log: jest.fn(),
-//   debug: jest.fn(),
-//   info: jest.fn(),
-//   warn: jest.fn(),
-//   error: jest.fn(),
-// };
+// Suppress console.error during tests (expected error scenarios produce noise)
+const originalConsoleError = console.error;
+console.error = () => {};

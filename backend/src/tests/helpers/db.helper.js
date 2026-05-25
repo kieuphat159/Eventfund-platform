@@ -5,6 +5,7 @@
 
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import mongoose from 'mongoose';
+import cacheService from '../../services/cache/redis.service.js';
 
 let mongoServer;
 
@@ -57,6 +58,13 @@ export async function clearTestDB() {
     for (const key in collections) {
       const collection = collections[key];
       await collection.deleteMany({});
+    }
+
+    if (cacheService.isAvailable()) {
+      const client = cacheService.getClient();
+      if (typeof client.flushdb === 'function') {
+        await client.flushdb();
+      }
     }
 
     console.log('Cleared all test database collections');

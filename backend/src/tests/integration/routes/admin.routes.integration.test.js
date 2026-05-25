@@ -53,7 +53,7 @@ describe('Admin Routes - E2E Integration Tests', () => {
 
     testOrganizer = await User.create({
       walletAddress: '0xabcdef1234567890abcdef1234567890abcdef12',
-      role: 'organizer',
+      role: 'user',
       nonce: 'test-nonce-organizer',
       nonceExpiresAt: new Date(Date.now() + 15 * 60 * 1000)
     });
@@ -97,7 +97,7 @@ describe('Admin Routes - E2E Integration Tests', () => {
 
         // Verify user stats
         expect(response.body.data.users.total).toBeGreaterThanOrEqual(3);
-        expect(response.body.data.users.organizers).toBeGreaterThanOrEqual(1);
+        expect(response.body.data.users.organizers).toBe(0);
         expect(response.body.data.users.admins).toBeGreaterThanOrEqual(1);
 
         // Verify event stats
@@ -106,7 +106,7 @@ describe('Admin Routes - E2E Integration Tests', () => {
 
         // Verify specific values
         expect(response.body.data.users.total).toBe(3);
-        expect(response.body.data.users.organizers).toBe(1);
+        expect(response.body.data.users.organizers).toBe(0);
         expect(response.body.data.users.admins).toBe(1);
         expect(response.body.data.events.total).toBe(1);
         expect(response.body.data.events.funding).toBe(1);
@@ -156,14 +156,14 @@ describe('Admin Routes - E2E Integration Tests', () => {
 
       it('should filter users by role', async () => {
         const response = await request(app)
-          .get('/api/admin/users?role=organizer')
+          .get('/api/admin/users?role=user')
           .set('Authorization', `Bearer ${adminToken}`);
 
         expect(response.status).toBe(200);
         expect(response.body.success).toBe(true);
         // Bắt buộc phải có data để tránh pass giả với mảng rỗng
         expect(response.body.data.docs.length).toBeGreaterThan(0);
-        expect(response.body.data.docs.every(user => user.role === 'organizer')).toBe(true);
+        expect(response.body.data.docs.every(user => user.role === 'user')).toBe(true);
       });
 
       it('should support pagination', async () => {
@@ -239,20 +239,20 @@ describe('Admin Routes - E2E Integration Tests', () => {
 
   describe('PATCH /api/admin/users/:walletAddress/role - Update User Role', () => {
     describe('Happy Path', () => {
-      it('should successfully update user role from user to organizer', async () => {
+      it('should successfully update user role from user to verifier', async () => {
         const response = await request(app)
           .patch(`/api/admin/users/${testUser.walletAddress}/role`)
           .set('Authorization', `Bearer ${adminToken}`)
-          .send({ role: 'organizer' });
+          .send({ role: 'verifier' });
 
         expect(response.status).toBe(200);
         expect(response.body.success).toBe(true);
-        expect(response.body.data.role).toBe('organizer');
+        expect(response.body.data.role).toBe('verifier');
         expect(response.body.data.walletAddress).toBe(testUser.walletAddress.toLowerCase());
 
         // Verify in database
         const updatedUser = await User.findOne({ walletAddress: testUser.walletAddress });
-        expect(updatedUser.role).toBe('organizer');
+        expect(updatedUser.role).toBe('verifier');
       });
 
       it('should successfully update user role to verifier', async () => {
@@ -296,7 +296,7 @@ describe('Admin Routes - E2E Integration Tests', () => {
         const response = await request(app)
           .patch(`/api/admin/users/${nonExistentAddress}/role`)
           .set('Authorization', `Bearer ${adminToken}`)
-          .send({ role: 'organizer' });
+          .send({ role: 'user' });
 
         expect(response.status).toBe(404);
         expect(response.body.success).toBe(false);
@@ -348,7 +348,7 @@ describe('Admin Routes - E2E Integration Tests', () => {
       it('should return 401 for unauthenticated requests', async () => {
         const response = await request(app)
           .patch(`/api/admin/users/${testUser.walletAddress}/role`)
-          .send({ role: 'organizer' });
+          .send({ role: 'user' });
 
         expect(response.status).toBe(401);
       });
@@ -357,7 +357,7 @@ describe('Admin Routes - E2E Integration Tests', () => {
         const response = await request(app)
           .patch(`/api/admin/users/${testUser.walletAddress}/role`)
           .set('Authorization', `Bearer ${userToken}`)
-          .send({ role: 'organizer' });
+          .send({ role: 'user' });
 
         expect(response.status).toBe(403);
       });
@@ -576,19 +576,19 @@ describe('Admin Routes - E2E Integration Tests', () => {
     });
 
     describe('Happy Path', () => {
-      it('should successfully update event status to completed', async () => {
+      it('should reject completing an event that has not been published on-chain', async () => {
+        await Event.findByIdAndUpdate(testEvent._id, { status: 'ongoing' });
+
         const response = await request(app)
           .patch(`/api/admin/events/${testEvent._id}/status`)
           .set('Authorization', `Bearer ${adminToken}`)
-          .send({ status: 'completed' });
+          .send({ status: 'completed', syncOnChain: false });
 
-        expect(response.status).toBe(200);
-        expect(response.body.success).toBe(true);
-        expect(response.body.data.status).toBe('completed');
-
-        // Verify in database
+        expect(response.status).toBe(400);
+        expect(response.body.success).toBe(false);
+        expect(response.body.error.message).toContain('contractEventId');
         const updatedEvent = await Event.findById(testEvent._id);
-        expect(updatedEvent.status).toBe('completed');
+        expect(updatedEvent.status).toBe('ongoing');
       });
 
       it('should successfully update event status to cancelled', async () => {
@@ -614,6 +614,8 @@ describe('Admin Routes - E2E Integration Tests', () => {
       });
 
       it('should successfully update event status to ongoing', async () => {
+        await Event.findByIdAndUpdate(testEvent._id, { status: 'ticketing' });
+
         const response = await request(app)
           .patch(`/api/admin/events/${testEvent._id}/status`)
           .set('Authorization', `Bearer ${adminToken}`)
