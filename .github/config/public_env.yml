@@ -9,9 +9,8 @@ aws:
 
 project:
   name: eventfund
-  environment: dev  # Default environment for workflows
+  environment: dev  
 
-# Environment-specific configs
 environments:
   dev:
     namespace: eventfund-dev
