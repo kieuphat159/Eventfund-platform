@@ -466,6 +466,7 @@ export async function markTxHashProcessed(eventId, txHash, field, models = {}) {
 
 /**
  * Atomically apply $inc/$set once per (txHash, field).
+ * Handles String-typed numeric fields by using aggregation pipeline.
  * Returns true when delta is applied, false when txHash+field was already processed.
  */
 export async function applyIdempotentDeltaByTxHash(
@@ -478,12 +479,69 @@ export async function applyIdempotentDeltaByTxHash(
   const Event = models.Event || DefaultEvent;
   const normalizedTxHash = txHash.toLowerCase();
 
-  const update = {
-    $addToSet: { processedTxHashes: { txHash: normalizedTxHash, field } },
-  };
+  const hasInc = inc && Object.keys(inc).length > 0;
+  const hasSet = set && Object.keys(set).length > 0;
 
-  if (inc && Object.keys(inc).length > 0) update.$inc = inc;
-  if (set && Object.keys(set).length > 0) update.$set = set;
+  if (!hasInc && !hasSet) return false;
+
+  // Use aggregation pipeline for atomic updates on String-typed numeric fields
+  const pipeline = [];
+
+  // Add processedTxHashes entry (idempotency guard)
+  pipeline.push({
+    $set: {
+      processedTxHashes: {
+        $cond: {
+          if: {
+            $gt: [{
+              $size: {
+                $filter: {
+                  input: { $ifNull: ['$processedTxHashes', []] },
+                  cond: {
+                    $and: [
+                      { $eq: ['$$this.txHash', normalizedTxHash] },
+                      { $eq: ['$$this.field', field] },
+                    ],
+                  },
+                },
+              },
+            }, 0],
+          },
+          then: '$processedTxHashes',
+          else: {
+            $concatArrays: [
+              { $ifNull: ['$processedTxHashes', []] },
+              [{ txHash: normalizedTxHash, field }],
+            ],
+          },
+        },
+      },
+    },
+  });
+
+  // Handle increment operations (convert String → Number → add → back to String)
+  // Works with both Number and String inc values (handlers use toNumberSafe or toAmountString)
+  if (hasInc) {
+    for (const [key, value] of Object.entries(inc)) {
+      pipeline.push({
+        $set: {
+          [key]: {
+            $toString: {
+              $add: [
+                { $toLong: { $ifNull: [`$${key}`, '0'] } },
+                { $toLong: value },
+              ],
+            },
+          },
+        },
+      });
+    }
+  }
+
+  // Handle set operations
+  if (hasSet) {
+    pipeline.push({ $set: set });
+  }
 
   const result = await Event.updateOne(
     {
@@ -492,7 +550,8 @@ export async function applyIdempotentDeltaByTxHash(
         $not: { $elemMatch: { txHash: normalizedTxHash, field } },
       },
     },
-    update
+    pipeline,
+    { updatePipeline: true }
   );
 
   return result.modifiedCount > 0;

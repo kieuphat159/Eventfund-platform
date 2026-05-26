@@ -52,7 +52,7 @@ export function generateAdminToken(walletAddress) {
  * @returns {string} JWT token
  */
 export function generateOrganizerToken(walletAddress) {
-  return generateTestToken({ walletAddress, role: 'organizer' });
+  return generateTestToken({ walletAddress, role: 'user' });
 }
 
 /**

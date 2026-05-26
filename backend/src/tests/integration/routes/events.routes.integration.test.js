@@ -10,15 +10,80 @@
  * Requirements: 2.5, 8.6
  */
 
+import { jest } from '@jest/globals';
 import request from 'supertest';
-import app from '../../../app.js';
-import User from '../../../models/User.model.js';
-import Event from '../../../models/Event.model.js';
-import JWTService from '../../../services/auth/jwt.service.js';
-import { connectTestDB, disconnectTestDB, clearTestDB } from '../../helpers/db.helper.js';
 
 // Set JWT_SECRET explicitly for test environment to avoid dependency on .env
 process.env.JWT_SECRET = 'test-secret-key-for-integration-tests-do-not-use-in-production';
+process.env.BACKEND_SIGNER_PRIVATE_KEY = `0x${'1'.repeat(64)}`;
+
+const fundAddress = '0x3333333333333333333333333333333333333333';
+const mockReceipt = {
+  status: 1,
+  logs: [
+    {
+      address: fundAddress,
+      topics: ['0xeventcreated'],
+      data: '0x',
+    },
+  ],
+};
+
+const mockFundWithSigner = {
+  createEvent: jest.fn(),
+  createEventWithInvestment: jest.fn(),
+};
+
+const mockFund = {
+  getAddress: jest.fn(),
+  connect: jest.fn(() => mockFundWithSigner),
+  interface: {
+    parseLog: jest.fn(),
+    encodeFunctionData: jest.fn(() => '0xencoded'),
+    parseError: jest.fn(),
+  },
+};
+
+const mockGetFund = jest.fn();
+const mockGetMarketplace = jest.fn();
+const mockGetTicket = jest.fn();
+const mockGetNetwork = jest.fn();
+const mockGetTransactionReceipt = jest.fn();
+const mockWaitForTransaction = jest.fn();
+
+jest.unstable_mockModule('../../../services/blockchain/index.js', () => ({
+  provider: {
+    getNetwork: mockGetNetwork,
+    getTransactionReceipt: mockGetTransactionReceipt,
+    waitForTransaction: mockWaitForTransaction,
+  },
+  getFund: mockGetFund,
+  getMarketplace: mockGetMarketplace,
+  getTicket: mockGetTicket,
+  runTicketIndexerLoop: jest.fn(),
+  syncTicketLogsOnce: jest.fn(),
+  runFundIndexerLoop: jest.fn(),
+  syncFundLogsOnce: jest.fn(),
+  runMarketplaceIndexerLoop: jest.fn(),
+  syncMarketplaceLogsOnce: jest.fn(),
+}));
+
+jest.unstable_mockModule(
+  '../../../services/blockchain/core/receiptChainLog.js',
+  () => ({
+    persistLogsFromReceipt: jest.fn(),
+  }),
+);
+
+jest.unstable_mockModule('../../../services/upload/ipfs.service.js', () => ({
+  uploadEventMetadataToIpfs: jest.fn().mockResolvedValue('ipfs://test-event-metadata'),
+}));
+
+const { default: app } = await import('../../../app.js');
+const { default: User } = await import('../../../models/User.model.js');
+const { default: Event } = await import('../../../models/Event.model.js');
+const { default: JWTService } = await import('../../../services/auth/jwt.service.js');
+const { connectTestDB, disconnectTestDB, clearTestDB } = await import('../../helpers/db.helper.js');
 
 const jwtService = new JWTService();
 
@@ -42,11 +107,30 @@ describe('Events Routes - E2E Integration Tests', () => {
 
   beforeEach(async () => {
     await clearTestDB();
+    mockGetFund.mockReturnValue(mockFund);
+    mockGetMarketplace.mockReturnValue(undefined);
+    mockGetTicket.mockReturnValue(undefined);
+    mockGetNetwork.mockResolvedValue({ chainId: 11155111n });
+    mockFund.getAddress.mockResolvedValue(fundAddress);
+    mockFund.connect.mockReturnValue(mockFundWithSigner);
+    mockFund.interface.parseLog.mockReturnValue({
+      name: 'EventCreated',
+      args: {
+        eventId: 1n,
+        organizer: organizerUser?.walletAddress || '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0',
+      },
+    });
+    mockFundWithSigner.createEvent.mockResolvedValue({
+      wait: jest.fn().mockResolvedValue(mockReceipt),
+    });
+    mockFundWithSigner.createEventWithInvestment.mockResolvedValue({
+      wait: jest.fn().mockResolvedValue(mockReceipt),
+    });
 
     // Create test users
     organizerUser = await User.create({
       walletAddress: '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0',
-      role: 'organizer',
+      role: 'user',
       nonce: 'test-nonce-organizer',
       nonceExpiresAt: new Date(Date.now() + 15 * 60 * 1000)
     });
@@ -67,7 +151,7 @@ describe('Events Routes - E2E Integration Tests', () => {
 
     anotherOrganizerUser = await User.create({
       walletAddress: '0x999d35Cc6634C0532925a3b844Bc9e7595f0bEb9',
-      role: 'organizer',
+      role: 'user',
       nonce: 'test-nonce-organizer2',
       nonceExpiresAt: new Date(Date.now() + 15 * 60 * 1000)
     });
@@ -88,8 +172,11 @@ describe('Events Routes - E2E Integration Tests', () => {
       title: 'Web3 Developer Conference 2026',
       description: 'Annual conference for blockchain developers',
       category: 'conference',
+      investmentEnabled: false,
+      syncOnChain: false,
       fundingGoal: '5000000000000000000',
       minStakeRequired: '1000000000000000000',
+      ticketPrice: '100000000000000000',
       fundingDeadline: new Date(Date.now() + 40 * 24 * 60 * 60 * 1000).toISOString(),
       startDate: new Date(Date.now() + 50 * 24 * 60 * 60 * 1000).toISOString(),
       endDate: new Date(Date.now() + 52 * 24 * 60 * 60 * 1000).toISOString(),
@@ -114,7 +201,7 @@ describe('Events Routes - E2E Integration Tests', () => {
         title: validEventData.title,
         description: validEventData.description,
         organizer: organizerUser.walletAddress.toLowerCase(),
-        status: 'draft',
+        status: 'funded',
         currentFunding: '0',
         ticketsSold: 0
       });
@@ -541,7 +628,7 @@ describe('Events Routes - E2E Integration Tests', () => {
       ).toBe(true);
     });
 
-    test('should reject owner opening ticketing from funded status', async () => {
+    test('should allow owner opening ticketing from funded status', async () => {
       const event = await Event.create({
         ...validEventData,
         organizer: organizerUser.walletAddress.toLowerCase(),
@@ -552,15 +639,10 @@ describe('Events Routes - E2E Integration Tests', () => {
         .patch(`/api/events/${event._id}`)
         .set('Authorization', `Bearer ${organizerToken}`)
         .send({ status: 'ticketing' })
-        .expect(400);
+        .expect(200);
 
-      expect(response.body.success).toBe(false);
-      const errorMsg = response.body.error.message.toLowerCase();
-      expect(
-        errorMsg.includes('advance') ||
-        errorMsg.includes('ticketing') ||
-        errorMsg.includes('ongoing')
-      ).toBe(true);
+      expect(response.body.success).toBe(true);
+      expect(response.body.data.status).toBe('ticketing');
     });
   });
 

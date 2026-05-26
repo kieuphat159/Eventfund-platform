@@ -81,21 +81,32 @@ describe('Validation Properties - Integration', () => {
   });
 
   describe('Property 1: Invalid input returns validation error shape', () => {
-    it('POST /api/auth/nonce validates wallet address format', async () => {
+    it('POST /api/auth/login rejects malformed idToken values', async () => {
       await fc.assert(
-        fc.asyncProperty(invalidWalletArb, async (walletAddress) => {
-          const response = await request(app).post('/api/auth/nonce').send({ walletAddress });
-          assertValidationErrorShape(response);
+        fc.asyncProperty(fc.string({ minLength: 1, maxLength: 80 }), async (idToken) => {
+          fc.pre(!idToken.includes('.'));
+          const response = await request(app)
+            .post('/api/auth/login')
+            .send({ idToken, walletAddress: '0x742d35cc6634c0532925a3b844bc9e7595f0beb0' });
+
+          expect(response.status).toBe(400);
+          expect(response.body).toHaveProperty('success', false);
+          expect(response.body).toHaveProperty('error');
+          expect(typeof response.body.error.message).toBe('string');
         }),
         { numRuns: 80 }
       );
     });
 
-    it('POST /api/auth/verify validates signature format', async () => {
+    it('POST /api/auth/login requires walletAddress', async () => {
       await fc.assert(
-        fc.asyncProperty(fc.string({ minLength: 1, maxLength: 180 }), invalidSignatureArb, async (message, signature) => {
-          const response = await request(app).post('/api/auth/verify').send({ message, signature });
-          assertValidationErrorShape(response);
+        fc.asyncProperty(fc.string({ minLength: 1, maxLength: 120 }), async (idToken) => {
+          fc.pre(idToken.trim().length > 0);
+          const response = await request(app).post('/api/auth/login').send({ idToken });
+
+          expect(response.status).toBe(400);
+          expect(response.body).toHaveProperty('success', false);
+          expect(response.body.error.code).toBe('WALLET_ADDRESS_REQUIRED');
         }),
         { numRuns: 80 }
       );
@@ -213,10 +224,15 @@ describe('Validation Properties - Integration', () => {
   });
 
   describe('Property 3: Valid format should not produce validation errors', () => {
-    it('POST /api/auth/nonce accepts structurally valid wallet format', async () => {
+    it('POST /api/auth/login accepts structurally valid external wallet payloads', async () => {
       await fc.assert(
         fc.asyncProperty(walletAddressArb, async (walletAddress) => {
-          const response = await request(app).post('/api/auth/nonce').send({ walletAddress });
+          const idToken = [
+            Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url'),
+            Buffer.from(JSON.stringify({ wallets: [{ type: 'ethereum' }] })).toString('base64url'),
+            '',
+          ].join('.');
+          const response = await request(app).post('/api/auth/login').send({ idToken, walletAddress });
           expect(response.status).not.toBe(400);
           if (response.body?.error?.code) {
             expect(response.body.error.code).not.toBe('VALIDATION_ERROR');
@@ -226,10 +242,15 @@ describe('Validation Properties - Integration', () => {
       );
     });
 
-    it('POST /api/auth/verify with valid formats does not fail at format validator', async () => {
+    it('POST /api/auth/login with valid JWT shape does not fail at format validator', async () => {
       await fc.assert(
-        fc.asyncProperty(fc.string({ minLength: 1, maxLength: 180 }), signatureArb, async (message, signature) => {
-          const response = await request(app).post('/api/auth/verify').send({ message, signature });
+        fc.asyncProperty(walletAddressArb, async (walletAddress) => {
+          const idToken = [
+            Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url'),
+            Buffer.from(JSON.stringify({ email: `${walletAddress.slice(2, 8)}@example.com` })).toString('base64url'),
+            '',
+          ].join('.');
+          const response = await request(app).post('/api/auth/login').send({ idToken, walletAddress });
           if (response.status === 400) {
             expect(response.body?.error?.code).not.toBe('VALIDATION_ERROR');
           }
