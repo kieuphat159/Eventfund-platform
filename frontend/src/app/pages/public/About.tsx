@@ -140,8 +140,8 @@ export const About: React.FC = () => {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
       <section className="relative overflow-hidden border-b border-slate-800/80 bg-slate-950">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.14),transparent_32%),radial-gradient(circle_at_bottom_right,rgba(16,185,129,0.12),transparent_28%)]" />
-        <div className="mx-auto grid max-w-7xl gap-12 px-4 py-16 sm:px-6 lg:grid-cols-[1.15fr_0.85fr] lg:px-8 lg:py-20">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(34,211,238,0.14),transparent_32%),radial-gradient(circle_at_bottom_right,rgba(16,185,129,0.12),transparent_28%)]" />
+        <div className="relative z-10 mx-auto grid max-w-7xl gap-12 px-4 py-16 sm:px-6 lg:grid-cols-[1.15fr_0.85fr] lg:px-8 lg:py-20">
           <div className="max-w-3xl">
             <div className="mb-5 flex flex-wrap gap-2">
               <Badge className="border border-cyan-400/30 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/10">
@@ -157,10 +157,9 @@ export const About: React.FC = () => {
             </h1>
 
             <p className="mt-5 max-w-2xl text-lg leading-8 text-slate-200">
-              EventChain is the product surface for this EventFund repository: a
-              full-stack event funding and ticketing platform that combines
-              crowdfunding, NFT tickets, verifier check-in, marketplace resale,
-              and admin operations in one system.
+              EventChain is a comprehensive event funding and ticketing platform 
+              that combines crowdfunding, NFT tickets, verifier check-in, 
+              marketplace resale, and admin operations seamlessly in one ecosystem.
             </p>
 
             <div className="mt-8 grid gap-4 sm:grid-cols-3">
@@ -179,7 +178,7 @@ export const About: React.FC = () => {
               <div className="border-l-2 border-amber-400 pl-4">
                 <div className="text-2xl font-semibold text-white">1</div>
                 <p className="mt-1 text-sm text-slate-300">
-                  Repository coordinating app, API, and chain logic
+                  Unified platform coordinating app, API, and chain logic
                 </p>
               </div>
             </div>
@@ -215,10 +214,10 @@ export const About: React.FC = () => {
                 <div className="flex items-center justify-between gap-3 border-b border-slate-800 pb-4">
                   <div>
                     <p className="text-sm font-medium text-cyan-300">
-                      Repository snapshot
+                      Platform snapshot
                     </p>
                     <h2 className="mt-1 text-xl font-semibold text-white">
-                      Event funding, ticketing, and chain sync in one build
+                      Event funding, ticketing, and chain sync in one ecosystem
                     </h2>
                   </div>
                   <div className="hidden h-12 w-12 items-center justify-center rounded-lg border border-slate-700 bg-slate-900 sm:flex">
@@ -276,12 +275,12 @@ export const About: React.FC = () => {
               Architecture
             </p>
             <h2 className="mt-3 text-3xl font-semibold text-white">
-              The project is organized as three tightly linked delivery layers
+              The platform is organized as three tightly linked delivery layers
             </h2>
             <p className="mt-4 text-base leading-7 text-slate-400">
-              The README makes the structure clear: one repository coordinates
-              the user-facing app, the service layer, and the on-chain logic so
-              event funding and ticketing can be shipped as one system.
+              Our architecture is built on a seamless integration: a unified
+              system coordinates the user-facing app, the service layer, and the 
+              on-chain logic so event funding and ticketing operate flawlessly together.
             </p>
           </div>
 
@@ -379,13 +378,13 @@ export const About: React.FC = () => {
                 Capabilities
               </p>
               <h2 className="mt-3 text-3xl font-semibold text-white">
-                The README-backed scope is broader than a ticket marketplace
+                Our scope provides much more than a ticket marketplace
               </h2>
               <p className="mt-4 max-w-2xl text-base leading-7 text-slate-400">
-                This project brings together event operations, user identity,
+                EventChain brings together event operations, user identity,
                 NFT ticketing, investor participation, payment flows, and
-                blockchain indexing. The result is closer to a product platform
-                than a single demo surface.
+                blockchain indexing. The result is a robust product platform
+                ready for real-world adoption.
               </p>
 
               <div className="mt-8 grid gap-4 sm:grid-cols-2">
@@ -440,9 +439,9 @@ export const About: React.FC = () => {
 
               <div className="mt-8 border-t border-slate-800 pt-5">
                 <p className="text-sm leading-6 text-slate-300">
-                  Local development in the README also reflects that breadth:
-                  minimal startup for frontend and API, plus a separate full
-                  loop for Hardhat, deployments, backend workers, and blockchain
+                  Our technical infrastructure reflects this breadth: combining
+                  a lightning-fast frontend and API with rigorous smart
+                  contract deployments, reliable backend workers, and real-time blockchain
                   synchronization.
                 </p>
               </div>
@@ -531,11 +530,11 @@ export const About: React.FC = () => {
                 Next step
               </p>
               <h2 className="mt-3 text-3xl font-semibold text-white">
-                Explore the flows the repository was built to support
+                Explore the experiences the platform was built to deliver
               </h2>
               <p className="mt-4 text-base leading-7 text-slate-400">
                 Browse public events, inspect ticket listings, or continue into
-                the marketplace to see how the user-facing side of the system is
+                the marketplace to discover how the user-facing side of the system is
                 presented.
               </p>
             </div>
